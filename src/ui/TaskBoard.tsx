@@ -7,11 +7,12 @@ interface TaskBoardProps {
   onSelectTask: (taskId: string) => void
 }
 
-const columns: Array<{ status: TaskStatus; title: string }> = [
-  { status: 'todo', title: '待开始' },
-  { status: 'running', title: '执行中' },
-  { status: 'needs_input', title: '等待输入' },
-  { status: 'in_review', title: '审查中' },
+const columns: Array<{ id: string; statuses: TaskStatus[]; title: string }> = [
+  { id: 'todo', statuses: ['todo'], title: '待开始' },
+  { id: 'running', statuses: ['running'], title: '执行中' },
+  { id: 'needs_input', statuses: ['needs_input'], title: '等待输入' },
+  { id: 'in_review', statuses: ['in_review'], title: '审查中' },
+  { id: 'completed', statuses: ['accepted', 'rejected'], title: '已完成' },
 ]
 
 const statusLabels: Record<TaskStatus, string> = {
@@ -31,11 +32,11 @@ export function TaskBoard({ tasks, selectedTaskId, onSelectTask }: TaskBoardProp
   return (
     <div className="task-board">
       {columns.map((column) => (
-        <section key={column.status} className="task-column" aria-labelledby={`task-column-${column.status}`}>
-          <h2 id={`task-column-${column.status}`}>{column.title}</h2>
+        <section key={column.id} className="task-column" aria-labelledby={`task-column-${column.id}`}>
+          <h2 id={`task-column-${column.id}`}>{column.title}</h2>
           <div>
             {tasks
-              .filter((task) => task.status === column.status)
+              .filter((task) => column.statuses.includes(task.status))
               .map((task) => (
                 <TaskCard
                   key={task.id}

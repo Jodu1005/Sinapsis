@@ -25,3 +25,27 @@
 
 - `npm run build`: passed (`tsc --noEmit` and Vite production build).
 - `git diff --check`: passed with no output.
+
+## Review Fixes
+
+### RED Evidence
+
+1. Added seven focused interaction tests to `src/ui/ControlRoomPage.test.tsx` before changing production components.
+2. Ran `npm run test -- --run src/ui/ControlRoomPage.test.tsx`.
+3. Result: 10 tests ran; 7 passed and 3 failed at assertions.
+4. The accepted and rejected cases failed because no `已完成` region existed.
+5. The Agent-state case failed because `进行中` was absent and raw English states were still rendered.
+
+### GREEN Evidence
+
+1. Added an `已完成` board section that groups `accepted` and `rejected` tasks while preserving all four active columns.
+2. Mapped Agent seat states to `进行中`, `等待中`, and `审查中`.
+3. The first focused GREEN run had 9 passing tests and one ambiguous legacy assertion because `已接受` now correctly appeared in both the terminal card and inspector.
+4. Scoped the preserved assertion to the terminal task card, matching its stated intent.
+5. Re-ran `npm run test -- --run src/ui/ControlRoomPage.test.tsx`: 1 test file passed, 10 tests passed.
+
+### Verification
+
+- `npm run test -- --run`: 3 test files passed, 19 tests passed.
+- `npm run build`: passed (`tsc --noEmit` and Vite production build).
+- `git diff --check`: passed with no output.

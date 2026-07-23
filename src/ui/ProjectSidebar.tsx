@@ -6,6 +6,12 @@ interface ProjectSidebarProps {
   agents: AgentSeat[]
 }
 
+const agentStateLabels: Record<AgentSeat['state'], string> = {
+  active: '进行中',
+  waiting: '等待中',
+  reviewing: '审查中',
+}
+
 export function ProjectSidebar({ projectName, branch, agents }: ProjectSidebarProps) {
   return (
     <div className="project-sidebar">
@@ -19,7 +25,7 @@ export function ProjectSidebar({ projectName, branch, agents }: ProjectSidebarPr
             <strong>{agent.name}</strong>
             <span>{agent.role}</span>
             <span>{agent.runtime}</span>
-            <span>{agent.state}</span>
+            <span>{agentStateLabels[agent.state]}</span>
           </li>
         ))}
       </ul>
