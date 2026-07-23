@@ -1,11 +1,10 @@
-import type { Activity, Task } from '../domain/control-room'
+import type { Task } from '../domain/control-room'
 import { ReviewActions } from './ReviewActions'
 import { getTaskStatusLabel } from './TaskBoard'
 import { Timeline } from './Timeline'
 
 interface TaskInspectorProps {
   task: Task
-  activities: Activity[]
   onRequestSummary: (taskId: string) => void
   onRequestDecision: (taskId: string) => void
   onSendFeedback: (taskId: string, feedback: string) => void
@@ -15,7 +14,6 @@ interface TaskInspectorProps {
 
 export function TaskInspector({
   task,
-  activities,
   onRequestSummary,
   onRequestDecision,
   onSendFeedback,
@@ -47,7 +45,7 @@ export function TaskInspector({
           <pre>{task.testOutput}</pre>
         </section>
       )}
-      <Timeline activities={activities} />
+      <Timeline events={task.events} taskStatus={task.status} />
       <ReviewActions
         key={task.id}
         task={task}

@@ -29,6 +29,7 @@ export function ControlRoomPage({ service }: ControlRoomPageProps) {
       <section className="board-panel" aria-label="任务看板">
         <TaskBoard
           tasks={snapshot.tasks}
+          agents={snapshot.agents}
           selectedTaskId={selectedTask.id}
           onSelectTask={setSelectedTaskId}
         />
@@ -36,7 +37,6 @@ export function ControlRoomPage({ service }: ControlRoomPageProps) {
       <aside className="inspector-panel" aria-label="任务详情与审查">
         <TaskInspector
           task={selectedTask}
-          activities={snapshot.activities.filter((activity) => activity.taskId === selectedTask.id)}
           onRequestSummary={service.requestSummary}
           onRequestDecision={service.requestDecision}
           onSendFeedback={service.sendFeedback}

@@ -1,8 +1,9 @@
-import type { Task, TaskStatus } from '../domain/control-room'
+import type { AgentSeat, Task, TaskStatus } from '../domain/control-room'
 import { TaskCard } from './TaskCard'
 
 interface TaskBoardProps {
   tasks: Task[]
+  agents: AgentSeat[]
   selectedTaskId: string | undefined
   onSelectTask: (taskId: string) => void
 }
@@ -28,7 +29,9 @@ export function getTaskStatusLabel(status: TaskStatus) {
   return statusLabels[status]
 }
 
-export function TaskBoard({ tasks, selectedTaskId, onSelectTask }: TaskBoardProps) {
+export function TaskBoard({ tasks, agents, selectedTaskId, onSelectTask }: TaskBoardProps) {
+  const ownerNames = new Map(agents.map((agent) => [agent.id, agent.name]))
+
   return (
     <div className="task-board">
       {columns.map((column) => (
@@ -48,6 +51,7 @@ export function TaskBoard({ tasks, selectedTaskId, onSelectTask }: TaskBoardProp
                 <TaskCard
                   key={task.id}
                   task={task}
+                  ownerName={ownerNames.get(task.ownerId) ?? '未分配'}
                   statusLabel={getTaskStatusLabel(task.status)}
                   selected={task.id === selectedTaskId}
                   onSelect={onSelectTask}

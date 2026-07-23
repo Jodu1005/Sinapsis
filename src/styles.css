@@ -299,10 +299,10 @@ button:disabled {
 
 .task-card {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 14px;
+  grid-template-rows: auto auto auto auto;
+  gap: 8px;
   width: 100%;
-  min-height: 88px;
+  min-height: 156px;
   padding: 12px 12px 10px;
   border: 1px solid var(--line);
   border-left: 3px solid var(--status-color);
@@ -317,14 +317,14 @@ button:disabled {
 
 .task-card:hover:not(:disabled) {
   border-color: var(--muted);
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .task-card[aria-pressed="true"] {
   border-color: var(--ink);
   outline: 1px solid var(--ink);
   outline-offset: -1px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .task-card-title {
@@ -333,6 +333,22 @@ button:disabled {
   overflow-wrap: anywhere;
   font-size: 13px;
   font-weight: 650;
+  line-height: 1.45;
+}
+
+.task-card-summary {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.task-card-metadata {
+  display: grid;
+  gap: 2px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
   line-height: 1.45;
 }
 
@@ -512,7 +528,7 @@ button:disabled {
   --event-color: var(--review);
 }
 
-.task-timeline li[data-kind="rejection"] {
+.task-timeline li[data-tone="rejection"] {
   --event-color: var(--danger);
 }
 
@@ -520,7 +536,7 @@ button:disabled {
   min-width: 0;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
@@ -589,7 +605,7 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 4px;
   color: var(--ink);
-  background: #ffffff;
+  background: var(--surface);
   font-size: 13px;
   line-height: 1.5;
 }

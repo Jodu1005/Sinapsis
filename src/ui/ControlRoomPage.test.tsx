@@ -21,6 +21,76 @@ test('shows the three seats and all four initial task columns', () => {
   expect(screen.getByRole('heading', { name: '审查中' })).toBeInTheDocument()
 })
 
+test('renders selected typed task events in append order with rejected decision tone', () => {
+  const service = createControlRoomService(createInMemoryControlRoomStore())
+  const initialSnapshot = service.getSnapshot()
+  const events = [
+    {
+      id: 'event-agent',
+      kind: 'agent' as const,
+      message: '完成编译检查',
+      at: '2026-07-23T00:01:00.000Z',
+    },
+    {
+      id: 'event-artifact',
+      kind: 'artifact' as const,
+      message: '生成测试产物',
+      at: '2026-07-23T00:02:00.000Z',
+    },
+    {
+      id: 'event-decision',
+      kind: 'decision' as const,
+      message: '停止合入',
+      at: '2026-07-23T00:03:00.000Z',
+    },
+  ]
+  const snapshot = {
+    ...initialSnapshot,
+    activities: [],
+    tasks: initialSnapshot.tasks.map((task) => (
+      task.id === 'review-rate-limit'
+        ? { ...task, status: 'rejected' as const, events }
+        : task
+    )),
+  }
+  const staticService = {
+    ...service,
+    getSnapshot: () => snapshot,
+    subscribe: () => () => undefined,
+  }
+
+  render(<ControlRoomPage service={staticService} />)
+
+  const timeline = screen.getByRole('list', { name: '任务活动' })
+  const timelineItems = within(timeline).queryAllByRole('listitem')
+  expect(timelineItems.map((item) => item.textContent)).toEqual([
+    '2026-07-23T00:01:00.000Z完成编译检查',
+    '2026-07-23T00:02:00.000Z生成测试产物',
+    '2026-07-23T00:03:00.000Z停止合入',
+  ])
+  expect(timelineItems.map((item) => item.dataset.kind)).toEqual([
+    'agent',
+    'artifact',
+    'decision',
+  ])
+  expect(timelineItems[2]).toHaveAttribute('data-tone', 'rejection')
+})
+
+test('shows Chinese task metadata with an exact accessible name and described status', () => {
+  renderPage()
+
+  const runningColumn = screen.getByRole('region', { name: '执行中' })
+  const taskCard = within(runningColumn).getByRole('button', {
+    name: '重构身份验证中间件',
+  })
+
+  expect(taskCard).toHaveAccessibleName('重构身份验证中间件')
+  expect(taskCard).toHaveAccessibleDescription('执行中')
+  expect(within(taskCard).queryByText('负责人 实现者')).toBeInTheDocument()
+  expect(within(taskCard).queryByText('正在简化身份验证边界。')).toBeInTheDocument()
+  expect(within(taskCard).queryByText('更新于 7月23日 00:00')).toBeInTheDocument()
+})
+
 test('accepting the selected review task updates its card and activity record', async () => {
   const user = renderPage()
 
