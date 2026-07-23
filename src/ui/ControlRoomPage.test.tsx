@@ -21,6 +21,15 @@ test('shows the three seats and all four initial task columns', () => {
   expect(screen.getByRole('heading', { name: '审查中' })).toBeInTheDocument()
 })
 
+test('shows a textual empty state without a timeline rail for a task with no events', async () => {
+  const user = renderPage()
+
+  await user.click(screen.getByRole('button', { name: '补充队列可观测性' }))
+
+  expect(screen.queryByText('暂无活动')).toBeInTheDocument()
+  expect(screen.queryByRole('list', { name: '任务活动' })).not.toBeInTheDocument()
+})
+
 test('renders selected typed task events in append order with rejected decision tone', () => {
   const service = createControlRoomService(createInMemoryControlRoomStore())
   const initialSnapshot = service.getSnapshot()
@@ -195,6 +204,6 @@ test('clears the feedback draft when switching between eligible tasks', async ()
   expect(sendFeedback).toBeDisabled()
 
   await user.click(sendFeedback)
-  const timeline = screen.getByRole('list', { name: '任务活动' })
+  const timeline = screen.getByRole('region', { name: '活动时间轨' })
   expect(within(timeline).queryByText(`人工反馈：${staleDraft}`)).not.toBeInTheDocument()
 })
