@@ -2,11 +2,14 @@ import type { Activity, ControlRoomSnapshot, EventKind, Task, TaskStatus } from 
 import type { ControlRoomStore } from '../ports/control-room-store'
 
 export function createControlRoomService(store: ControlRoomStore) {
+  let sequence = 0
+
   function commit(taskId: string, status: TaskStatus, kind: EventKind, message: string) {
     const snapshot = store.getSnapshot()
     const at = new Date().toISOString()
-    const event = { id: `${taskId}-${at}`, kind, message, at }
-    const activity: Activity = { id: `activity-${taskId}-${at}`, taskId, message, at }
+    const entryId = `${taskId}-${at}-${++sequence}`
+    const event = { id: entryId, kind, message, at }
+    const activity: Activity = { id: `activity-${entryId}`, taskId, message, at }
     let changed = false
     const tasks = snapshot.tasks.map((task) => {
       if (task.id !== taskId) return task
