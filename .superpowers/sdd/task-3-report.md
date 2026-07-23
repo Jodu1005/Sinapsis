@@ -49,3 +49,23 @@
 - `npm run test -- --run`: 3 test files passed, 19 tests passed.
 - `npm run build`: passed (`tsc --noEmit` and Vite production build).
 - `git diff --check`: passed with no output.
+
+## Feedback Draft Isolation Fix
+
+### RED Evidence
+
+1. Added a focused component test that enters feedback for `审查速率限制改动`, switches to `验证旧版登录分支`, and checks the new task has no inherited or submittable draft.
+2. Ran `npm run test -- --run src/ui/ControlRoomPage.test.tsx`.
+3. Result: 11 tests ran; 10 passed and 1 failed at the empty-textarea assertion.
+4. Expected the textarea value to be empty, but received `只适用于速率限制任务`.
+
+### GREEN Evidence
+
+1. Keyed `ReviewActions` by `task.id` at the `TaskInspector` boundary so its local feedback state is recreated when task selection changes.
+2. Re-ran `npm run test -- --run src/ui/ControlRoomPage.test.tsx`: 1 test file passed, 11 tests passed.
+
+### Verification
+
+- `npm run test -- --run`: 3 test files passed, 20 tests passed.
+- `npm run build`: passed (`tsc --noEmit` and Vite production build).
+- `git diff --check`: passed with no output.

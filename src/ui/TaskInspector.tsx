@@ -39,6 +39,7 @@ export function TaskInspector({
       {task.testOutput && <section aria-label="测试输出"><h3>测试输出</h3><pre>{task.testOutput}</pre></section>}
       <Timeline activities={activities} />
       <ReviewActions
+        key={task.id}
         task={task}
         onRequestSummary={onRequestSummary}
         onRequestDecision={onRequestDecision}

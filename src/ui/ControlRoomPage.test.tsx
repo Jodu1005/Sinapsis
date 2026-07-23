@@ -111,3 +111,20 @@ test('shows Agent seat states in Chinese', () => {
   expect(within(sidebar).getByText('审查中')).toBeInTheDocument()
   expect(within(sidebar).queryByText(/^(active|waiting|reviewing)$/)).not.toBeInTheDocument()
 })
+
+test('clears the feedback draft when switching between eligible tasks', async () => {
+  const user = renderPage()
+  const staleDraft = '只适用于速率限制任务'
+
+  await user.type(screen.getByRole('textbox', { name: '发送给 Agent 的反馈' }), staleDraft)
+  await user.click(screen.getByRole('button', { name: '验证旧版登录分支' }))
+
+  const feedback = screen.getByRole('textbox', { name: '发送给 Agent 的反馈' })
+  const sendFeedback = screen.getByRole('button', { name: '发送反馈' })
+  expect(feedback).toHaveValue('')
+  expect(sendFeedback).toBeDisabled()
+
+  await user.click(sendFeedback)
+  const timeline = screen.getByRole('list', { name: '任务活动' })
+  expect(within(timeline).queryByText(`人工反馈：${staleDraft}`)).not.toBeInTheDocument()
+})
