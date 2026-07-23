@@ -23,20 +23,30 @@ export function TaskInspector({
   onReject,
 }: TaskInspectorProps) {
   return (
-    <div className="task-inspector">
-      <header>
+    <div className="task-inspector" data-status={task.status}>
+      <header className="inspector-heading">
         <h2>{task.title}</h2>
-        <p>{getTaskStatusLabel(task.status)}</p>
-        <p>{task.summary}</p>
+        <p className="inspector-status">{getTaskStatusLabel(task.status)}</p>
+        <p className="inspector-summary">{task.summary}</p>
       </header>
-      <section aria-label="改动文件">
+      <section className="evidence-section changed-files" aria-label="改动文件">
         <h3>改动文件</h3>
         <ul>
           {task.changedFiles.map((file) => <li key={file}>{file}</li>)}
         </ul>
       </section>
-      {task.diffSummary && <section aria-label="差异摘要"><h3>差异摘要</h3><p>{task.diffSummary}</p></section>}
-      {task.testOutput && <section aria-label="测试输出"><h3>测试输出</h3><pre>{task.testOutput}</pre></section>}
+      {task.diffSummary && (
+        <section className="evidence-section diff-summary" aria-label="差异摘要">
+          <h3>差异摘要</h3>
+          <p>{task.diffSummary}</p>
+        </section>
+      )}
+      {task.testOutput && (
+        <section className="evidence-section test-output" aria-label="测试输出">
+          <h3>测试输出</h3>
+          <pre>{task.testOutput}</pre>
+        </section>
+      )}
       <Timeline activities={activities} />
       <ReviewActions
         key={task.id}

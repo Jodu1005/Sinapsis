@@ -32,9 +32,16 @@ export function TaskBoard({ tasks, selectedTaskId, onSelectTask }: TaskBoardProp
   return (
     <div className="task-board">
       {columns.map((column) => (
-        <section key={column.id} className="task-column" aria-labelledby={`task-column-${column.id}`}>
-          <h2 id={`task-column-${column.id}`}>{column.title}</h2>
-          <div>
+        <section
+          key={column.id}
+          className="task-column"
+          data-column={column.id}
+          aria-labelledby={`task-column-${column.id}`}
+        >
+          <h2 className="task-column-title" id={`task-column-${column.id}`}>
+            {column.title}
+          </h2>
+          <div className="task-column-list">
             {tasks
               .filter((task) => column.statuses.includes(task.status))
               .map((task) => (

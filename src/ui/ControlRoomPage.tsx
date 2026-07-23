@@ -18,22 +18,22 @@ export function ControlRoomPage({ service }: ControlRoomPageProps) {
 
   return (
     <main className="control-room-page">
-      <h1>控制室</h1>
-      <aside aria-label="项目与 Agent 席位">
+      <h1 className="control-room-title">控制室</h1>
+      <aside className="project-panel" aria-label="项目与 Agent 席位">
         <ProjectSidebar
           projectName={snapshot.projectName}
           branch={snapshot.branch}
           agents={snapshot.agents}
         />
       </aside>
-      <section aria-label="任务看板">
+      <section className="board-panel" aria-label="任务看板">
         <TaskBoard
           tasks={snapshot.tasks}
           selectedTaskId={selectedTask.id}
           onSelectTask={setSelectedTaskId}
         />
       </section>
-      <aside aria-label="任务详情与审查">
+      <aside className="inspector-panel" aria-label="任务详情与审查">
         <TaskInspector
           task={selectedTask}
           activities={snapshot.activities.filter((activity) => activity.taskId === selectedTask.id)}

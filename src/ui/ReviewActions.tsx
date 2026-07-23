@@ -33,7 +33,7 @@ export function ReviewActions({
 
   return (
     <section className="review-actions" aria-label="控制操作">
-      <div>
+      <div className="review-action-group review-action-group--context">
         <button type="button" onClick={() => onRequestSummary(task.id)} disabled={!canRequestUpdate}>
           <FileText aria-hidden="true" size={16} />
           请求总结
@@ -43,20 +43,35 @@ export function ReviewActions({
           需要决策
         </button>
       </div>
-      <label>
-        发送给 Agent 的反馈
+      <label className="feedback-field">
+        <span>发送给 Agent 的反馈</span>
         <textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} />
       </label>
-      <button type="button" onClick={sendFeedback} disabled={!canSendFeedback || !feedback.trim()}>
+      <button
+        type="button"
+        className="send-feedback"
+        onClick={sendFeedback}
+        disabled={!canSendFeedback || !feedback.trim()}
+      >
         <Send aria-hidden="true" size={16} />
         发送反馈
       </button>
-      <div>
-        <button type="button" onClick={() => onAccept(task.id)} disabled={!canReview}>
+      <div className="review-action-group review-action-group--decision">
+        <button
+          type="button"
+          className="accept-action"
+          onClick={() => onAccept(task.id)}
+          disabled={!canReview}
+        >
           <Check aria-hidden="true" size={16} />
           接受改动
         </button>
-        <button type="button" onClick={() => onReject(task.id)} disabled={!canReview}>
+        <button
+          type="button"
+          className="reject-action"
+          onClick={() => onReject(task.id)}
+          disabled={!canReview}
+        >
           <X aria-hidden="true" size={16} />
           驳回改动
         </button>

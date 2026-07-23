@@ -15,17 +15,19 @@ const agentStateLabels: Record<AgentSeat['state'], string> = {
 export function ProjectSidebar({ projectName, branch, agents }: ProjectSidebarProps) {
   return (
     <div className="project-sidebar">
-      <header>
+      <header className="project-heading">
         <h2>{projectName}</h2>
-        <p>{branch}</p>
+        <p className="project-branch">{branch}</p>
       </header>
-      <ul aria-label="Agent 席位">
+      <ul className="agent-list" aria-label="Agent 席位">
         {agents.map((agent) => (
-          <li key={agent.id} className="agent-seat">
-            <strong>{agent.name}</strong>
-            <span>{agent.role}</span>
-            <span>{agent.runtime}</span>
-            <span>{agentStateLabels[agent.state]}</span>
+          <li key={agent.id} className="agent-seat" data-state={agent.state}>
+            <div className="agent-identity">
+              <strong>{agent.name}</strong>
+              <span className="agent-role">{agent.role}</span>
+            </div>
+            <span className="agent-runtime">{agent.runtime}</span>
+            <span className="agent-state">{agentStateLabels[agent.state]}</span>
           </li>
         ))}
       </ul>

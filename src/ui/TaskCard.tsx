@@ -12,12 +12,13 @@ export function TaskCard({ task, statusLabel, selected, onSelect }: TaskCardProp
     <button
       type="button"
       className="task-card"
+      data-status={task.status}
       aria-label={task.title}
       aria-pressed={selected}
       onClick={() => onSelect(task.id)}
     >
-      <span>{task.title}</span>
-      <span>{statusLabel}</span>
+      <span className="task-card-title">{task.title}</span>
+      <span className="task-card-status">{statusLabel}</span>
     </button>
   )
 }
