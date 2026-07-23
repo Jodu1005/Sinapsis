@@ -1,3 +1,13 @@
+import { useMemo } from 'react'
+import { createInMemoryControlRoomStore } from '../adapters/in-memory-control-room'
+import { createControlRoomService } from '../application/control-room-service'
+import { ControlRoomPage } from '../ui/ControlRoomPage'
+
 export default function App() {
-  return <main><h1>控制室</h1></main>
+  const service = useMemo(
+    () => createControlRoomService(createInMemoryControlRoomStore()),
+    [],
+  )
+
+  return <ControlRoomPage service={service} />
 }
