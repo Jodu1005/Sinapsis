@@ -9,6 +9,9 @@ export interface Repository {
   workspaceId: string
   name: string
   path: string
+  currentBranch: string
+  defaultBranch: string
+  isClean: boolean
   createdAt: string
 }
 
@@ -27,6 +30,9 @@ export interface CreateRepositoryInput {
   workspaceId: string
   name: string
   path: string
+  currentBranch?: string
+  defaultBranch?: string
+  isClean?: boolean
 }
 
 export interface CreateChannelInput {

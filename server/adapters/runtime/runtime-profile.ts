@@ -1,0 +1,73 @@
+import { spawn } from 'node:child_process'
+
+export const runtimeKinds = ['opencode', 'pi'] as const
+export type RuntimeKind = (typeof runtimeKinds)[number]
+
+export interface RuntimeProfile {
+  runtime: RuntimeKind
+  command: string
+  args: string[]
+  model: string
+  env: Record<string, string>
+  policy: 'task-worktree'
+}
+
+export type RuntimeProfileOverrides = Partial<Pick<RuntimeProfile, 'command' | 'args' | 'model' | 'env'>>
+
+export interface RuntimeAvailability {
+  executable: 'available' | 'missing'
+  taskExecution: 'ready' | 'unhealthy' | 'unavailable'
+}
+
+export interface RuntimeAvailabilityDetector {
+  detect(profile: RuntimeProfile): Promise<RuntimeAvailability>
+}
+
+export const runtimePresets = {
+  opencode: { command: 'opencode', args: ['run'], model: '', env: {}, policy: 'task-worktree' },
+  pi: { command: 'pi', args: ['--mode', 'rpc'], model: '', env: {}, policy: 'task-worktree' },
+} as const
+
+export function resolveRuntimeProfile(runtime: RuntimeKind, overrides: RuntimeProfileOverrides = {}): RuntimeProfile {
+  const preset = runtimePresets[runtime]
+  return {
+    runtime,
+    command: overrides.command ?? preset.command,
+    args: overrides.args ?? [...preset.args],
+    model: overrides.model ?? preset.model,
+    env: overrides.env ?? { ...preset.env },
+    policy: preset.policy,
+  }
+}
+
+export class CommandRuntimeAvailabilityDetector implements RuntimeAvailabilityDetector {
+  constructor(private readonly timeoutMs = 2_000) {}
+
+  detect(profile: RuntimeProfile): Promise<RuntimeAvailability> {
+    return new Promise((resolve) => {
+      const child = spawn(profile.command, ['--version'], { shell: false, stdio: 'ignore' })
+      let settled = false
+      const finish = (availability: RuntimeAvailability) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        resolve(availability)
+      }
+      const timeout = setTimeout(() => {
+        child.kill()
+        finish({ executable: 'available', taskExecution: 'unhealthy' })
+      }, this.timeoutMs)
+
+      child.once('error', (error: NodeJS.ErrnoException) => {
+        finish(error.code === 'ENOENT'
+          ? { executable: 'missing', taskExecution: 'unavailable' }
+          : { executable: 'available', taskExecution: 'unhealthy' })
+      })
+      child.once('close', (code) => {
+        finish(code === 0
+          ? { executable: 'available', taskExecution: 'ready' }
+          : { executable: 'available', taskExecution: 'unhealthy' })
+      })
+    })
+  }
+}

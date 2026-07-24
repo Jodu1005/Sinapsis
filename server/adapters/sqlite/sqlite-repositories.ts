@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { Agent } from '../../domain/agent'
+import type { Agent, CreateAgentInput } from '../../domain/agent'
 import type { DomainEvent } from '../../domain/events'
 import type { CreateMessageInput, Message, MessageSenderType } from '../../domain/message'
 import { type CreateTaskInput, type Task, type TaskStatus, transitionTask as transitionTaskDomain } from '../../domain/task'
@@ -27,6 +27,9 @@ interface RepositoryRow {
   workspace_id: string
   name: string
   path: string
+  current_branch: string
+  default_branch: string
+  is_clean: number
   created_at: string
 }
 
@@ -73,10 +76,16 @@ interface MessageRow {
 interface AgentRow {
   id: string
   workspace_id: string
+  identity: string
   mention_name: string
   runtime: 'opencode' | 'pi'
   status: Agent['status']
   capability_tags_json: string
+  max_concurrent_tasks: 1
+  command: string
+  args_json: string
+  model: string
+  env_json: string
   created_at: string
   updated_at: string
 }
@@ -101,13 +110,22 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
       workspaceId: input.workspaceId,
       name: requireText(input.name, 'Repository name'),
       path: requireText(input.path, 'Repository path'),
+      currentBranch: input.currentBranch ?? '',
+      defaultBranch: input.defaultBranch ?? '',
+      isClean: input.isClean ?? true,
       createdAt,
     }
-    this.database.prepare('INSERT INTO repositories (id, workspace_id, name, path, created_at) VALUES (?, ?, ?, ?, ?)').run(
+    this.database.prepare(`
+      INSERT INTO repositories (id, workspace_id, name, path, current_branch, default_branch, is_clean, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
       repository.id,
       repository.workspaceId,
       repository.name,
       repository.path,
+      repository.currentBranch,
+      repository.defaultBranch,
+      repository.isClean ? 1 : 0,
       repository.createdAt,
     )
     return repository
@@ -128,6 +146,37 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
       channel.createdAt,
     )
     return channel
+  }
+
+  createAgent(input: CreateAgentInput): Agent {
+    const createdAt = now()
+    const agent: Agent = {
+      id: randomUUID(),
+      workspaceId: input.workspaceId,
+      identity: requireText(input.identity, 'Agent identity'),
+      mentionName: requireText(input.mentionName, 'Agent mention'),
+      runtime: input.runtime,
+      status: 'offline',
+      capabilityTags: input.capabilityTags,
+      maxConcurrentTasks: input.maxConcurrentTasks,
+      command: requireText(input.command, 'Runtime command'),
+      args: input.args,
+      model: input.model,
+      env: input.env,
+      createdAt,
+      updatedAt: createdAt,
+    }
+    this.database.prepare(`
+      INSERT INTO agents (
+        id, workspace_id, identity, mention_name, runtime, status, capability_tags_json,
+        max_concurrent_tasks, command, args_json, model, env_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      agent.id, agent.workspaceId, agent.identity, agent.mentionName, agent.runtime, agent.status,
+      JSON.stringify(agent.capabilityTags), agent.maxConcurrentTasks, agent.command, JSON.stringify(agent.args),
+      agent.model, JSON.stringify(agent.env), agent.createdAt, agent.updatedAt,
+    )
+    return agent
   }
 
   createTask(input: CreateTaskInput): Task {
@@ -268,6 +317,10 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return this.inTransaction((unitOfWork) => unitOfWork.createChannel(input))
   }
 
+  createAgent(input: CreateAgentInput): Agent {
+    return this.inTransaction((unitOfWork) => unitOfWork.createAgent(input))
+  }
+
   createTask(input: CreateTaskInput): Task {
     return this.inTransaction((unitOfWork) => unitOfWork.createTask(input))
   }
@@ -296,12 +349,19 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return readMessage(this.sqlite.database, messageId)
   }
 
+  hasAgentMention(workspaceId: string, mentionName: string): boolean {
+    const row = this.sqlite.database.prepare(
+      'SELECT 1 FROM agents WHERE workspace_id = ? AND mention_name = ? LIMIT 1',
+    ).get(workspaceId, mentionName)
+    return row !== undefined
+  }
+
   getBootstrap(): BootstrapSnapshot {
     const workspaces = this.sqlite.database.prepare('SELECT id, name, created_at FROM workspaces ORDER BY created_at').all() as unknown as WorkspaceRow[]
     return {
       workspaces: workspaces.map((workspaceRow) => {
         const workspace = mapWorkspace(workspaceRow)
-        const repositories = (this.sqlite.database.prepare('SELECT id, workspace_id, name, path, created_at FROM repositories WHERE workspace_id = ? ORDER BY created_at').all(workspace.id) as unknown as RepositoryRow[])
+        const repositories = (this.sqlite.database.prepare('SELECT id, workspace_id, name, path, current_branch, default_branch, is_clean, created_at FROM repositories WHERE workspace_id = ? ORDER BY created_at').all(workspace.id) as unknown as RepositoryRow[])
           .map((repositoryRow) => {
             const repository = mapRepository(repositoryRow)
             const channels = (this.sqlite.database.prepare('SELECT id, repository_id, name, created_at FROM channels WHERE repository_id = ? ORDER BY created_at').all(repository.id) as unknown as ChannelRow[])
@@ -342,7 +402,16 @@ function mapWorkspace(row: WorkspaceRow): Workspace {
 }
 
 function mapRepository(row: RepositoryRow): Repository {
-  return { id: row.id, workspaceId: row.workspace_id, name: row.name, path: row.path, createdAt: row.created_at }
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    name: row.name,
+    path: row.path,
+    currentBranch: row.current_branch,
+    defaultBranch: row.default_branch,
+    isClean: row.is_clean === 1,
+    createdAt: row.created_at,
+  }
 }
 
 function mapChannel(row: ChannelRow): Channel {
@@ -390,10 +459,16 @@ function mapAgent(row: AgentRow): Agent {
   return {
     id: row.id,
     workspaceId: row.workspace_id,
+    identity: row.identity,
     mentionName: row.mention_name,
     runtime: row.runtime,
     status: row.status,
     capabilityTags: JSON.parse(row.capability_tags_json) as string[],
+    maxConcurrentTasks: row.max_concurrent_tasks,
+    command: row.command,
+    args: JSON.parse(row.args_json) as string[],
+    model: row.model,
+    env: JSON.parse(row.env_json) as Record<string, string>,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }

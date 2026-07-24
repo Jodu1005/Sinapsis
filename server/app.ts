@@ -1,12 +1,21 @@
-import express, { type Express } from 'express'
+import express, { type ErrorRequestHandler, type Express, type RequestHandler } from 'express'
 import path from 'node:path'
+import { CommandGitClient } from './adapters/git/git-client'
+import { CommandRuntimeAvailabilityDetector, runtimeKinds, type RuntimeAvailabilityDetector } from './adapters/runtime/runtime-profile'
 import { SseDomainEventPublisher } from './adapters/sse/sse-domain-event-publisher'
 import { createSqliteDatabase } from './adapters/sqlite/database'
 import { SqliteRepositories } from './adapters/sqlite/sqlite-repositories'
+import { AgentService } from './application/agent-service'
+import { NotFoundError, ValidationError, WorkspaceService, type WorkspaceCatalog } from './application/workspace-service'
 import { getServiceConfig } from './config'
+import { DomainError } from './domain/task'
+import type { GitClient } from './ports/git-client'
+import type { WorkspaceRepositories } from './ports/repositories'
 
 export interface CreateAppOptions {
   databasePath?: string
+  gitClient?: GitClient
+  runtimeAvailabilityDetector?: RuntimeAvailabilityDetector
 }
 
 export function createApp(options: CreateAppOptions = {}): Express {
@@ -15,22 +24,189 @@ export function createApp(options: CreateAppOptions = {}): Express {
   const database = createSqliteDatabase(databasePath)
   const eventPublisher = new SseDomainEventPublisher()
   const repositories = new SqliteRepositories(database, eventPublisher)
+  const catalog = new RepositoryWorkspaceCatalog(repositories)
+  const workspaceService = new WorkspaceService(catalog, options.gitClient ?? new CommandGitClient())
+  const agentService = new AgentService(catalog, options.runtimeAvailabilityDetector ?? new CommandRuntimeAvailabilityDetector())
 
   app.locals.closeDatabase = () => database.close()
+  app.use(express.json())
 
   app.get('/api/health', (_request, response) => {
     response.json({ status: 'ok' })
   })
 
   app.get('/api/bootstrap', (_request, response) => {
-    response.json(repositories.getBootstrap())
+    response.json(sanitizeBootstrap(repositories.getBootstrap()))
   })
+
+  app.post('/api/workspaces', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    const workspace = workspaceService.createWorkspace({ name: requiredString(body, 'name') })
+    response.status(201).json(workspace)
+  }))
+
+  app.post('/api/workspaces/:workspaceId/repositories', asyncRoute(async (request, response) => {
+    const body = objectBody(request.body)
+    const repository = await workspaceService.addRepository({
+      workspaceId: requiredParam(request.params.workspaceId, 'workspaceId'),
+      directory: requiredString(body, 'directory'),
+      name: optionalString(body, 'name'),
+    })
+    response.status(201).json(repository)
+  }))
+
+  app.post('/api/repositories/:repositoryId/channels', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    const channel = workspaceService.createChannel({
+      repositoryId: requiredParam(request.params.repositoryId, 'repositoryId'),
+      name: requiredString(body, 'name'),
+    })
+    response.status(201).json(channel)
+  }))
+
+  app.post('/api/workspaces/:workspaceId/agents', asyncRoute(async (request, response) => {
+    const body = objectBody(request.body)
+    const runtime = requiredString(body, 'runtime')
+    if (!runtimeKinds.includes(runtime as (typeof runtimeKinds)[number])) {
+      throw new ValidationError('Runtime must be opencode or pi.')
+    }
+    const agent = await agentService.createAgent({
+      workspaceId: requiredParam(request.params.workspaceId, 'workspaceId'),
+      identity: requiredString(body, 'identity'),
+      mention: requiredString(body, 'mention'),
+      runtime: runtime as (typeof runtimeKinds)[number],
+      capabilityTags: requiredStringArray(body, 'capabilityTags'),
+      runtimeOverrides: runtimeOverrides(body),
+    })
+    response.status(201).json({
+      ...agent,
+      profile: { ...agent.profile, env: Object.keys(agent.profile.env) },
+    })
+  }))
 
   app.get('/events', (request, response) => {
     eventPublisher.handle(request, response)
   })
 
+  app.use(errorHandler)
+
   return app
+}
+
+class RepositoryWorkspaceCatalog implements WorkspaceCatalog {
+  constructor(private readonly repositories: WorkspaceRepositories) {}
+
+  hasWorkspace(workspaceId: string): boolean {
+    return this.repositories.getBootstrap().workspaces.some((workspace) => workspace.id === workspaceId)
+  }
+
+  hasRepository(repositoryId: string): boolean {
+    return this.repositories.getBootstrap().workspaces.some((workspace) =>
+      workspace.repositories.some((repository) => repository.id === repositoryId),
+    )
+  }
+
+  hasAgentMention(workspaceId: string, mention: string): boolean {
+    return this.repositories.hasAgentMention(workspaceId, mention)
+  }
+
+  createWorkspace(input: { name: string }) {
+    return this.repositories.createWorkspace(input)
+  }
+
+  createRepository(input: Parameters<WorkspaceRepositories['createRepository']>[0]) {
+    return this.repositories.createRepository(input)
+  }
+
+  createChannel(input: { repositoryId: string; name: string }) {
+    return this.repositories.createChannel(input)
+  }
+
+  createAgent(input: Parameters<WorkspaceRepositories['createAgent']>[0]) {
+    return this.repositories.createAgent(input)
+  }
+}
+
+function asyncRoute(handler: (request: express.Request, response: express.Response) => void | Promise<void>): RequestHandler {
+  return (request, response, next) => {
+    Promise.resolve(handler(request, response)).catch(next)
+  }
+}
+
+function objectBody(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ValidationError('Request body must be a JSON object.')
+  }
+  return value as Record<string, unknown>
+}
+
+function requiredString(body: Record<string, unknown>, key: string): string {
+  const value = body[key]
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new ValidationError(`${key} must be a non-empty string.`)
+  }
+  return value.trim()
+}
+
+function optionalString(body: Record<string, unknown>, key: string): string | undefined {
+  if (body[key] === undefined) return undefined
+  return requiredString(body, key)
+}
+
+function requiredStringArray(body: Record<string, unknown>, key: string): string[] {
+  const value = body[key]
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !item.trim())) {
+    throw new ValidationError(`${key} must be an array of non-empty strings.`)
+  }
+  return value.map((item) => item.trim())
+}
+
+function runtimeOverrides(body: Record<string, unknown>) {
+  const overrides: { command?: string; model?: string; args?: string[]; env?: Record<string, string> } = {}
+  const command = optionalString(body, 'command')
+  const model = optionalString(body, 'model')
+  if (command !== undefined) overrides.command = command
+  if (model !== undefined) overrides.model = model
+  if (body.args !== undefined) overrides.args = requiredStringArray(body, 'args')
+  if (body.env !== undefined) {
+    const env = objectBody(body.env)
+    if (Object.values(env).some((value) => typeof value !== 'string')) {
+      throw new ValidationError('env values must be strings.')
+    }
+    overrides.env = env as Record<string, string>
+  }
+  return overrides
+}
+
+function requiredParam(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !value) throw new ValidationError(`${name} is required.`)
+  return value
+}
+
+function sanitizeBootstrap(snapshot: ReturnType<WorkspaceRepositories['getBootstrap']>) {
+  return {
+    ...snapshot,
+    workspaces: snapshot.workspaces.map((workspace) => ({
+      ...workspace,
+      agents: workspace.agents.map((agent) => ({ ...agent, env: Object.keys(agent.env) })),
+    })),
+  }
+}
+
+const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
+  if (error instanceof ValidationError || error instanceof SyntaxError) {
+    response.status(400).json({ error: error.message })
+    return
+  }
+  if (error instanceof NotFoundError) {
+    response.status(404).json({ error: error.message })
+    return
+  }
+  if (error instanceof DomainError) {
+    response.status(409).json({ error: error.message })
+    return
+  }
+  response.status(500).json({ error: 'Internal server error.' })
 }
 
 function defaultDatabasePath(): string {

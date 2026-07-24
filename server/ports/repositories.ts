@@ -1,4 +1,4 @@
-import type { Agent } from '../domain/agent'
+import type { Agent, CreateAgentInput } from '../domain/agent'
 import type { DomainEvent } from '../domain/events'
 import type { CreateMessageInput, Message } from '../domain/message'
 import type { CreateTaskInput, Task, TaskStatus } from '../domain/task'
@@ -30,6 +30,7 @@ export interface WorkspaceUnitOfWork {
   createWorkspace(input: CreateWorkspaceInput): Workspace
   createRepository(input: CreateRepositoryInput): Repository
   createChannel(input: CreateChannelInput): Channel
+  createAgent(input: CreateAgentInput): Agent
   createTask(input: CreateTaskInput): Task
   createMessage(input: CreateMessageInput): Message
   updateMessageBody(messageId: string, body: string): Message
@@ -43,6 +44,7 @@ export interface WorkspaceRepositories {
   createWorkspace(input: CreateWorkspaceInput): Workspace
   createRepository(input: CreateRepositoryInput): Repository
   createChannel(input: CreateChannelInput): Channel
+  createAgent(input: CreateAgentInput): Agent
   createTask(input: CreateTaskInput): Task
   createMessage(input: CreateMessageInput): Message
   updateMessageBody(messageId: string, body: string): Message
@@ -50,5 +52,6 @@ export interface WorkspaceRepositories {
   transitionTask(taskId: string, next: TaskStatus, reason: string): Task
   getTask(taskId: string): Task | undefined
   getMessage(messageId: string): Message | undefined
+  hasAgentMention(workspaceId: string, mentionName: string): boolean
   getBootstrap(): BootstrapSnapshot
 }

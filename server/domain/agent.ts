@@ -15,12 +15,31 @@ export type SessionStatus = (typeof sessionStatuses)[number]
 export interface Agent {
   id: string
   workspaceId: string
+  identity: string
   mentionName: string
   runtime: 'opencode' | 'pi'
   status: AgentStatus
   capabilityTags: string[]
+  maxConcurrentTasks: 1
+  command: string
+  args: string[]
+  model: string
+  env: Record<string, string>
   createdAt: string
   updatedAt: string
+}
+
+export interface CreateAgentInput {
+  workspaceId: string
+  identity: string
+  mentionName: string
+  runtime: Agent['runtime']
+  capabilityTags: string[]
+  maxConcurrentTasks: 1
+  command: string
+  args: string[]
+  model: string
+  env: Record<string, string>
 }
 
 export interface TaskSession {

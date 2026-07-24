@@ -1,7 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
 
-const migrationVersion = 1
-
 export function migrateSchema(database: DatabaseSync): void {
   database.exec('PRAGMA foreign_keys = ON')
   database.exec('BEGIN IMMEDIATE')
@@ -14,8 +12,8 @@ export function migrateSchema(database: DatabaseSync): void {
       );
     `)
 
-    const migration = database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migrationVersion)
-    if (!migration) {
+    const firstMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 1').get()
+    if (!firstMigration) {
       database.exec(`
     CREATE TABLE workspaces (
       id TEXT PRIMARY KEY,
@@ -130,7 +128,31 @@ export function migrateSchema(database: DatabaseSync): void {
     CREATE INDEX task_leases_task_expires_at_idx ON task_leases(task_id, expires_at);
   `)
 
-      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(migrationVersion, new Date().toISOString())
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(1, new Date().toISOString())
+    }
+
+    const secondMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 2').get()
+    if (!secondMigration) {
+      database.exec(`
+        ALTER TABLE agents ADD COLUMN identity TEXT NOT NULL DEFAULT '';
+        ALTER TABLE agents ADD COLUMN max_concurrent_tasks INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE agents ADD COLUMN command TEXT NOT NULL DEFAULT '';
+        ALTER TABLE agents ADD COLUMN args_json TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE agents ADD COLUMN model TEXT NOT NULL DEFAULT '';
+        ALTER TABLE agents ADD COLUMN env_json TEXT NOT NULL DEFAULT '{}';
+        CREATE UNIQUE INDEX agents_workspace_mention_unique_idx ON agents(workspace_id, mention_name);
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(2, new Date().toISOString())
+    }
+
+    const thirdMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 3').get()
+    if (!thirdMigration) {
+      database.exec(`
+        ALTER TABLE repositories ADD COLUMN current_branch TEXT NOT NULL DEFAULT '';
+        ALTER TABLE repositories ADD COLUMN default_branch TEXT NOT NULL DEFAULT '';
+        ALTER TABLE repositories ADD COLUMN is_clean INTEGER NOT NULL DEFAULT 1;
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(3, new Date().toISOString())
     }
 
     database.exec('COMMIT')
