@@ -198,7 +198,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     const artifact = await taskService.readArtifact(
       requiredParam(request.params.taskId, 'taskId'), requiredParam(request.params.artifactId, 'artifactId'),
     )
-    response.type(artifact.kind === 'runtime-stderr' ? 'text/plain' : 'application/json').send(artifact.content)
+    response.type(artifact.kind.startsWith('runtime-') || artifact.kind === 'review-controlled-stderr' ? 'text/plain' : 'application/json').send(artifact.content)
   }))
 
   app.get('/events', (request, response) => {

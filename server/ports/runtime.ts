@@ -1,6 +1,6 @@
 import type { RuntimeAvailability, RuntimeAvailabilityDetector, RuntimeKind, RuntimeProfile } from '../adapters/runtime/runtime-profile'
 
-export type RuntimeArtifactType = 'runtime-jsonl' | 'runtime-stderr' | 'runtime-exit'
+export type RuntimeArtifactType = 'runtime-stdout' | 'runtime-jsonl' | 'runtime-stderr' | 'runtime-exit'
 
 export type RuntimeEvent =
   | { kind: 'artifact'; taskId: string; artifactType: RuntimeArtifactType; content: string }

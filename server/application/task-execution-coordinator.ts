@@ -30,7 +30,7 @@ interface ManagedExecution {
   adapter: RuntimeAdapter
   session: RuntimeSession
   targetBranch: string
-  testOutput: string[]
+  controlledStderr: string[]
 }
 
 export class TaskExecutionCoordinator {
@@ -71,7 +71,7 @@ export class TaskExecutionCoordinator {
         worktreePath: allocation.worktreePath,
         profile: { runtime: agent.runtime, command: agent.command, args: agent.args, model: agent.model, env: agent.env, policy: 'task-worktree' },
       }, (event) => this.enqueue(event.taskId, () => this.handleRuntimeEvent(event)))
-      this.executions.set(task.id, { taskId: task.id, agentId: agent.id, adapter, session, targetBranch: repository.defaultBranch, testOutput: [] })
+      this.executions.set(task.id, { taskId: task.id, agentId: agent.id, adapter, session, targetBranch: repository.defaultBranch, controlledStderr: [] })
       this.repositories.updateTaskSession(task.id, agent.id, { runtimeSessionId: session.sessionId, status: 'running' })
       this.deliverUnconsumedInputs(task.id)
     } catch (error) {
@@ -139,11 +139,11 @@ export class TaskExecutionCoordinator {
     if (!execution) return
     switch (event.kind) {
       case 'artifact':
-        if (event.artifactType === 'runtime-stderr') this.captureTestOutput(execution, event.content)
-        await this.writeArtifact(event.taskId, event.artifactType, event.content)
+        if (!await this.persistRuntimeArtifact(execution, event.artifactType, event.content)) return
+        if (event.artifactType === 'runtime-stderr') execution.controlledStderr.push(event.content)
         return
       case 'text':
-        await this.writeArtifact(event.taskId, 'runtime-text', event.text)
+        if (!await this.persistRuntimeArtifact(execution, 'runtime-text', event.text)) return
         this.repositories.inTransaction((unitOfWork) => unitOfWork.recordTaskEvent(event.taskId, 'runtime.text', { text: event.text }))
         return
       case 'tool_start':
@@ -159,7 +159,7 @@ export class TaskExecutionCoordinator {
         this.messages.postMilestone(this.task(event.taskId).channelId, event.taskId, `需要决定：${event.prompt}`)
         return
       case 'error':
-        await this.writeArtifact(event.taskId, 'runtime-error', event.message)
+        if (!await this.persistRuntimeArtifact(execution, 'runtime-error', event.message)) return
         this.fail(event.taskId, execution.agentId, event.message)
         return
       case 'settled':
@@ -211,28 +211,34 @@ export class TaskExecutionCoordinator {
     })
   }
 
+  private async persistRuntimeArtifact(execution: ManagedExecution, kind: string, content: string): Promise<boolean> {
+    try {
+      await this.writeArtifact(execution.taskId, kind, content)
+      return true
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : '未知错误'
+      this.fail(execution.taskId, execution.agentId, `运行产物保存失败：${detail}`, 'task.runtime_artifact_persistence_failed')
+      this.executions.delete(execution.taskId)
+      return false
+    }
+  }
+
   private deliverUnconsumedInputs(taskId: string): void {
     for (const input of this.repositories.getTaskDetails(taskId)?.inputs.filter((candidate) => !candidate.consumedAt) ?? []) {
       this.deliverQueuedInput(taskId, input.id)
     }
   }
 
-  private captureTestOutput(execution: ManagedExecution, content: string): void {
-    if (/\b(test|tests|vitest|jest|pytest|mocha|passed|failed)\b/i.test(content)) {
-      execution.testOutput.push(content)
-    }
-  }
-
   private async writeReviewEvidence(task: Task, execution: ManagedExecution): Promise<void> {
     if (!task.worktreePath) throw new Error('Task worktree is required before collecting review evidence.')
     const evidence = await this.collectReviewEvidence(task.worktreePath, execution.targetBranch)
-    const testOutput = execution.testOutput.length > 0
-      ? execution.testOutput.join('\n')
-      : '未在受控 Runtime 工具输出中检测到测试结果。请查看原始运行日志。'
+    const controlledStderr = execution.controlledStderr.length > 0
+      ? execution.controlledStderr.join('')
+      : '受控进程未产生 stderr 输出。'
     await Promise.all([
       this.writeArtifact(task.id, 'review-commit', evidence.commit),
       this.writeArtifact(task.id, 'review-changed-files', evidence.changedFiles),
-      this.writeArtifact(task.id, 'review-test-output', testOutput),
+      this.writeArtifact(task.id, 'review-controlled-stderr', controlledStderr),
       this.writeArtifact(task.id, 'review-diff-summary', evidence.diffSummary),
     ])
   }

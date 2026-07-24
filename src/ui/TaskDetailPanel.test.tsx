@@ -12,7 +12,7 @@ const task: TaskView = {
 const details: TaskDetailView = { task, sessions: [], leases: [], inputs: [], decisions: [], artifacts: [
   { id: 'artifact-commit', taskId: 'task-1', kind: 'review-commit', createdAt: '2026-07-25T08:01:00.000Z' },
   { id: 'artifact-files', taskId: 'task-1', kind: 'review-changed-files', createdAt: '2026-07-25T08:01:00.000Z' },
-  { id: 'artifact-tests', taskId: 'task-1', kind: 'review-test-output', createdAt: '2026-07-25T08:01:00.000Z' },
+  { id: 'artifact-stderr', taskId: 'task-1', kind: 'review-controlled-stderr', createdAt: '2026-07-25T08:01:00.000Z' },
   { id: 'artifact-diff', taskId: 'task-1', kind: 'review-diff-summary', createdAt: '2026-07-25T08:01:00.000Z' },
   { id: 'artifact-log', taskId: 'task-1', kind: 'runtime-stderr', createdAt: '2026-07-25T08:01:00.000Z' },
 ], events: [] }
@@ -23,7 +23,7 @@ describe('TaskDetailPanel', () => {
     const onReadArtifact = vi.fn((artifactId: string) => Promise.resolve({
       'artifact-commit': 'abc123 Implement mobile drawer',
       'artifact-files': 'M src/ui/WorkspaceShell.tsx',
-      'artifact-tests': 'npm test\\n 108 passed',
+      'artifact-stderr': 'warning: optional dependency missing\\n',
       'artifact-diff': '2 files changed, 34 insertions(+)',
       'artifact-log': 'raw runtime output',
     }[artifactId] ?? ''))
@@ -35,7 +35,8 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByRole('heading', { name: '审查' })).toBeInTheDocument()
     expect(await screen.findByText('abc123 Implement mobile drawer')).toBeInTheDocument()
     expect(screen.getByText('M src/ui/WorkspaceShell.tsx')).toBeInTheDocument()
-    expect(screen.getByText('npm test\\n 108 passed')).toBeInTheDocument()
+    expect(screen.getByText('受控进程 stderr（非测试结论）')).toBeInTheDocument()
+    expect(screen.getByText('warning: optional dependency missing\\n')).toBeInTheDocument()
     expect(screen.getByText('2 files changed, 34 insertions(+)')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '原始运行日志' })).toBeInTheDocument()
     await userEvent.setup().click(screen.getByRole('button', { name: '接受验收' }))

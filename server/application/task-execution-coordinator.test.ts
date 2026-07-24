@@ -12,6 +12,7 @@ import { TaskExecutionCoordinator } from './task-execution-coordinator'
 import { TaskReviewService } from './task-review-service'
 import type { DomainEvent } from '../domain/events'
 import type { DomainEventPublisher } from '../ports/domain-event-publisher'
+import type { RuntimeArtifactType } from '../ports/runtime'
 import type { WorktreeManager } from '../ports/worktree-manager'
 
 describe('TaskExecutionCoordinator', () => {
@@ -75,7 +76,7 @@ describe('TaskExecutionCoordinator', () => {
     expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('等待人工验收')
     const artifacts = fixture.repositories.getTaskDetails(second.id)!.artifacts
     expect(artifacts.map((artifact) => artifact.kind)).toEqual(expect.arrayContaining([
-      'review-commit', 'review-changed-files', 'review-test-output', 'review-diff-summary',
+      'review-commit', 'review-changed-files', 'review-controlled-stderr', 'review-diff-summary',
     ]))
     const evidence = Object.fromEntries(await Promise.all(artifacts
       .filter((artifact) => artifact.kind.startsWith('review-'))
@@ -83,11 +84,11 @@ describe('TaskExecutionCoordinator', () => {
     ))
     expect(evidence['review-commit']).toMatch(/[0-9a-f]{40}/)
     expect(evidence['review-changed-files']).toContain('implementation.txt')
-    expect(evidence['review-test-output']).toContain('3 passed')
+    expect(evidence['review-controlled-stderr']).toBe('npm test\n  3 passed\n')
     expect(evidence['review-diff-summary']).toContain('implementation.txt')
   })
 
-  it('does not treat assistant text as verified test evidence', async () => {
+  it('keeps complete controlled stderr separate from assistant text and does not call it test evidence', async () => {
     const fixture = await createFixture()
     const claim = fixture.scheduler.claimNext(fixture.agent.id)!
     await fixture.coordinator.startClaim(claim)
@@ -96,12 +97,35 @@ describe('TaskExecutionCoordinator', () => {
     await commitFile(worktree, 'text-only.txt', 'Add text-only evidence fixture')
 
     fixture.runtime.emit(claim.task.id, { kind: 'text', text: '我已经运行测试，所有 108 tests passed。' })
+    fixture.runtime.emit(claim.task.id, { kind: 'artifact', artifactType: 'runtime-stderr', content: 'warning: test setup unavailable\n' })
     fixture.runtime.emit(claim.task.id, { kind: 'settled' })
     await fixture.coordinator.flush(claim.task.id)
 
-    const testEvidence = fixture.repositories.getTaskDetails(claim.task.id)!.artifacts.find((artifact) => artifact.kind === 'review-test-output')!
-    await expect(readFile(testEvidence.path, 'utf8')).resolves.toBe('未在受控 Runtime 工具输出中检测到测试结果。请查看原始运行日志。')
+    const stderrEvidence = fixture.repositories.getTaskDetails(claim.task.id)!.artifacts.find((artifact) => artifact.kind === 'review-controlled-stderr')!
+    await expect(readFile(stderrEvidence.path, 'utf8')).resolves.toBe('warning: test setup unavailable\n')
   })
+
+  it.each<RuntimeArtifactType>(['runtime-stdout', 'runtime-stderr', 'runtime-jsonl', 'runtime-exit'])(
+    'moves a task to human handling and releases its agent when %s artifact persistence fails',
+    async (artifactType) => {
+      const fixture = await createFixture({ failRawArtifactPersistence: true })
+      const claim = fixture.scheduler.claimNext(fixture.agent.id)!
+      await fixture.coordinator.startClaim(claim)
+
+      fixture.runtime.emit(claim.task.id, { kind: 'artifact', artifactType, content: 'raw process output' })
+      await expect(fixture.coordinator.flush(claim.task.id)).resolves.toBeUndefined()
+
+      const details = fixture.repositories.getTaskDetails(claim.task.id)!
+      expect(details.task.status).toBe('needs_human')
+      expect(details.leases).toEqual([])
+      expect(fixture.repositories.getBootstrap().workspaces[0].agents[0].status).toBe('idle')
+      expect(fixture.rawArtifactWrites).toEqual([artifactType])
+      expect(details.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'task.runtime_artifact_persistence_failed', payload: expect.objectContaining({ reason: expect.stringContaining('raw artifact persistence unavailable') }) }),
+      ]))
+      expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('任务需要人工处理：运行产物保存失败：raw artifact persistence unavailable')
+    },
+  )
 
   it('moves a settled task to human handling when Git review evidence collection fails', async () => {
     const fixture = await createFixture({
@@ -281,14 +305,20 @@ describe('TaskExecutionCoordinator', () => {
     worktrees?: WorktreeManager
     collectReviewEvidence?: () => Promise<never>
     failReviewArtifactPersistence?: boolean
+    failRawArtifactPersistence?: boolean
   } = {}) {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-coordinator-'))
     database = createSqliteDatabase(path.join(temporaryDirectory, 'sinapsis.sqlite'))
     const repositories = new SqliteRepositories(database, new RecordingPublisher())
-    if (options.failReviewArtifactPersistence) {
+    const rawArtifactWrites: string[] = []
+    if (options.failReviewArtifactPersistence || options.failRawArtifactPersistence) {
       const createTaskArtifact = repositories.createTaskArtifact.bind(repositories)
       repositories.createTaskArtifact = (taskId, kind, artifactPath) => {
         if (kind.startsWith('review-')) throw new Error('review artifact persistence unavailable')
+        if (kind.startsWith('runtime-')) {
+          rawArtifactWrites.push(kind)
+          if (options.failRawArtifactPersistence) throw new Error('raw artifact persistence unavailable')
+        }
         return createTaskArtifact(taskId, kind, artifactPath)
       }
     }
@@ -319,7 +349,7 @@ describe('TaskExecutionCoordinator', () => {
     })
     const first = createTask({ title: 'First task' })
     return {
-      repositories, runtime, coordinator, scheduler, agent, first,
+      repositories, runtime, coordinator, scheduler, agent, first, rawArtifactWrites,
       createTask,
       channelMessages: () => repositories.getBootstrap().workspaces[0].recentMessages.filter((message) => message.channelId === channel.id),
     }
