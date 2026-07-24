@@ -46,16 +46,16 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const composerRepository = useMemo(() => findRepository(workspace, composerRepositoryId), [workspace, composerRepositoryId])
 
   useEffect(() => {
-    if (!selectedTaskId) { setTaskDetails(null); setTaskDetailsError(null); return undefined }
+    if (!selectedTask) { setTaskDetails(null); setTaskDetailsError(null); return undefined }
     let active = true
     setTaskDetails(null)
     setTaskDetailsError(null)
-    void api.getTaskDetails(selectedTaskId).then(
+    void api.getTaskDetails(selectedTask.id).then(
       (details) => { if (active) setTaskDetails(details) },
       (cause: unknown) => { if (active) setTaskDetailsError(cause instanceof Error ? cause.message : '无法读取任务详情。') },
     )
     return () => { active = false }
-  }, [api, selectedTaskId])
+  }, [api, selectedTask])
 
   if (!snapshot) return <main className="workspace-loading"><p>{error ?? '正在连接本机工作空间...'}</p>{error && <button type="button" onClick={() => void refresh()}>重试</button>}</main>
   if (!workspace) return <WorkspaceSetup api={api} onComplete={refresh} />

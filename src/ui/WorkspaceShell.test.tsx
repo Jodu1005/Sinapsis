@@ -57,7 +57,7 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     createAgent: vi.fn(),
     postMessage: vi.fn().mockResolvedValue(undefined),
     createTask: vi.fn(),
-    getTaskDetails: vi.fn(),
+    getTaskDetails: vi.fn().mockResolvedValue(createdTaskDetails),
     queueTaskInput: vi.fn(),
     reviewTask: vi.fn(),
     readArtifact: vi.fn(),
@@ -119,6 +119,22 @@ describe('WorkspaceShell', () => {
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
     expect(api.postMessage).toHaveBeenCalledWith('channel-general', { body: '大家同步一下。' })
+  })
+
+  it('loads details for the initially selected channel task', async () => {
+    const initialTask = { ...createdTask, channelId: 'channel-general', status: 'queued' as const }
+    const initialDetails = { ...createdTaskDetails, task: initialTask }
+    const initialSnapshot = structuredClone(snapshot)
+    initialSnapshot.workspaces[0].repositories[0].tasks = [initialTask]
+    const api = makeApi({
+      getBootstrap: vi.fn().mockResolvedValue(initialSnapshot),
+      getTaskDetails: vi.fn().mockResolvedValue(initialDetails),
+    })
+
+    render(<WorkspaceShell api={api} />)
+
+    expect(await screen.findByRole('heading', { name: '概览' })).toBeInTheDocument()
+    expect(api.getTaskDetails).toHaveBeenCalledWith('task-new')
   })
 
   it('creates an Agent from the workspace sidebar', async () => {
