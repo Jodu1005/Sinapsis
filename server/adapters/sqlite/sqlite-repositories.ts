@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { Agent, CreateAgentInput } from '../../domain/agent'
+import type { Agent, AgentStatus, CreateAgentInput } from '../../domain/agent'
 import type { DomainEvent } from '../../domain/events'
 import type { CreateMessageInput, Message, MessageSenderType } from '../../domain/message'
 import {
@@ -25,7 +25,14 @@ import type {
   Workspace,
 } from '../../domain/workspace'
 import type { DomainEventPublisher } from '../../ports/domain-event-publisher'
-import type { BootstrapSnapshot, WorkspaceRepositories, WorkspaceUnitOfWork } from '../../ports/repositories'
+import type {
+  BootstrapSnapshot,
+  ExpiredLease,
+  LeaseRecovery,
+  TaskClaim,
+  WorkspaceRepositories,
+  WorkspaceUnitOfWork,
+} from '../../ports/repositories'
 import type { SqliteDatabase } from './database'
 
 interface WorkspaceRow {
@@ -472,6 +479,143 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return row !== undefined
   }
 
+  getIdleAgentIds(): string[] {
+    return (this.sqlite.database.prepare('SELECT id FROM agents WHERE status = ? ORDER BY updated_at, id').all('idle') as Array<{ id: string }>)
+      .map((agent) => agent.id)
+  }
+
+  setAgentStatus(agentId: string, status: AgentStatus, occurredAt: Date): Agent {
+    return this.inTransaction((unitOfWork) => {
+      const agent = readAgent(this.sqlite.database, agentId)
+      if (!agent) throw new Error(`Agent ${agentId} does not exist.`)
+      const updatedAt = occurredAt.toISOString()
+      this.sqlite.database.prepare('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?').run(status, updatedAt, agentId)
+      unitOfWork.afterCommit(event('agent.status_changed', 'agent', agentId, updatedAt))
+      return { ...agent, status, updatedAt }
+    })
+  }
+
+  claimNextTask(agentId: string, occurredAt: Date, leaseTtlMs: number): TaskClaim | undefined {
+    if (!Number.isInteger(leaseTtlMs) || leaseTtlMs < 1) throw new Error('Lease TTL must be a positive integer.')
+
+    return this.inTransaction((unitOfWork) => {
+      const database = this.sqlite.database
+      const agent = readAgent(database, agentId)
+      if (!agent || agent.status !== 'idle' || hasActiveLease(database, agentId)) return undefined
+
+      const candidates = (database.prepare(`
+        SELECT * FROM tasks
+        WHERE status = 'queued' AND (direct_agent_id IS NULL OR direct_agent_id = ?)
+        ORDER BY queued_at ASC, rowid ASC
+      `).all(agentId) as unknown as TaskRow[]).map(mapTask)
+      const candidate = candidates.find((task) => labelsMatch(agent.capabilityTags, task.labels))
+      if (!candidate) return undefined
+
+      const occurredAtIso = occurredAt.toISOString()
+      const taskUpdate = database.prepare(`
+        UPDATE tasks SET status = 'claimed', updated_at = ? WHERE id = ? AND status = 'queued'
+      `).run(occurredAtIso, candidate.id)
+      if (Number(taskUpdate.changes) !== 1) return undefined
+
+      const lease: TaskLease = {
+        id: randomUUID(), taskId: candidate.id, agentId,
+        expiresAt: new Date(occurredAt.getTime() + leaseTtlMs).toISOString(), createdAt: occurredAtIso,
+      }
+      database.prepare(`
+        INSERT INTO task_leases (id, task_id, agent_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)
+      `).run(lease.id, lease.taskId, lease.agentId, lease.expiresAt, lease.createdAt)
+      const agentUpdate = database.prepare(`
+        UPDATE agents SET status = 'busy', updated_at = ? WHERE id = ? AND status = 'idle'
+      `).run(occurredAtIso, agentId)
+      if (Number(agentUpdate.changes) !== 1) throw new Error(`Agent ${agentId} became unavailable while claiming a task.`)
+
+      unitOfWork.recordTaskEvent(candidate.id, 'task.claimed', { agentId, leaseId: lease.id, expiresAt: lease.expiresAt })
+      unitOfWork.afterCommit(event('agent.status_changed', 'agent', agentId, occurredAtIso))
+      return { task: { ...candidate, status: 'claimed', updatedAt: occurredAtIso }, lease }
+    })
+  }
+
+  renewTaskLease(taskId: string, agentId: string, occurredAt: Date, leaseTtlMs: number): TaskLease | undefined {
+    if (!Number.isInteger(leaseTtlMs) || leaseTtlMs < 1) throw new Error('Lease TTL must be a positive integer.')
+
+    return this.inTransaction((unitOfWork) => {
+      const database = this.sqlite.database
+      const lease = readLeaseForTaskAgent(database, taskId, agentId)
+      if (!lease) return undefined
+      const expiresAt = new Date(occurredAt.getTime() + leaseTtlMs).toISOString()
+      const updated = database.prepare(`
+        UPDATE task_leases SET expires_at = ? WHERE id = ? AND expires_at > ?
+      `).run(expiresAt, lease.id, occurredAt.toISOString())
+      if (Number(updated.changes) !== 1) return undefined
+      unitOfWork.recordTaskEvent(taskId, 'task.lease_renewed', { agentId, leaseId: lease.id, expiresAt })
+      return { ...lease, expiresAt }
+    })
+  }
+
+  findExpiredLeases(occurredAt: Date): ExpiredLease[] {
+    const leaseIds = this.sqlite.database.prepare(`
+      SELECT id FROM task_leases WHERE expires_at <= ? ORDER BY expires_at ASC, rowid ASC
+    `).all(occurredAt.toISOString()) as Array<{ id: string }>
+    return leaseIds.flatMap(({ id }) => {
+      const lease = readLease(this.sqlite.database, id)
+      if (!lease) return []
+      const task = readTask(this.sqlite.database, lease.taskId)
+      return task ? [{ lease, task }] : []
+    })
+  }
+
+  markTimedOut(taskId: string, agentId: string, occurredAt: Date): void {
+    this.inTransaction((unitOfWork) => {
+      const task = readTask(this.sqlite.database, taskId)
+      if (!task) return
+      const occurredAtIso = occurredAt.toISOString()
+      this.sqlite.database.prepare(`
+        UPDATE task_sessions SET status = 'timed_out', updated_at = ?
+        WHERE task_id = ? AND agent_id = ? AND status NOT IN ('completed', 'cancelled', 'failed', 'timed_out')
+      `).run(occurredAtIso, taskId, agentId)
+      unitOfWork.recordTaskEvent(taskId, 'task.session_timed_out', { agentId })
+    })
+  }
+
+  recoverExpiredLease(leaseId: string, occurredAt: Date): LeaseRecovery | undefined {
+    return this.inTransaction((unitOfWork) => {
+      const database = this.sqlite.database
+      const lease = readLease(database, leaseId)
+      if (!lease || lease.expiresAt > occurredAt.toISOString()) return undefined
+      const task = readTask(database, lease.taskId)
+      if (!task) return undefined
+
+      const outcome = task.attemptCount < task.maxRetries ? 'requeued' : 'needs_human'
+      const nextStatus = outcome === 'requeued' ? 'queued' : 'needs_human'
+      const updatedAt = occurredAt.toISOString()
+      const nextAttemptCount = outcome === 'requeued' ? task.attemptCount + 1 : task.attemptCount
+      const leaseDeletion = database.prepare('DELETE FROM task_leases WHERE id = ? AND expires_at <= ?').run(lease.id, updatedAt)
+      if (Number(leaseDeletion.changes) !== 1) return undefined
+      database.prepare(`
+        UPDATE tasks SET status = ?, queued_at = ?, attempt_count = ?, updated_at = ? WHERE id = ?
+      `).run(nextStatus, updatedAt, nextAttemptCount, updatedAt, task.id)
+      database.prepare('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?').run('idle', updatedAt, lease.agentId)
+      unitOfWork.recordTaskEvent(task.id, 'task.lease_expired', {
+        agentId: lease.agentId, leaseId: lease.id, outcome, attemptCount: nextAttemptCount,
+      })
+      unitOfWork.createMessage({
+        channelId: task.channelId,
+        taskId: task.id,
+        senderType: 'system',
+        authorName: 'Sinapsis',
+        body: outcome === 'requeued'
+          ? `任务租约已超时，已重新进入 FIFO 队列（第 ${nextAttemptCount} 次重试）。`
+          : '任务租约已超时，重试次数已用尽，等待人工处理。',
+      })
+      unitOfWork.afterCommit(event('agent.status_changed', 'agent', lease.agentId, updatedAt))
+      return {
+        task: { ...task, status: nextStatus, queuedAt: updatedAt, attemptCount: nextAttemptCount, updatedAt },
+        lease,
+        outcome,
+      }
+    })
+  }
+
   getBootstrap(): BootstrapSnapshot {
     const workspaces = this.sqlite.database.prepare('SELECT id, name, created_at FROM workspaces ORDER BY created_at').all() as unknown as WorkspaceRow[]
     return {
@@ -511,6 +655,30 @@ function readTask(database: DatabaseSync, taskId: string): Task | undefined {
 function readMessage(database: DatabaseSync, messageId: string): Message | undefined {
   const row = database.prepare('SELECT * FROM messages WHERE id = ?').get(messageId) as MessageRow | undefined
   return row ? mapMessage(row) : undefined
+}
+
+function readAgent(database: DatabaseSync, agentId: string): Agent | undefined {
+  const row = database.prepare('SELECT * FROM agents WHERE id = ?').get(agentId) as AgentRow | undefined
+  return row ? mapAgent(row) : undefined
+}
+
+function readLease(database: DatabaseSync, leaseId: string): TaskLease | undefined {
+  const row = database.prepare('SELECT * FROM task_leases WHERE id = ?').get(leaseId) as TaskLeaseRow | undefined
+  return row ? mapTaskLease(row) : undefined
+}
+
+function readLeaseForTaskAgent(database: DatabaseSync, taskId: string, agentId: string): TaskLease | undefined {
+  const row = database.prepare('SELECT * FROM task_leases WHERE task_id = ? AND agent_id = ?').get(taskId, agentId) as TaskLeaseRow | undefined
+  return row ? mapTaskLease(row) : undefined
+}
+
+function hasActiveLease(database: DatabaseSync, agentId: string): boolean {
+  return database.prepare('SELECT 1 FROM task_leases WHERE agent_id = ? LIMIT 1').get(agentId) !== undefined
+}
+
+function labelsMatch(capabilityTags: string[], labels: string[]): boolean {
+  const capabilities = new Set(capabilityTags)
+  return labels.every((label) => capabilities.has(label))
 }
 
 function mapWorkspace(row: WorkspaceRow): Workspace {

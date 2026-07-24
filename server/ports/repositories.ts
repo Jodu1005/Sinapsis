@@ -1,7 +1,8 @@
-import type { Agent, CreateAgentInput } from '../domain/agent'
+import type { Agent, AgentStatus, CreateAgentInput } from '../domain/agent'
 import type { DomainEvent } from '../domain/events'
 import type { CreateMessageInput, Message } from '../domain/message'
-import type { CreateTaskInput, Task, TaskArtifact, TaskDetails, TaskInput, TaskStatus } from '../domain/task'
+import type { CreateTaskInput, Task, TaskArtifact, TaskDetails, TaskInput, TaskLease, TaskStatus } from '../domain/task'
+import type { TaskSessionStore } from './task-session-store'
 import type {
   Channel,
   CreateChannelInput,
@@ -26,6 +27,22 @@ export interface BootstrapSnapshot {
   workspaces: BootstrapWorkspace[]
 }
 
+export interface TaskClaim {
+  task: Task
+  lease: TaskLease
+}
+
+export interface ExpiredLease {
+  lease: TaskLease
+  task: Task
+}
+
+export interface LeaseRecovery {
+  task: Task
+  lease: TaskLease
+  outcome: 'requeued' | 'needs_human'
+}
+
 export interface WorkspaceUnitOfWork {
   createWorkspace(input: CreateWorkspaceInput): Workspace
   createRepository(input: CreateRepositoryInput): Repository
@@ -41,7 +58,7 @@ export interface WorkspaceUnitOfWork {
   afterCommit(event: DomainEvent): void
 }
 
-export interface WorkspaceRepositories {
+export interface WorkspaceRepositories extends TaskSessionStore {
   inTransaction<T>(work: (unitOfWork: WorkspaceUnitOfWork) => T): T
   createWorkspace(input: CreateWorkspaceInput): Workspace
   createRepository(input: CreateRepositoryInput): Repository
@@ -59,5 +76,11 @@ export interface WorkspaceRepositories {
   getTaskArtifact(taskId: string, artifactId: string): TaskArtifact | undefined
   getMessage(messageId: string): Message | undefined
   hasAgentMention(workspaceId: string, mentionName: string): boolean
+  getIdleAgentIds(): string[]
+  setAgentStatus(agentId: string, status: AgentStatus, occurredAt: Date): Agent
+  claimNextTask(agentId: string, occurredAt: Date, leaseTtlMs: number): TaskClaim | undefined
+  renewTaskLease(taskId: string, agentId: string, occurredAt: Date, leaseTtlMs: number): TaskLease | undefined
+  findExpiredLeases(occurredAt: Date): ExpiredLease[]
+  recoverExpiredLease(leaseId: string, occurredAt: Date): LeaseRecovery | undefined
   getBootstrap(): BootstrapSnapshot
 }

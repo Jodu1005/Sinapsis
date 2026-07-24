@@ -162,6 +162,15 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(4, new Date().toISOString())
     }
 
+    const fifthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 5').get()
+    if (!fifthMigration) {
+      database.exec(`
+        CREATE UNIQUE INDEX task_leases_task_unique_idx ON task_leases(task_id);
+        CREATE UNIQUE INDEX task_leases_agent_unique_idx ON task_leases(agent_id);
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(5, new Date().toISOString())
+    }
+
     database.exec('COMMIT')
   } catch (error) {
     database.exec('ROLLBACK')

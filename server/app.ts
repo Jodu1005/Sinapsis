@@ -31,6 +31,8 @@ export function createApp(options: CreateAppOptions = {}): Express {
   const taskService = new TaskService(repositories)
 
   app.locals.closeDatabase = () => database.close()
+  app.locals.closeSse = () => eventPublisher.close()
+  app.locals.repositories = repositories
   app.use(express.json())
 
   app.get('/api/health', (_request, response) => {

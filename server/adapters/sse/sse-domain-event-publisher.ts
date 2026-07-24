@@ -22,4 +22,11 @@ export class SseDomainEventPublisher implements DomainEventPublisher {
       client.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${payload}\n\n`)
     }
   }
+
+  close(): void {
+    for (const client of this.clients) {
+      client.end()
+    }
+    this.clients.clear()
+  }
 }
