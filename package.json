@@ -4,23 +4,31 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev:api": "tsx watch server/main.ts",
+    "dev:web": "vite",
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"npm:dev:api\" \"npm:dev:web\"",
     "build": "tsc --noEmit && vite build",
-    "test": "vitest"
+    "test": "vitest",
+    "test:run": "vitest run"
   },
   "dependencies": {
+    "express": "latest",
     "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest"
   },
   "devDependencies": {
+    "@types/express": "latest",
+    "@types/node": "latest",
     "@vitejs/plugin-react": "latest",
     "@testing-library/jest-dom": "latest",
     "@testing-library/react": "latest",
     "@testing-library/user-event": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "concurrently": "latest",
     "jsdom": "latest",
+    "tsx": "latest",
     "typescript": "latest",
     "vite": "latest",
     "vitest": "latest"
