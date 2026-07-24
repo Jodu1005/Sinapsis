@@ -1,0 +1,134 @@
+import type { DatabaseSync } from 'node:sqlite'
+
+const migrationVersion = 1
+
+export function migrateSchema(database: DatabaseSync): void {
+  database.exec('PRAGMA foreign_keys = ON')
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    );
+  `)
+
+  const migration = database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migrationVersion)
+  if (migration) {
+    return
+  }
+
+  database.exec(`
+    CREATE TABLE workspaces (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE repositories (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+      name TEXT NOT NULL,
+      path TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE channels (
+      id TEXT PRIMARY KEY,
+      repository_id TEXT NOT NULL REFERENCES repositories(id),
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE agents (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+      mention_name TEXT NOT NULL,
+      runtime TEXT NOT NULL,
+      status TEXT NOT NULL,
+      capability_tags_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY,
+      repository_id TEXT NOT NULL REFERENCES repositories(id),
+      channel_id TEXT NOT NULL REFERENCES channels(id),
+      direct_agent_id TEXT REFERENCES agents(id),
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      acceptance_criteria TEXT NOT NULL,
+      labels_json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      queued_at TEXT NOT NULL,
+      attempt_count INTEGER NOT NULL,
+      max_retries INTEGER NOT NULL,
+      timeout_ms INTEGER NOT NULL,
+      branch_name TEXT,
+      worktree_path TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE task_label_overrides (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id),
+      label TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE task_sessions (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id),
+      agent_id TEXT NOT NULL REFERENCES agents(id),
+      runtime_session_id TEXT,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE task_input_queue (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id),
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      consumed_at TEXT
+    );
+    CREATE TABLE task_leases (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id),
+      agent_id TEXT NOT NULL REFERENCES agents(id),
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE messages (
+      id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL REFERENCES channels(id),
+      task_id TEXT REFERENCES tasks(id),
+      sender_type TEXT NOT NULL,
+      sender_id TEXT,
+      author_name TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      deleted_at TEXT
+    );
+    CREATE TABLE task_events (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id),
+      type TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE task_artifacts (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id),
+      kind TEXT NOT NULL,
+      path TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE review_decisions (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id),
+      decision TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX tasks_repository_status_queued_at_idx ON tasks(repository_id, status, queued_at);
+    CREATE INDEX task_leases_task_expires_at_idx ON task_leases(task_id, expires_at);
+  `)
+
+  database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(migrationVersion, new Date().toISOString())
+}
