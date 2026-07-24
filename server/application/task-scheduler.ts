@@ -6,6 +6,10 @@ export interface TaskClaimStarter {
   startClaim(claim: TaskClaim): Promise<void>
 }
 
+export interface ActiveLeaseOwner {
+  hasExecution(taskId: string, agentId: string): boolean
+}
+
 export class TaskScheduler {
   constructor(
     private readonly repositories: WorkspaceRepositories,
@@ -35,6 +39,7 @@ export class SchedulerLoop {
     private readonly repositories: WorkspaceRepositories,
     private readonly intervalMs = 1_000,
     private readonly now: () => Date = () => new Date(),
+    private readonly activeLeaseOwner?: ActiveLeaseOwner,
   ) {}
 
   start(): void {
@@ -66,6 +71,7 @@ export class SchedulerLoop {
   heartbeatTick(): void {
     const occurredAt = this.now()
     for (const lease of this.repositories.getActiveLeases()) {
+      if (this.activeLeaseOwner && !this.activeLeaseOwner.hasExecution(lease.taskId, lease.agentId)) continue
       this.scheduler.renew(lease.taskId, lease.agentId, occurredAt)
     }
   }

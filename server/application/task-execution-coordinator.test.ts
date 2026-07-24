@@ -8,6 +8,7 @@ import { FakeRuntimeAdapter } from '../adapters/runtime/fake-runtime-adapter'
 import { GitWorktreeManager } from '../adapters/git/git-worktree-manager'
 import { createGitFixture, commitFile, type GitFixture } from '../test/git-fixture'
 import { TaskScheduler } from './task-scheduler'
+import { LeaseReaper } from './lease-reaper'
 import { TaskExecutionCoordinator } from './task-execution-coordinator'
 import { TaskReviewService } from './task-review-service'
 import type { DomainEvent } from '../domain/events'
@@ -21,6 +22,7 @@ describe('TaskExecutionCoordinator', () => {
   let gitFixture: GitFixture | undefined
 
   afterEach(async () => {
+    vi.useRealTimers()
     database?.close()
     if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true })
     await gitFixture?.dispose()
@@ -48,6 +50,50 @@ describe('TaskExecutionCoordinator', () => {
     expect(fixture.channelMessages().map((message) => message.body).join('\n')).not.toContain('npm test --verbose')
     const artifact = details.artifacts.find((candidate) => candidate.kind === 'runtime-stderr')!
     await expect(readFile(artifact.path, 'utf8')).resolves.toContain('npm test --verbose')
+  })
+
+  it('terminates only its managed runtime and stops advertising the lease as live', async () => {
+    const fixture = await createFixture()
+    const claim = fixture.scheduler.claimNext(fixture.agent.id)!
+    await fixture.coordinator.startClaim(claim)
+
+    expect(fixture.coordinator.hasExecution(claim.task.id, fixture.agent.id)).toBe(true)
+    await fixture.coordinator.terminate(claim.task.id, fixture.agent.id)
+
+    expect(fixture.runtime.cancellations.map((session) => session.taskId)).toEqual([claim.task.id])
+    expect(fixture.coordinator.hasExecution(claim.task.id, fixture.agent.id)).toBe(false)
+  })
+
+  it('terminates an execution that exceeds its task timeout and releases its lease', async () => {
+    vi.useFakeTimers()
+    const fixture = await createFixture({ taskTimeoutMs: 50 })
+    const claim = fixture.scheduler.claimNext(fixture.agent.id)!
+    await fixture.coordinator.startClaim(claim)
+
+    await vi.advanceTimersByTimeAsync(50)
+
+    expect(fixture.runtime.cancellations.map((session) => session.taskId)).toEqual([claim.task.id])
+    expect(fixture.repositories.getTask(claim.task.id)?.status).toBe('needs_human')
+    expect(fixture.repositories.getTaskDetails(claim.task.id)?.leases).toEqual([])
+    expect(fixture.repositories.getTaskDetails(claim.task.id)?.sessions).toEqual([
+      expect.objectContaining({ status: 'timed_out' }),
+    ])
+    expect(fixture.repositories.getBootstrap().workspaces[0].agents[0].status).toBe('idle')
+  })
+
+  it('kills the managed runtime before an expired lease returns its task to FIFO', async () => {
+    const fixture = await createFixture()
+    const claim = fixture.scheduler.claimNext(fixture.agent.id)!
+    await fixture.coordinator.startClaim(claim)
+
+    await new LeaseReaper(fixture.repositories, fixture.coordinator, fixture.repositories).reap(
+      new Date(new Date(claim.lease.expiresAt).getTime() + 1),
+    )
+
+    expect(fixture.runtime.cancellations.map((session) => session.taskId)).toEqual([claim.task.id])
+    expect(fixture.coordinator.hasExecution(claim.task.id, fixture.agent.id)).toBe(false)
+    expect(fixture.repositories.getTask(claim.task.id)).toMatchObject({ status: 'queued', attemptCount: 1 })
+    expect(fixture.repositories.getTaskDetails(claim.task.id)?.leases).toEqual([])
   })
 
   it('requires a real task branch commit before moving a settled task into review', async () => {
@@ -306,6 +352,7 @@ describe('TaskExecutionCoordinator', () => {
     collectReviewEvidence?: () => Promise<never>
     failReviewArtifactPersistence?: boolean
     failRawArtifactPersistence?: boolean
+    taskTimeoutMs?: number
   } = {}) {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-coordinator-'))
     database = createSqliteDatabase(path.join(temporaryDirectory, 'sinapsis.sqlite'))
@@ -345,7 +392,7 @@ describe('TaskExecutionCoordinator', () => {
     const scheduler = new TaskScheduler(repositories)
     const createTask = (input: { title: string }) => repositories.createTask({
       repositoryId: repository.id, channelId: channel.id, title: input.title, description: 'Implement it',
-      acceptanceCriteria: 'Commit the change', labels: ['typescript'], directAgentId: agent.id,
+      acceptanceCriteria: 'Commit the change', labels: ['typescript'], directAgentId: agent.id, timeoutMs: options.taskTimeoutMs,
     })
     const first = createTask({ title: 'First task' })
     return {

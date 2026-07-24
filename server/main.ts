@@ -3,7 +3,7 @@ import { createApp } from './app'
 import { LeaseReaper, LeaseReaperLoop } from './application/lease-reaper'
 import { SchedulerLoop, TaskScheduler } from './application/task-scheduler'
 import { ensureDataDirectory, getServiceConfig } from './config'
-import { NoopProcessTerminator } from './ports/process-terminator'
+import { TaskExecutionCoordinator } from './application/task-execution-coordinator'
 import type { WorkspaceRepositories } from './ports/repositories'
 
 const config = getServiceConfig()
@@ -12,8 +12,9 @@ await ensureDataDirectory(config.dataDir)
 const app = createApp()
 const repositories = app.locals.repositories as WorkspaceRepositories
 const scheduler = app.locals.scheduler as TaskScheduler
-const schedulerLoop = new SchedulerLoop(scheduler, repositories)
-const leaseReaperLoop = new LeaseReaperLoop(new LeaseReaper(repositories, new NoopProcessTerminator(), repositories))
+const coordinator = app.locals.executionCoordinator as TaskExecutionCoordinator
+const schedulerLoop = new SchedulerLoop(scheduler, repositories, 1_000, () => new Date(), coordinator)
+const leaseReaperLoop = new LeaseReaperLoop(new LeaseReaper(repositories, coordinator, repositories))
 const server = app.listen(config.port, '127.0.0.1', () => {
   console.log(`Sinapsis local service listening on http://127.0.0.1:${config.port}`)
   schedulerLoop.start()

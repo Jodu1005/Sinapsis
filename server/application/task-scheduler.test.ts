@@ -176,6 +176,25 @@ describe('TaskScheduler', () => {
     ])
   })
 
+  it('only renews leases owned by the current execution coordinator when an owner is supplied', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(at(0))
+    const { repositories, agents, createTask } = await createFixture()
+    const task = createTask({ title: 'Do not revive a lease after restart', labels: ['frontend'] })
+    const scheduler = new TaskScheduler(repositories)
+    const loop = new SchedulerLoop(scheduler, repositories, 1_000, () => new Date(), {
+      hasExecution: () => false,
+    })
+
+    loop.start()
+    await vi.advanceTimersByTimeAsync(10_000)
+    await loop.stop()
+
+    expect(repositories.getTaskDetails(task.id)?.leases).toEqual([
+      expect.objectContaining({ agentId: agents.frontend.id, expiresAt: at(30).toISOString() }),
+    ])
+  })
+
   async function createFixture(options: { workspaceLeaseTtlMs?: number } = {}) {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-scheduler-'))
     database = createSqliteDatabase(path.join(temporaryDirectory, 'sinapsis.sqlite'))

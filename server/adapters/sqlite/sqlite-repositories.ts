@@ -560,7 +560,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
         UPDATE task_sessions SET status = ?, updated_at = ?
         WHERE id = (
           SELECT id FROM task_sessions WHERE task_id = ? AND agent_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1
-        )
+        ) AND status <> 'timed_out'
       `).run(sessionStatus, transitioned.updatedAt, taskId, agentId)
       if (Number(sessionUpdate.changes) === 1) {
         unitOfWork.recordTaskEvent(taskId, 'task.session_updated', { agentId, status: sessionStatus })

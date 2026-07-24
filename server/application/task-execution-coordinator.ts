@@ -31,6 +31,8 @@ interface ManagedExecution {
   session: RuntimeSession
   targetBranch: string
   controlledStderr: string[]
+  timeout: NodeJS.Timeout | undefined
+  active: boolean
 }
 
 export class TaskExecutionCoordinator {
@@ -71,7 +73,18 @@ export class TaskExecutionCoordinator {
         worktreePath: allocation.worktreePath,
         profile: { runtime: agent.runtime, command: agent.command, args: agent.args, model: agent.model, env: agent.env, policy: 'task-worktree' },
       }, (event) => this.enqueue(event.taskId, () => this.handleRuntimeEvent(event)))
-      this.executions.set(task.id, { taskId: task.id, agentId: agent.id, adapter, session, targetBranch: repository.defaultBranch, controlledStderr: [] })
+      const execution: ManagedExecution = {
+        taskId: task.id,
+        agentId: agent.id,
+        adapter,
+        session,
+        targetBranch: repository.defaultBranch,
+        controlledStderr: [],
+        timeout: undefined,
+        active: true,
+      }
+      this.executions.set(task.id, execution)
+      this.armTimeout(task, execution)
       this.repositories.updateTaskSession(task.id, agent.id, { runtimeSessionId: session.sessionId, status: 'running' })
       this.deliverUnconsumedInputs(task.id)
     } catch (error) {
@@ -108,6 +121,8 @@ export class TaskExecutionCoordinator {
     this.repositories.transitionTask(taskId, 'running', '人工退回后恢复原 Runtime 会话')
     try {
       await execution.adapter.resume(execution.session, (event) => this.enqueue(event.taskId, () => this.handleRuntimeEvent(event)))
+      execution.active = true
+      this.armTimeout(this.task(taskId), execution)
       this.deliverUnconsumedInputs(taskId)
       this.repositories.updateTaskSession(taskId, execution.agentId, { status: 'running' })
     } catch (error) {
@@ -122,6 +137,21 @@ export class TaskExecutionCoordinator {
       return
     }
     await Promise.all(this.pending.values())
+  }
+
+  hasExecution(taskId: string, agentId: string): boolean {
+    const execution = this.executions.get(taskId)
+    return execution?.agentId === agentId && execution.active
+  }
+
+  async terminate(taskId: string, agentId: string): Promise<void> {
+    const execution = this.executions.get(taskId)
+    if (!execution || execution.agentId !== agentId) return
+    try {
+      await execution.adapter.cancel(execution.session)
+    } finally {
+      this.clearExecution(taskId, execution)
+    }
   }
 
   private enqueue(taskId: string, work: () => Promise<void>): void {
@@ -189,6 +219,8 @@ export class TaskExecutionCoordinator {
     }
     this.repositories.finishTaskExecution(task.id, execution.agentId, 'in_review', 'Runtime 完成并检测到任务分支提交')
     this.messages.postMilestone(task.channelId, task.id, '任务已完成，等待人工验收。')
+    execution.active = false
+    this.disarmTimeout(execution)
   }
 
   private failReviewEvidence(task: Task, agentId: string, error: unknown): void {
@@ -209,6 +241,7 @@ export class TaskExecutionCoordinator {
         body: `任务需要人工处理：${reason}`,
       })
     })
+    this.clearExecution(taskId)
   }
 
   private async persistRuntimeArtifact(execution: ManagedExecution, kind: string, content: string): Promise<boolean> {
@@ -218,7 +251,6 @@ export class TaskExecutionCoordinator {
     } catch (error) {
       const detail = error instanceof Error ? error.message : '未知错误'
       this.fail(execution.taskId, execution.agentId, `运行产物保存失败：${detail}`, 'task.runtime_artifact_persistence_failed')
-      this.executions.delete(execution.taskId)
       return false
     }
   }
@@ -227,6 +259,40 @@ export class TaskExecutionCoordinator {
     for (const input of this.repositories.getTaskDetails(taskId)?.inputs.filter((candidate) => !candidate.consumedAt) ?? []) {
       this.deliverQueuedInput(taskId, input.id)
     }
+  }
+
+  private armTimeout(task: Task, execution: ManagedExecution): void {
+    this.disarmTimeout(execution)
+    execution.timeout = setTimeout(() => {
+      void this.handleTimeout(execution)
+    }, task.timeoutMs)
+  }
+
+  private async handleTimeout(execution: ManagedExecution): Promise<void> {
+    if (this.executions.get(execution.taskId) !== execution || !execution.active) return
+    try {
+      await this.terminate(execution.taskId, execution.agentId)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : '未知终止错误'
+      this.fail(execution.taskId, execution.agentId, `任务执行超时，且无法终止 Runtime：${detail}`)
+      return
+    }
+    this.repositories.markTimedOut(execution.taskId, execution.agentId, new Date())
+    this.fail(execution.taskId, execution.agentId, '任务执行超时，已终止 Runtime 并等待人工处理。')
+  }
+
+  private clearExecution(taskId: string, expected?: ManagedExecution): void {
+    const execution = this.executions.get(taskId)
+    if (!execution || expected && execution !== expected) return
+    this.disarmTimeout(execution)
+    execution.active = false
+    this.executions.delete(taskId)
+  }
+
+  private disarmTimeout(execution: ManagedExecution): void {
+    if (!execution.timeout) return
+    clearTimeout(execution.timeout)
+    execution.timeout = undefined
   }
 
   private async writeReviewEvidence(task: Task, execution: ManagedExecution): Promise<void> {
