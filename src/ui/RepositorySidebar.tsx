@@ -9,12 +9,13 @@ interface RepositorySidebarProps {
   onSelectTasks(repositoryId: string): void
   onCreateTask(repositoryId: string): void
   onSelectAgent(agent: AgentView): void
+  onCreateAgent(): void
   mobileOpen: boolean
   mobileHidden: boolean
   onClose(): void
 }
 
-export function RepositorySidebar({ workspace, selectedChannelId, onSelectChannel, onSelectTasks, onCreateTask, onSelectAgent, mobileOpen, mobileHidden, onClose }: RepositorySidebarProps) {
+export function RepositorySidebar({ workspace, selectedChannelId, onSelectChannel, onSelectTasks, onCreateTask, onSelectAgent, onCreateAgent, mobileOpen, mobileHidden, onClose }: RepositorySidebarProps) {
   return <nav className="repository-sidebar" aria-label="代码仓与频道" aria-hidden={mobileHidden || undefined} inert={mobileHidden} data-mobile-open={mobileOpen}>
     <div className="sidebar-topline">
       <div className="workspace-lockup"><span className="workspace-mark">S</span><strong>{workspace.name}</strong></div>
@@ -32,7 +33,7 @@ export function RepositorySidebar({ workspace, selectedChannelId, onSelectChanne
         <button type="button" className="task-entry" onClick={() => onSelectTasks(repository.id)}><ListTodo size={15} /> <span>任务 {repository.tasks.length}</span></button>
       </section>)}
     </div>
-    <AgentStatusList agents={workspace.agents} onSelect={onSelectAgent} />
+    <AgentStatusList agents={workspace.agents} onSelect={onSelectAgent} onCreate={onCreateAgent} />
   </nav>
 }
 

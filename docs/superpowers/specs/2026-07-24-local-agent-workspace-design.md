@@ -1,7 +1,7 @@
 # 本机 Agent 工作空间设计
 
 生成日期：2026-07-24
-状态：已确认，等待实现计划
+状态：第一版已实现，本机验证完成
 适用范围：单人、本机、多代码仓、OpenCode 与 Pi Agent
 
 ## 产品定义
@@ -146,7 +146,7 @@ RuntimeAdapter
 ## 持久化与接口边界
 
 - SQLite 是第一版的真相来源；消息、任务、租约、会话、Agent 状态和审查决定分别存储。
-- WebSocket 只推送已持久化后的领域事件；客户端重连后通过快照补齐。
+- SSE 只推送已持久化后的领域事件；客户端重连后通过快照补齐。
 - UI 依赖应用层命令和查询接口，不直接读 SQLite，也不调用 Runtime。
 - 调度器依赖 `TaskRepository`、`LeaseRepository`、`AgentRepository` 和 `RuntimeAdapter` 端口；OpenCode/Pi 属于适配器实现。
 
@@ -164,3 +164,9 @@ RuntimeAdapter
 ## 演进路径
 
 第一版完成本机闭环后，再按以下顺序演进：频道多 Agent 发布订阅和主动拉取、私聊与搜索、多任务优先级/并发、多机 Worker，最后才考虑中央协作服务与团队账户。
+
+## 实现状态
+
+第一版已实现并完成本机验证：SQLite 持久化、SSE 快照恢复、Agent Runtime 适配器、FIFO 租约、隔离 Git worktree、任务证据与人工验收均已落地。验证包含临时 Git 仓与 fake Runtime 的完整流程测试、浏览器桌面与 700px 窄屏检查、生产构建，以及不调用模型的 Runtime 健康检查。
+
+当前验证环境中 OpenCode 可执行；Pi 未安装时明确显示为不可用，不会阻塞其余本机能力。真实 Pi 任务运行验证留待安装 Pi 后执行。

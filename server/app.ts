@@ -259,6 +259,10 @@ class RepositoryWorkspaceCatalog implements WorkspaceCatalog {
   createAgent(input: Parameters<WorkspaceRepositories['createAgent']>[0]) {
     return this.repositories.createAgent(input)
   }
+
+  setAgentStatus(agentId: string, status: 'idle', occurredAt: Date) {
+    return this.repositories.setAgentStatus(agentId, status, occurredAt)
+  }
 }
 
 class TransactionWorkspaceCatalog {

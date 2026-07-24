@@ -24,6 +24,7 @@ export interface AgentWorkspaceReader {
     model: string
     env: Record<string, string>
   }): { id: string; createdAt: string }
+  setAgentStatus?(agentId: string, status: 'idle', occurredAt: Date): unknown
 }
 
 export interface AgentConfiguration {
@@ -87,6 +88,9 @@ export class AgentService {
         throw new DomainError(`Agent mention @${mention} already exists in this workspace.`)
       }
       throw error
+    }
+    if (availability.executable === 'available' && availability.taskExecution === 'unverified') {
+      this.workspaces.setAgentStatus?.(storedAgent.id, 'idle', new Date())
     }
     return {
       id: storedAgent.id,

@@ -30,6 +30,9 @@ describe('AgentService', () => {
       mentionName: 'build',
       maxConcurrentTasks: 1,
     }))
+    expect(repository.statusUpdates).toEqual([
+      expect.objectContaining({ agentId: 'agent-1', status: 'idle' }),
+    ])
   })
 
   it('rejects an Agent whose workspace does not exist', async () => {
@@ -102,6 +105,7 @@ function availableDetector(): RuntimeAvailabilityDetector & { detect: ReturnType
 
 class RecordingAgentRepository {
   readonly createdAgents: Array<Record<string, unknown>> = []
+  readonly statusUpdates: Array<{ agentId: string; status: string }> = []
 
   constructor(private readonly workspaceIds: string[]) {}
 
@@ -116,5 +120,9 @@ class RecordingAgentRepository {
   createAgent(input: Record<string, unknown>) {
     this.createdAgents.push(input)
     return { id: `agent-${this.createdAgents.length}`, createdAt: '2026-07-25T00:00:00.000Z' }
+  }
+
+  setAgentStatus(agentId: string, status: string) {
+    this.statusUpdates.push({ agentId, status })
   }
 }

@@ -1,10 +1,11 @@
 import { PanelRightClose, PanelRightOpen, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { CreateTaskRequest, WorkspaceApi } from '../api/client'
+import type { CreateAgentRequest, CreateTaskRequest, WorkspaceApi } from '../api/client'
 import { ApiClient } from '../api/client'
 import { useWorkspaceEvents } from '../api/use-workspace-events'
 import { channelMessages, type AgentView, type RepositoryView, type TaskDetailView, type TaskView, type WorkspaceSnapshot, type WorkspaceView } from '../domain/workspace-view'
 import { AgentConfigDialog } from './AgentConfigDialog'
+import { AgentCreateDialog } from './AgentCreateDialog'
 import { ChannelTimeline } from './ChannelTimeline'
 import { MessageComposer } from './MessageComposer'
 import { NavigationToggle, RepositorySidebar } from './RepositorySidebar'
@@ -25,6 +26,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const [taskDetailsError, setTaskDetailsError] = useState<string | null>(null)
   const [composerRepositoryId, setComposerRepositoryId] = useState<string | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<AgentView | null>(null)
+  const [creatingAgent, setCreatingAgent] = useState(false)
   const [navOpen, setNavOpen] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
   const narrowNavigation = useMediaQuery('(max-width: 700px)')
@@ -81,8 +83,13 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     setTaskDetails((details) => details?.task.id === taskId ? { ...details, task } : details)
     await refresh()
   }
+  const createAgent = async (input: CreateAgentRequest) => {
+    await api.createAgent(workspace.id, input)
+    await refresh()
+    setCreatingAgent(false)
+  }
   return <div className="workspace-shell">
-    <RepositorySidebar workspace={workspace} selectedChannelId={selection.channel.id} onSelectChannel={selectChannel} onSelectTasks={selectRepositoryTasks} onCreateTask={setComposerRepositoryId} onSelectAgent={setSelectedAgent} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
+    <RepositorySidebar workspace={workspace} selectedChannelId={selection.channel.id} onSelectChannel={selectChannel} onSelectTasks={selectRepositoryTasks} onCreateTask={setComposerRepositoryId} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
     <main className="conversation-panel">
       <header className="channel-header"><NavigationToggle onClick={() => setNavOpen(true)} /><div className="channel-heading"><h1># {selection.channel.name}</h1><p>{selection.repository.name} · {selection.repository.currentBranch}</p></div><div className="header-actions"><span className="connection-state" data-reconnecting={reconnecting}>{reconnecting ? '正在重新连接' : '已连接'}</span><button type="button" className="icon-button" aria-label="打开上下文" data-tooltip="打开上下文" onClick={() => setContextOpen(true)}><PanelRightOpen size={18} /></button></div></header>
       <ChannelTimeline messages={channelMessages(workspace, selection.channel.id)} />
@@ -95,6 +102,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
       <section className="context-section"><h2>频道操作</h2><button type="button" className="context-action" onClick={() => setContextOpen(false)}><PanelRightClose size={16} /> 收起上下文</button></section>
     </aside>
     {composerRepository && <TaskComposerPanel repository={composerRepository} agents={workspace.agents} onCreate={createTask} onClose={() => setComposerRepositoryId(null)} />}
+    {creatingAgent && <AgentCreateDialog onCreate={createAgent} onClose={() => setCreatingAgent(false)} />}
     {selectedAgent && <AgentConfigDialog agent={selectedAgent} onClose={() => setSelectedAgent(null)} />}
   </div>
 }

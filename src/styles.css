@@ -49,6 +49,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .channel-button[aria-current="page"] { color: #15241c; background: #9bd5ba; font-weight: 700; }
 .task-entry { color: #a7b8ae; font-size: 12px; }
 .agent-status-list { margin-top: auto; padding-top: 12px; border-top: 1px solid #405046; }
+.agent-status-list .sidebar-section-heading { display: flex; align-items: center; justify-content: space-between; padding-top: 0; }
+.agent-status-list .sidebar-section-heading .icon-button { width: 26px; height: 26px; color: #b7c7be; }
 .agent-status { display: grid; width: 100%; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 6px 7px; border: 0; border-radius: 4px; color: inherit; background: transparent; text-align: left; }
 .agent-status:hover { background: #31443a; }
 .agent-avatar { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 5px; color: #c9d7cf; background: #3a4d42; }
@@ -168,6 +170,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .task-composer-panel .primary-action { min-width: 92px; margin: 0; }
 .assignment-note { margin: 2px 0 0; color: #087b62 !important; font-size: 12px; }
 .agent-config-dialog dl { display: grid; gap: 11px; margin: 0; padding: 18px; }
+.agent-create-form { display: grid; gap: 7px; padding: 16px 18px 18px; }
+.agent-create-form label { margin-top: 4px; color: #405048; font-size: 12px; font-weight: 700; }
+.agent-create-form input, .agent-create-form select { width: 100%; border: 1px solid #c9d3cd; border-radius: 4px; padding: 7px 9px; color: var(--ink); background: #fff; }
+.agent-create-form footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.agent-create-form .primary-action { min-width: 92px; margin: 0; }
 .agent-config-dialog dl div { display: grid; gap: 2px; }
 .agent-config-dialog dt { color: #718078; font-size: 11px; }
 .agent-config-dialog dd { margin: 0; color: #29362f; overflow-wrap: anywhere; }

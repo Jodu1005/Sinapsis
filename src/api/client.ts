@@ -1,9 +1,10 @@
-import type { ChannelMessage, RepositoryView, TaskDetailView, TaskInputView, TaskView, WorkspaceSnapshot, WorkspaceView } from '../domain/workspace-view'
+import type { AgentView, ChannelMessage, RepositoryView, TaskDetailView, TaskInputView, TaskView, WorkspaceSnapshot, WorkspaceView } from '../domain/workspace-view'
 
 export interface WorkspaceApi {
   getBootstrap(): Promise<WorkspaceSnapshot>
   createWorkspace(input: { name: string }): Promise<WorkspaceView>
   addRepository(workspaceId: string, input: { directory: string; name?: string }): Promise<RepositoryView>
+  createAgent(workspaceId: string, input: CreateAgentRequest): Promise<AgentView>
   postMessage(channelId: string, input: { body: string; taskId?: string }): Promise<ChannelMessage>
   createTask(repositoryId: string, input: CreateTaskRequest): Promise<TaskView>
   getTaskDetails(taskId: string): Promise<TaskDetailView>
@@ -20,6 +21,13 @@ export interface CreateTaskRequest {
   directAgentId?: string
 }
 
+export interface CreateAgentRequest {
+  identity: string
+  mention: string
+  runtime: 'opencode' | 'pi'
+  capabilityTags: string[]
+}
+
 export class ApiClient implements WorkspaceApi {
   async getBootstrap(): Promise<WorkspaceSnapshot> { return this.request('/api/bootstrap') }
   async createWorkspace(input: { name: string }): Promise<WorkspaceView> {
@@ -27,6 +35,9 @@ export class ApiClient implements WorkspaceApi {
   }
   async addRepository(workspaceId: string, input: { directory: string; name?: string }): Promise<RepositoryView> {
     return this.request(`/api/workspaces/${workspaceId}/repositories`, { method: 'POST', body: JSON.stringify(input) })
+  }
+  async createAgent(workspaceId: string, input: CreateAgentRequest): Promise<AgentView> {
+    return this.request(`/api/workspaces/${workspaceId}/agents`, { method: 'POST', body: JSON.stringify(input) })
   }
   async postMessage(channelId: string, input: { body: string; taskId?: string }): Promise<ChannelMessage> {
     return this.request(`/api/channels/${channelId}/messages`, { method: 'POST', body: JSON.stringify(input) })

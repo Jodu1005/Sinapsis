@@ -54,6 +54,7 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     getBootstrap: vi.fn().mockResolvedValue(snapshot),
     createWorkspace: vi.fn(),
     addRepository: vi.fn(),
+    createAgent: vi.fn(),
     postMessage: vi.fn().mockResolvedValue(undefined),
     createTask: vi.fn(),
     getTaskDetails: vi.fn(),
@@ -118,6 +119,24 @@ describe('WorkspaceShell', () => {
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
     expect(api.postMessage).toHaveBeenCalledWith('channel-general', { body: '大家同步一下。' })
+  })
+
+  it('creates an Agent from the workspace sidebar', async () => {
+    const api = makeApi({ createAgent: vi.fn().mockResolvedValue(snapshot.workspaces[0].agents[0]) })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await screen.findByRole('button', { name: '添加 Agent' })
+    await user.click(screen.getByRole('button', { name: '添加 Agent' }))
+    const dialog = screen.getByRole('dialog', { name: '添加 Agent' })
+    await user.type(within(dialog).getByLabelText('Agent 名称'), '验证 Agent')
+    await user.type(within(dialog).getByLabelText('提及名'), 'verify')
+    await user.type(within(dialog).getByLabelText('能力标签'), 'typescript, test')
+    await user.click(within(dialog).getByRole('button', { name: '添加 Agent' }))
+
+    expect(api.createAgent).toHaveBeenCalledWith('workspace-1', {
+      identity: '验证 Agent', mention: 'verify', runtime: 'opencode', capabilityTags: ['typescript', 'test'],
+    })
   })
 
   it('refreshes the snapshot and agent status after a task.changed event', async () => {
