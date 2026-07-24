@@ -5,6 +5,8 @@ import type { RuntimeAdapter, RuntimeEventSink, RuntimeSession, RuntimeTaskReque
 
 export class PiRuntimeAdapter implements RuntimeAdapter {
   private readonly processes = new WeakMap<RuntimeSession, ProcessHandle>()
+  private readonly initialPrompts = new WeakMap<RuntimeSession, string>()
+  private readonly restoringSessions = new WeakSet<RuntimeSession>()
   private requestId = 0
 
   constructor(
@@ -18,23 +20,30 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
 
   async start(task: RuntimeTaskRequest, sink: RuntimeEventSink): Promise<RuntimeSession> {
     const session = createSession(task)
+    this.initialPrompts.set(session, initialPrompt(task))
+    this.restoringSessions.add(session)
     this.launch(session, sink)
-    this.request(session, 'prompt', { text: initialPrompt(task) })
+    this.request(session, 'get_state', {})
     return session
   }
 
   sendInput(session: RuntimeSession, input: string, _sink: RuntimeEventSink): void {
     if (!input.trim()) return
+    if (this.restoringSessions.has(session)) {
+      session.pendingInputs.push(input)
+      return
+    }
     this.request(session, session.isStreaming ? 'steer' : 'prompt', { text: input })
   }
 
   async resume(session: RuntimeSession, sink: RuntimeEventSink): Promise<void> {
+    this.restoringSessions.add(session)
     this.launch(session, sink)
     if (session.sessionId || session.sessionFile) {
       this.request(session, 'switch_session', { sessionId: session.sessionId, sessionFile: session.sessionFile })
       return
     }
-    this.drain(session)
+    this.request(session, 'get_state', {})
   }
 
   private launch(session: RuntimeSession, sink: RuntimeEventSink): void {
@@ -73,8 +82,12 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
   }
 
   private drain(session: RuntimeSession): void {
+    if (this.restoringSessions.has(session) || session.isStreaming) return
     const input = session.pendingInputs.shift()
-    if (input) this.request(session, 'prompt', { text: input })
+    if (input) {
+      session.isStreaming = true
+      this.request(session, 'prompt', { text: input })
+    }
   }
 
   private recordJson(session: RuntimeSession, value: unknown, sink: RuntimeEventSink): void {
@@ -97,15 +110,35 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
     if (type === 'agent_settled') {
       session.isStreaming = false
       sink({ kind: 'settled', taskId: session.taskId })
-      if (!session.sessionId) this.request(session, 'get_state', {})
       this.drain(session)
     }
-    if (type === 'get_state' || type === 'state') this.saveSession(session, value, sink)
-    if (type === 'response' && value.command === 'switch_session' && value.success === true) this.drain(session)
+    if (type === 'get_state' || type === 'state') {
+      this.saveSession(session, value, sink)
+      this.completeRestoration(session)
+    }
+    if (type === 'response' && value.command === 'get_state' && value.success === true) {
+      this.saveSession(session, value, sink)
+      this.completeRestoration(session)
+    }
+    if (type === 'response' && value.command === 'switch_session' && value.success === true) this.completeRestoration(session)
+  }
+
+  private completeRestoration(session: RuntimeSession): void {
+    if (!this.restoringSessions.has(session)) return
+    this.restoringSessions.delete(session)
+    session.isStreaming = false
+    const initialPrompt = this.initialPrompts.get(session)
+    if (initialPrompt) {
+      this.initialPrompts.delete(session)
+      session.isStreaming = true
+      this.request(session, 'prompt', { text: initialPrompt })
+      return
+    }
+    this.drain(session)
   }
 
   private saveSession(session: RuntimeSession, value: Record<string, unknown>, sink: RuntimeEventSink): void {
-    const state = isRecord(value.state) ? value.state : value
+    const state = isRecord(value.state) ? value.state : isRecord(value.result) ? value.result : value
     const sessionId = stringValue(state.sessionId)
     const sessionFile = stringValue(state.sessionFile)
     if (!sessionId) return

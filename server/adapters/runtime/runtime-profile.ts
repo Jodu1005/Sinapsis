@@ -33,7 +33,7 @@ export function resolveRuntimeProfile(runtime: RuntimeKind, overrides: RuntimePr
   return {
     runtime,
     command: overrides.command ?? preset.command,
-    args: overrides.args ?? [...preset.args],
+    args: [...preset.args, ...(overrides.args ?? [])],
     model: overrides.model ?? preset.model,
     env: overrides.env ?? { ...preset.env },
     policy: preset.policy,
