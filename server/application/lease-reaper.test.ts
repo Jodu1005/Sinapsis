@@ -114,6 +114,27 @@ describe('LeaseReaper', () => {
     expect(repositories.getTask(task.id)).toMatchObject({ status: 'queued', attemptCount: 1 })
   })
 
+  it('moves a task to human handling when session timeout persistence fails', async () => {
+    const { repositories, agent, task } = await createClaimedTask({ maxRetries: 2 })
+    const reaper = new LeaseReaper(repositories, new RecordingTerminator(), new ThrowingSessionStore())
+
+    await expect(reaper.reap(at(31))).resolves.toBe(1)
+
+    expect(repositories.getTask(task.id)).toMatchObject({ status: 'needs_human', attemptCount: 0 })
+    expect(repositories.getBootstrap().workspaces[0].agents.find((candidate) => candidate.id === agent.id))
+      .toMatchObject({ status: 'idle' })
+    expect(repositories.getTaskDetails(task.id)?.leases).toEqual([])
+    expect(repositories.getTaskDetails(task.id)?.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'task.session_timeout_persistence_failed' }),
+    ]))
+    expect(repositories.getBootstrap().workspaces[0].recentMessages).toEqual([
+      expect.objectContaining({
+        taskId: task.id,
+        body: expect.stringContaining('会话超时状态保存失败'),
+      }),
+    ])
+  })
+
   it('returns the agent to idle when cancellation races after an expired lease is taken', async () => {
     const { repositories, agent, task } = await createClaimedTask({ maxRetries: 1 })
     const reaper = new LeaseReaper(repositories, new CancellingTerminator(repositories, task.id), new RecordingSessionStore())
@@ -124,6 +145,20 @@ describe('LeaseReaper', () => {
     expect(repositories.getTaskDetails(task.id)?.leases).toEqual([])
     expect(repositories.getBootstrap().workspaces[0].agents.find((candidate) => candidate.id === agent.id))
       .toMatchObject({ status: 'idle' })
+  })
+
+  it('does not revive a cancelled task when session timeout persistence fails after its lease is taken', async () => {
+    const { repositories, agent, task } = await createClaimedTask({ maxRetries: 1 })
+    const reaper = new LeaseReaper(repositories, new CancellingTerminator(repositories, task.id), new ThrowingSessionStore())
+
+    await expect(reaper.reap(at(31))).resolves.toBe(0)
+
+    expect(repositories.getTask(task.id)).toMatchObject({ status: 'cancelled', attemptCount: 0 })
+    expect(repositories.getBootstrap().workspaces[0].agents.find((candidate) => candidate.id === agent.id))
+      .toMatchObject({ status: 'idle' })
+    expect(repositories.getTaskDetails(task.id)?.events).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'task.session_timeout_persistence_failed' }),
+    ]))
   })
 
   it('drains an in-flight reaper pass before stopping', async () => {
@@ -142,6 +177,19 @@ describe('LeaseReaper', () => {
     expect(didStop).toBe(false)
     release?.()
     await expect(stopped).resolves.toBeUndefined()
+  })
+
+  it('does not reject reaper loop shutdown when session timeout persistence fails', async () => {
+    const { repositories, task } = await createClaimedTask({ maxRetries: 2 })
+    const reaper = new LeaseReaper(repositories, new RecordingTerminator(), new ThrowingSessionStore())
+    const loop = new LeaseReaperLoop(reaper, 60_000, () => at(31))
+
+    loop.start()
+    await vi.waitFor(() => {
+      expect(repositories.getTask(task.id)).toMatchObject({ status: 'needs_human' })
+    })
+
+    await expect(loop.stop()).resolves.toBeUndefined()
   })
 
   async function createClaimedTask(options: { maxRetries: number }) {
@@ -200,6 +248,12 @@ class RecordingSessionStore implements TaskSessionStore {
 
   markTimedOut(taskId: string, agentId: string, _occurredAt: Date): void {
     this.timeouts.push({ taskId, agentId })
+  }
+}
+
+class ThrowingSessionStore implements TaskSessionStore {
+  markTimedOut(): void {
+    throw new Error('Session timeout persistence failed.')
   }
 }
 

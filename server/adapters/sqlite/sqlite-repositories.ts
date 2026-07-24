@@ -660,6 +660,36 @@ export class SqliteRepositories implements WorkspaceRepositories {
     })
   }
 
+  failExpiredLeaseAfterSessionTimeoutPersistenceFailure(expiredLease: ExpiredLease, occurredAt: Date): boolean {
+    return this.inTransaction((unitOfWork) => {
+      const database = this.sqlite.database
+      const { lease } = expiredLease
+      const task = readTask(database, lease.taskId)
+      const updatedAt = occurredAt.toISOString()
+
+      database.prepare('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?').run('idle', updatedAt, lease.agentId)
+      unitOfWork.afterCommit(event('agent.status_changed', 'agent', lease.agentId, updatedAt))
+
+      if (!task || !canRecoverExpiredTask(task.status)) return false
+
+      database.prepare(`
+        UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND status = ?
+      `).run('needs_human', updatedAt, task.id, task.status)
+      unitOfWork.recordTaskEvent(task.id, 'task.session_timeout_persistence_failed', {
+        agentId: lease.agentId,
+        leaseId: lease.id,
+      })
+      unitOfWork.createMessage({
+        channelId: task.channelId,
+        taskId: task.id,
+        senderType: 'system',
+        authorName: 'Sinapsis',
+        body: '任务租约已超时，但会话超时状态保存失败。为避免丢失运行上下文，任务已转为等待人工处理。',
+      })
+      return true
+    })
+  }
+
   getBootstrap(): BootstrapSnapshot {
     const workspaces = this.sqlite.database.prepare('SELECT id, name, lease_ttl_ms, created_at FROM workspaces ORDER BY created_at').all() as unknown as WorkspaceRow[]
     return {

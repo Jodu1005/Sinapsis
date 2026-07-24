@@ -20,7 +20,14 @@ export class LeaseReaper {
       } catch {
         // The lease must still be recovered when a stale process is already gone.
       }
-      this.sessionStore.markTimedOut(ownedLease.lease.taskId, ownedLease.lease.agentId, occurredAt)
+      try {
+        this.sessionStore.markTimedOut(ownedLease.lease.taskId, ownedLease.lease.agentId, occurredAt)
+      } catch {
+        if (this.repositories.failExpiredLeaseAfterSessionTimeoutPersistenceFailure(ownedLease, occurredAt)) {
+          recovered += 1
+        }
+        continue
+      }
       if (this.repositories.finalizeExpiredLease(ownedLease, occurredAt)) recovered += 1
     }
     return recovered

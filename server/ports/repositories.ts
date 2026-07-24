@@ -84,5 +84,6 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   findExpiredLeases(occurredAt: Date): ExpiredLease[]
   takeExpiredLease(leaseId: string, occurredAt: Date): ExpiredLease | undefined
   finalizeExpiredLease(expiredLease: ExpiredLease, occurredAt: Date): LeaseRecovery | undefined
+  failExpiredLeaseAfterSessionTimeoutPersistenceFailure(expiredLease: ExpiredLease, occurredAt: Date): boolean
   getBootstrap(): BootstrapSnapshot
 }
