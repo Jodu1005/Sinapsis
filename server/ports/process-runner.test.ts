@@ -20,15 +20,19 @@ describe('NodeProcessRunner', () => {
       const environment = await captureChildEnvironment(new NodeProcessRunner())
 
       expect(environment).toMatchObject({
-      OPENAI_API_KEY: 'agent-api-key',
-      GITHUB_TOKEN: 'agent-provided-token',
-      GIT_TERMINAL_PROMPT: '0',
-      GIT_CONFIG_NOSYSTEM: '1',
-      GIT_CONFIG_GLOBAL: '/dev/null',
-      GIT_SSH_COMMAND: 'ssh -oBatchMode=yes',
-      GCM_INTERACTIVE: 'Never',
+        OPENAI_API_KEY: 'agent-api-key',
+        GITHUB_TOKEN: 'agent-provided-token',
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'credential.helper',
+        GIT_CONFIG_VALUE_0: '',
+        GIT_SSH_COMMAND: 'ssh -oBatchMode=yes',
+        GCM_INTERACTIVE: 'Never',
       })
       expect(environment).not.toHaveProperty('GH_TOKEN')
+      expect(environment).not.toHaveProperty('GIT_ASKPASS')
       expect(environment).not.toHaveProperty('SSH_AUTH_SOCK')
       expect(environment).not.toHaveProperty('SSH_ASKPASS')
       expect(environment).not.toHaveProperty('CI_JOB_TOKEN')
