@@ -171,6 +171,15 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(5, new Date().toISOString())
     }
 
+    const sixthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 6').get()
+    if (!sixthMigration) {
+      database.exec(`
+        ALTER TABLE workspaces ADD COLUMN lease_ttl_ms INTEGER NOT NULL DEFAULT 30000 CHECK(lease_ttl_ms > 0);
+        ALTER TABLE tasks ADD COLUMN lease_ttl_ms INTEGER CHECK(lease_ttl_ms IS NULL OR lease_ttl_ms > 0);
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(6, new Date().toISOString())
+    }
+
     database.exec('COMMIT')
   } catch (error) {
     database.exec('ROLLBACK')

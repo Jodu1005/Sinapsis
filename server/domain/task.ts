@@ -33,6 +33,7 @@ export interface Task {
   attemptCount: number
   maxRetries: number
   timeoutMs: number
+  leaseTtlMs: number | null
   branchName: string | null
   worktreePath: string | null
   createdAt: string
@@ -49,6 +50,7 @@ export interface CreateTaskInput {
   labels?: string[]
   maxRetries?: number
   timeoutMs?: number
+  leaseTtlMs?: number
 }
 
 export interface TaskInput {

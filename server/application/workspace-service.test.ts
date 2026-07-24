@@ -84,8 +84,8 @@ class RecordingWorkspaceRepository {
     return false
   }
 
-  createWorkspace(input: { name: string }) {
-    return { id: this.workspaceId, ...input, createdAt: '2026-07-25T00:00:00.000Z' }
+  createWorkspace(input: { name: string; leaseTtlMs?: number }) {
+    return { id: this.workspaceId, name: input.name, leaseTtlMs: input.leaseTtlMs ?? 30_000, createdAt: '2026-07-25T00:00:00.000Z' }
   }
 
   inTransaction<T>(work: (catalog: this) => T): T {

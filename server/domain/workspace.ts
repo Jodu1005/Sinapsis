@@ -1,6 +1,7 @@
 export interface Workspace {
   id: string
   name: string
+  leaseTtlMs: number
   createdAt: string
 }
 
@@ -24,6 +25,7 @@ export interface Channel {
 
 export interface CreateWorkspaceInput {
   name: string
+  leaseTtlMs?: number
 }
 
 export interface CreateRepositoryInput {

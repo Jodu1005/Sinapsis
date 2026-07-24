@@ -38,6 +38,7 @@ import type { SqliteDatabase } from './database'
 interface WorkspaceRow {
   id: string
   name: string
+  lease_ttl_ms: number
   created_at: string
 }
 
@@ -73,6 +74,7 @@ interface TaskRow {
   attempt_count: number
   max_retries: number
   timeout_ms: number
+  lease_ttl_ms: number | null
   branch_name: string | null
   worktree_path: string | null
   created_at: string
@@ -167,8 +169,13 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
 
   createWorkspace(input: CreateWorkspaceInput): Workspace {
     const createdAt = now()
-    const workspace: Workspace = { id: randomUUID(), name: requireText(input.name, 'Workspace name'), createdAt }
-    this.database.prepare('INSERT INTO workspaces (id, name, created_at) VALUES (?, ?, ?)').run(workspace.id, workspace.name, workspace.createdAt)
+    const workspace: Workspace = {
+      id: randomUUID(), name: requireText(input.name, 'Workspace name'),
+      leaseTtlMs: positiveInteger(input.leaseTtlMs ?? 30_000, 'Workspace lease TTL'), createdAt,
+    }
+    this.database.prepare('INSERT INTO workspaces (id, name, lease_ttl_ms, created_at) VALUES (?, ?, ?, ?)').run(
+      workspace.id, workspace.name, workspace.leaseTtlMs, workspace.createdAt,
+    )
     return workspace
   }
 
@@ -264,6 +271,7 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
       attemptCount: 0,
       maxRetries: input.maxRetries ?? 2,
       timeoutMs: input.timeoutMs ?? 900000,
+      leaseTtlMs: input.leaseTtlMs === undefined ? null : positiveInteger(input.leaseTtlMs, 'Task lease TTL'),
       branchName: null,
       worktreePath: null,
       createdAt,
@@ -272,13 +280,13 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     this.database.prepare(`
       INSERT INTO tasks (
         id, repository_id, channel_id, direct_agent_id, title, description, acceptance_criteria,
-        labels_json, status, queued_at, attempt_count, max_retries, timeout_ms, branch_name,
+        labels_json, status, queued_at, attempt_count, max_retries, timeout_ms, lease_ttl_ms, branch_name,
         worktree_path, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       task.id, task.repositoryId, task.channelId, task.directAgentId, task.title, task.description,
       task.acceptanceCriteria, JSON.stringify(task.labels), task.status, task.queuedAt,
-      task.attemptCount, task.maxRetries, task.timeoutMs, task.branchName, task.worktreePath,
+      task.attemptCount, task.maxRetries, task.timeoutMs, task.leaseTtlMs, task.branchName, task.worktreePath,
       task.createdAt, task.updatedAt,
     )
     this.afterCommit(event('task.created', 'task', task.id, createdAt))
@@ -503,9 +511,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
     })
   }
 
-  claimNextTask(agentId: string, occurredAt: Date, leaseTtlMs: number): TaskClaim | undefined {
-    if (!Number.isInteger(leaseTtlMs) || leaseTtlMs < 1) throw new Error('Lease TTL must be a positive integer.')
-
+  claimNextTask(agentId: string, occurredAt: Date): TaskClaim | undefined {
     return this.inTransaction((unitOfWork) => {
       const database = this.sqlite.database
       const agent = readAgent(database, agentId)
@@ -530,7 +536,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
 
       const lease: TaskLease = {
         id: randomUUID(), taskId: candidate.id, agentId,
-        expiresAt: new Date(occurredAt.getTime() + leaseTtlMs).toISOString(), createdAt: occurredAtIso,
+        expiresAt: new Date(occurredAt.getTime() + resolveLeaseTtlMs(database, candidate)).toISOString(), createdAt: occurredAtIso,
       }
       database.prepare(`
         INSERT INTO task_leases (id, task_id, agent_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)
@@ -546,14 +552,14 @@ export class SqliteRepositories implements WorkspaceRepositories {
     })
   }
 
-  renewTaskLease(taskId: string, agentId: string, occurredAt: Date, leaseTtlMs: number): TaskLease | undefined {
-    if (!Number.isInteger(leaseTtlMs) || leaseTtlMs < 1) throw new Error('Lease TTL must be a positive integer.')
-
+  renewTaskLease(taskId: string, agentId: string, occurredAt: Date): TaskLease | undefined {
     return this.inTransaction((unitOfWork) => {
       const database = this.sqlite.database
       const lease = readLeaseForTaskAgent(database, taskId, agentId)
       if (!lease) return undefined
-      const expiresAt = new Date(occurredAt.getTime() + leaseTtlMs).toISOString()
+      const task = readTask(database, taskId)
+      if (!task) return undefined
+      const expiresAt = new Date(occurredAt.getTime() + resolveLeaseTtlMs(database, task)).toISOString()
       const updated = database.prepare(`
         UPDATE task_leases SET expires_at = ? WHERE id = ? AND expires_at > ?
       `).run(expiresAt, lease.id, occurredAt.toISOString())
@@ -561,6 +567,11 @@ export class SqliteRepositories implements WorkspaceRepositories {
       unitOfWork.recordTaskEvent(taskId, 'task.lease_renewed', { agentId, leaseId: lease.id, expiresAt })
       return { ...lease, expiresAt }
     })
+  }
+
+  getActiveLeases(): TaskLease[] {
+    return (this.sqlite.database.prepare('SELECT * FROM task_leases ORDER BY created_at, rowid').all() as unknown as TaskLeaseRow[])
+      .map(mapTaskLease)
   }
 
   findExpiredLeases(occurredAt: Date): ExpiredLease[] {
@@ -613,7 +624,12 @@ export class SqliteRepositories implements WorkspaceRepositories {
       const database = this.sqlite.database
       const { lease } = expiredLease
       const task = readTask(database, lease.taskId)
-      if (!task || !canRecoverExpiredTask(task.status)) return undefined
+      if (!task || !canRecoverExpiredTask(task.status)) {
+        const updatedAt = occurredAt.toISOString()
+        database.prepare('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?').run('idle', updatedAt, lease.agentId)
+        unitOfWork.afterCommit(event('agent.status_changed', 'agent', lease.agentId, updatedAt))
+        return undefined
+      }
 
       const outcome = task.attemptCount < task.maxRetries ? 'requeued' : 'needs_human'
       const nextStatus = outcome === 'requeued' ? 'queued' : 'needs_human'
@@ -645,7 +661,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
   }
 
   getBootstrap(): BootstrapSnapshot {
-    const workspaces = this.sqlite.database.prepare('SELECT id, name, created_at FROM workspaces ORDER BY created_at').all() as unknown as WorkspaceRow[]
+    const workspaces = this.sqlite.database.prepare('SELECT id, name, lease_ttl_ms, created_at FROM workspaces ORDER BY created_at').all() as unknown as WorkspaceRow[]
     return {
       workspaces: workspaces.map((workspaceRow) => {
         const workspace = mapWorkspace(workspaceRow)
@@ -714,7 +730,7 @@ function labelsMatch(capabilityTags: string[], labels: string[]): boolean {
 }
 
 function mapWorkspace(row: WorkspaceRow): Workspace {
-  return { id: row.id, name: row.name, createdAt: row.created_at }
+  return { id: row.id, name: row.name, leaseTtlMs: row.lease_ttl_ms, createdAt: row.created_at }
 }
 
 function mapRepository(row: RepositoryRow): Repository {
@@ -749,11 +765,29 @@ function mapTask(row: TaskRow): Task {
     attemptCount: row.attempt_count,
     maxRetries: row.max_retries,
     timeoutMs: row.timeout_ms,
+    leaseTtlMs: row.lease_ttl_ms,
     branchName: row.branch_name,
     worktreePath: row.worktree_path,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
+}
+
+function resolveLeaseTtlMs(database: DatabaseSync, task: Task): number {
+  if (task.leaseTtlMs !== null) return task.leaseTtlMs
+  const row = database.prepare(`
+    SELECT workspaces.lease_ttl_ms
+    FROM repositories
+    JOIN workspaces ON workspaces.id = repositories.workspace_id
+    WHERE repositories.id = ?
+  `).get(task.repositoryId) as { lease_ttl_ms: number } | undefined
+  if (!row) throw new Error(`Repository ${task.repositoryId} does not have a workspace lease policy.`)
+  return row.lease_ttl_ms
+}
+
+function positiveInteger(value: number, name: string): number {
+  if (!Number.isInteger(value) || value < 1) throw new Error(`${name} must be a positive integer.`)
+  return value
 }
 
 function mapTaskInput(row: TaskInputRow): TaskInput {

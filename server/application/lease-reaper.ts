@@ -29,32 +29,34 @@ export class LeaseReaper {
 
 export class LeaseReaperLoop {
   private timer: NodeJS.Timeout | undefined
-  private reaping = false
+  private inFlight: Promise<void> | undefined
 
   constructor(
-    private readonly reaper: LeaseReaper,
+    private readonly reaper: Pick<LeaseReaper, 'reap'>,
     private readonly intervalMs = 5_000,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
   start(): void {
     if (this.timer) return
-    this.timer = setInterval(() => void this.reap(), this.intervalMs)
-    void this.reap()
+    this.timer = setInterval(() => void this.triggerReap(), this.intervalMs)
+    void this.triggerReap()
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.timer) clearInterval(this.timer)
     this.timer = undefined
+    await this.inFlight
   }
 
-  private async reap(): Promise<void> {
-    if (this.reaping) return
-    this.reaping = true
-    try {
-      await this.reaper.reap(this.now())
-    } finally {
-      this.reaping = false
-    }
+  private triggerReap(): Promise<void> {
+    if (this.inFlight) return this.inFlight
+    const reaping = this.reaper.reap(this.now()).then(() => undefined)
+    let tracked: Promise<void>
+    tracked = reaping.finally(() => {
+      if (this.inFlight === tracked) this.inFlight = undefined
+    })
+    this.inFlight = tracked
+    return tracked
   }
 }

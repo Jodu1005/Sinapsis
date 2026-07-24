@@ -45,7 +45,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   app.post('/api/workspaces', asyncRoute((request, response) => {
     const body = objectBody(request.body)
-    const workspace = workspaceService.createWorkspace({ name: requiredString(body, 'name') })
+    assertOnlyKeys(body, ['name', 'leaseTtlMs'])
+    const workspace = workspaceService.createWorkspace({
+      name: requiredString(body, 'name'), leaseTtlMs: optionalPositiveInteger(body, 'leaseTtlMs'),
+    })
     response.status(201).json(workspace)
   }))
 
@@ -90,7 +93,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   app.post('/api/repositories/:repositoryId/tasks', asyncRoute((request, response) => {
     const body = objectBody(request.body)
-    assertOnlyKeys(body, ['title', 'description', 'acceptanceCriteria', 'labels', 'directAgentId', 'timeoutMs', 'maxRetries'])
+    assertOnlyKeys(body, ['title', 'description', 'acceptanceCriteria', 'labels', 'directAgentId', 'timeoutMs', 'leaseTtlMs', 'maxRetries'])
     const task = taskService.createTask({
       repositoryId: requiredParam(request.params.repositoryId, 'repositoryId'),
       title: requiredString(body, 'title'),
@@ -99,6 +102,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
       labels: body.labels === undefined ? undefined : requiredStringArray(body, 'labels'),
       directAgentId: optionalString(body, 'directAgentId'),
       timeoutMs: optionalPositiveInteger(body, 'timeoutMs'),
+      leaseTtlMs: optionalPositiveInteger(body, 'leaseTtlMs'),
       maxRetries: optionalNonNegativeInteger(body, 'maxRetries'),
     })
     response.status(201).json(task)
@@ -163,7 +167,7 @@ class RepositoryWorkspaceCatalog implements WorkspaceCatalog {
     return this.repositories.hasAgentMention(workspaceId, mention)
   }
 
-  createWorkspace(input: { name: string }) {
+  createWorkspace(input: { name: string; leaseTtlMs?: number }) {
     return this.repositories.createWorkspace(input)
   }
 

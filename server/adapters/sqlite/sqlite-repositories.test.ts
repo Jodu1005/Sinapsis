@@ -120,6 +120,7 @@ describe('SQLite workspace repositories', () => {
       attemptCount: 1,
       maxRetries: 2,
       timeoutMs: 900000,
+      leaseTtlMs: null,
       branchName: null,
       worktreePath: null,
       createdAt: '2026-07-24T00:00:00.000Z',

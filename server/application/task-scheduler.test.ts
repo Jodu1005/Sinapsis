@@ -13,6 +13,7 @@ describe('TaskScheduler', () => {
   let database: SqliteDatabase | undefined
 
   afterEach(async () => {
+    vi.useRealTimers()
     database?.close()
     database = undefined
     if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true })
@@ -124,11 +125,50 @@ describe('TaskScheduler', () => {
     expect(rejectedFirstClaim).toBe(true)
   })
 
-  async function createFixture() {
+  it('resolves a task lease TTL from the workspace default before the process timeout', async () => {
+    const { repositories, agents, createTask } = await createFixture({ workspaceLeaseTtlMs: 45_000 })
+    const task = createTask({ title: 'Workspace lease policy', labels: ['frontend'], timeoutMs: 120_000 })
+    const scheduler = new TaskScheduler(repositories)
+
+    const claim = scheduler.claimNext(agents.frontend.id, at(0))
+
+    expect(claim?.lease.expiresAt).toBe(at(45).toISOString())
+    expect(repositories.getTask(task.id)?.timeoutMs).toBe(120_000)
+  })
+
+  it('lets an explicit task lease TTL override the workspace default', async () => {
+    const { agents, createTask, repositories } = await createFixture({ workspaceLeaseTtlMs: 45_000 })
+    const task = createTask({ title: 'Short lease', labels: ['frontend'], leaseTtlMs: 12_000 })
+    const scheduler = new TaskScheduler(repositories)
+
+    const claim = scheduler.claimNext(agents.frontend.id, at(0))
+
+    expect(claim?.lease.expiresAt).toBe(at(12).toISOString())
+    expect(repositories.getTask(task.id)?.leaseTtlMs).toBe(12_000)
+  })
+
+  it('heartbeats every ten seconds for every active lease', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(at(0))
+    const { repositories, agents, createTask } = await createFixture()
+    const task = createTask({ title: 'Keep the lease alive', labels: ['frontend'] })
+    const scheduler = new TaskScheduler(repositories)
+    const loop = new SchedulerLoop(scheduler, repositories)
+
+    loop.start()
+    await vi.advanceTimersByTimeAsync(10_000)
+    await loop.stop()
+
+    expect(repositories.getTaskDetails(task.id)?.leases).toEqual([
+      expect.objectContaining({ agentId: agents.frontend.id, expiresAt: at(40).toISOString() }),
+    ])
+  })
+
+  async function createFixture(options: { workspaceLeaseTtlMs?: number } = {}) {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-scheduler-'))
     database = createSqliteDatabase(path.join(temporaryDirectory, 'sinapsis.sqlite'))
     const repositories = new SqliteRepositories(database, new RecordingPublisher())
-    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis', leaseTtlMs: options.workspaceLeaseTtlMs })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
     const channel = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
     const frontend = repositories.createAgent({
@@ -146,9 +186,10 @@ describe('TaskScheduler', () => {
       database,
       repositories,
       agents: { frontend, backend },
-      createTask: (input: { title: string; labels: string[]; directAgentId?: string }) => repositories.createTask({
+      createTask: (input: { title: string; labels: string[]; directAgentId?: string; timeoutMs?: number; leaseTtlMs?: number }) => repositories.createTask({
         repositoryId: repository.id, channelId: channel.id, title: input.title, description: 'Description',
         acceptanceCriteria: 'Acceptance criteria', labels: input.labels, directAgentId: input.directAgentId,
+        timeoutMs: input.timeoutMs, leaseTtlMs: input.leaseTtlMs,
       }),
     }
   }

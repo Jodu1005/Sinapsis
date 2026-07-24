@@ -12,6 +12,7 @@ export interface CreateLabeledTaskInput {
   acceptanceCriteria: string
   labels?: string[]
   timeoutMs?: number
+  leaseTtlMs?: number
   maxRetries?: number
 }
 
@@ -45,6 +46,7 @@ export class TaskService {
       acceptanceCriteria: input.acceptanceCriteria,
       labels,
       timeoutMs: input.timeoutMs,
+      leaseTtlMs: input.leaseTtlMs,
       maxRetries: input.maxRetries,
     }
 

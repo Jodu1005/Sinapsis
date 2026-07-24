@@ -191,7 +191,7 @@ class TaskInputRepositories {
       id: 'task-1', repositoryId: 'repository-1', channelId: 'channel-1', directAgentId: null,
       title: 'Task', description: 'Description', acceptanceCriteria: 'Acceptance criteria', labels: [],
       status: this.status, queuedAt: '2026-07-25T00:00:00.000Z', attemptCount: 0, maxRetries: 2,
-      timeoutMs: 900000, branchName: null, worktreePath: null,
+      timeoutMs: 900000, leaseTtlMs: null, branchName: null, worktreePath: null,
       createdAt: '2026-07-25T00:00:00.000Z', updatedAt: '2026-07-25T00:00:00.000Z',
     }
     return { task, sessions: [], leases: [], inputs: [], decisions: [], artifacts: [], events: [] }

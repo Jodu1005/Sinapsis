@@ -20,7 +20,7 @@ export interface WorkspaceMutationCatalog {
 export interface WorkspaceCatalog {
   hasWorkspace(workspaceId: string): boolean
   hasRepository(repositoryId: string): boolean
-  createWorkspace(input: { name: string }): { id: string; name: string; createdAt: string }
+  createWorkspace(input: { name: string; leaseTtlMs?: number }): { id: string; name: string; leaseTtlMs: number; createdAt: string }
   inTransaction<T>(work: (catalog: WorkspaceMutationCatalog) => T): T
   createRepository: WorkspaceMutationCatalog['createRepository']
   createChannel: WorkspaceMutationCatalog['createChannel']
@@ -43,8 +43,11 @@ export class WorkspaceService {
     private readonly gitClient: GitClient,
   ) {}
 
-  createWorkspace(input: { name: string }) {
-    return this.catalog.createWorkspace({ name: requiredText(input.name, 'Workspace name') })
+  createWorkspace(input: { name: string; leaseTtlMs?: number }) {
+    return this.catalog.createWorkspace({
+      name: requiredText(input.name, 'Workspace name'),
+      leaseTtlMs: input.leaseTtlMs === undefined ? undefined : positiveInteger(input.leaseTtlMs, 'Workspace lease TTL'),
+    })
   }
 
   async addRepository(input: { workspaceId: string; directory: string; name?: string }): Promise<ManagedRepository> {
@@ -105,4 +108,9 @@ function requiredText(value: string, name: string): string {
   const trimmed = value.trim()
   if (!trimmed) throw new ValidationError(`${name} is required.`)
   return trimmed
+}
+
+function positiveInteger(value: number, name: string): number {
+  if (!Number.isInteger(value) || value < 1) throw new ValidationError(`${name} must be a positive integer.`)
+  return value
 }

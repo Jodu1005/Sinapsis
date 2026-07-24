@@ -78,8 +78,9 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   hasAgentMention(workspaceId: string, mentionName: string): boolean
   getIdleAgentIds(): string[]
   setAgentStatus(agentId: string, status: AgentStatus, occurredAt: Date): Agent
-  claimNextTask(agentId: string, occurredAt: Date, leaseTtlMs: number): TaskClaim | undefined
-  renewTaskLease(taskId: string, agentId: string, occurredAt: Date, leaseTtlMs: number): TaskLease | undefined
+  claimNextTask(agentId: string, occurredAt: Date): TaskClaim | undefined
+  renewTaskLease(taskId: string, agentId: string, occurredAt: Date): TaskLease | undefined
+  getActiveLeases(): TaskLease[]
   findExpiredLeases(occurredAt: Date): ExpiredLease[]
   takeExpiredLease(leaseId: string, occurredAt: Date): ExpiredLease | undefined
   finalizeExpiredLease(expiredLease: ExpiredLease, occurredAt: Date): LeaseRecovery | undefined

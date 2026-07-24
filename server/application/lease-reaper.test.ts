@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
-import { LeaseReaper } from './lease-reaper'
+import { LeaseReaper, LeaseReaperLoop } from './lease-reaper'
 import { TaskScheduler } from './task-scheduler'
 import { createSqliteDatabase, type SqliteDatabase } from '../adapters/sqlite/database'
 import { SqliteRepositories } from '../adapters/sqlite/sqlite-repositories'
@@ -114,6 +114,36 @@ describe('LeaseReaper', () => {
     expect(repositories.getTask(task.id)).toMatchObject({ status: 'queued', attemptCount: 1 })
   })
 
+  it('returns the agent to idle when cancellation races after an expired lease is taken', async () => {
+    const { repositories, agent, task } = await createClaimedTask({ maxRetries: 1 })
+    const reaper = new LeaseReaper(repositories, new CancellingTerminator(repositories, task.id), new RecordingSessionStore())
+
+    await expect(reaper.reap(at(31))).resolves.toBe(0)
+
+    expect(repositories.getTask(task.id)).toMatchObject({ status: 'cancelled', attemptCount: 0 })
+    expect(repositories.getTaskDetails(task.id)?.leases).toEqual([])
+    expect(repositories.getBootstrap().workspaces[0].agents.find((candidate) => candidate.id === agent.id))
+      .toMatchObject({ status: 'idle' })
+  })
+
+  it('drains an in-flight reaper pass before stopping', async () => {
+    let release: (() => void) | undefined
+    const reaper = {
+      reap: () => new Promise<number>((resolve) => { release = () => resolve(0) }),
+    }
+    const loop = new LeaseReaperLoop(reaper)
+
+    loop.start()
+    const stopped = loop.stop()
+    let didStop = false
+    void stopped.then(() => { didStop = true })
+
+    await Promise.resolve()
+    expect(didStop).toBe(false)
+    release?.()
+    await expect(stopped).resolves.toBeUndefined()
+  })
+
   async function createClaimedTask(options: { maxRetries: number }) {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-reaper-'))
     database = createSqliteDatabase(path.join(temporaryDirectory, 'sinapsis.sqlite'))
@@ -151,6 +181,17 @@ class RecordingTerminator implements ProcessTerminator {
 class ThrowingTerminator implements ProcessTerminator {
   terminate(): void {
     throw new Error('Process already exited.')
+  }
+}
+
+class CancellingTerminator implements ProcessTerminator {
+  constructor(
+    private readonly repositories: SqliteRepositories,
+    private readonly taskId: string,
+  ) {}
+
+  terminate(): void {
+    this.repositories.transitionTask(this.taskId, 'cancelled', 'Cancelled during process termination.')
   }
 }
 

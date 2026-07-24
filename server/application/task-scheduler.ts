@@ -3,22 +3,20 @@ import type { TaskClaim, WorkspaceRepositories } from '../ports/repositories'
 export const defaultLeaseTtlMs = 30_000
 
 export class TaskScheduler {
-  constructor(
-    private readonly repositories: WorkspaceRepositories,
-    private readonly leaseTtlMs = defaultLeaseTtlMs,
-  ) {}
+  constructor(private readonly repositories: WorkspaceRepositories) {}
 
   claimNext(agentId: string, occurredAt = new Date()): TaskClaim | undefined {
-    return this.repositories.claimNextTask(agentId, occurredAt, this.leaseTtlMs)
+    return this.repositories.claimNextTask(agentId, occurredAt)
   }
 
   renew(taskId: string, agentId: string, occurredAt = new Date()): boolean {
-    return this.repositories.renewTaskLease(taskId, agentId, occurredAt, this.leaseTtlMs) !== undefined
+    return this.repositories.renewTaskLease(taskId, agentId, occurredAt) !== undefined
   }
 }
 
 export class SchedulerLoop {
   private timer: NodeJS.Timeout | undefined
+  private heartbeatTimer: NodeJS.Timeout | undefined
   private ticking = false
 
   constructor(
@@ -31,12 +29,15 @@ export class SchedulerLoop {
   start(): void {
     if (this.timer) return
     this.timer = setInterval(() => this.tick(), this.intervalMs)
+    this.heartbeatTimer = setInterval(() => this.heartbeatTick(), 10_000)
     this.tick()
   }
 
   stop(): void {
     if (this.timer) clearInterval(this.timer)
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
     this.timer = undefined
+    this.heartbeatTimer = undefined
   }
 
   tick(): void {
@@ -48,6 +49,13 @@ export class SchedulerLoop {
       }
     } finally {
       this.ticking = false
+    }
+  }
+
+  heartbeatTick(): void {
+    const occurredAt = this.now()
+    for (const lease of this.repositories.getActiveLeases()) {
+      this.scheduler.renew(lease.taskId, lease.agentId, occurredAt)
     }
   }
 }

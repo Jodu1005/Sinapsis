@@ -21,7 +21,7 @@ const server = app.listen(config.port, '127.0.0.1', () => {
 
 let shuttingDown = false
 
-function closeGracefully(signal: NodeJS.Signals, service: Server): void {
+async function closeGracefully(signal: NodeJS.Signals, service: Server): Promise<void> {
   if (shuttingDown) {
     return
   }
@@ -29,18 +29,19 @@ function closeGracefully(signal: NodeJS.Signals, service: Server): void {
   shuttingDown = true
   console.log(`${signal} received, stopping Sinapsis local service.`)
   schedulerLoop.stop()
-  leaseReaperLoop.stop()
+  await leaseReaperLoop.stop()
   const closeSse = app.locals.closeSse as (() => void) | undefined
   closeSse?.()
-  service.close((error) => {
+  await new Promise<void>((resolve) => service.close((error) => {
     const closeDatabase = app.locals.closeDatabase as (() => void) | undefined
     closeDatabase?.()
     if (error) {
       console.error('Unable to stop Sinapsis local service cleanly.', error)
       process.exitCode = 1
     }
-  })
+    resolve()
+  }))
 }
 
-process.once('SIGINT', () => closeGracefully('SIGINT', server))
-process.once('SIGTERM', () => closeGracefully('SIGTERM', server))
+process.once('SIGINT', () => void closeGracefully('SIGINT', server))
+process.once('SIGTERM', () => void closeGracefully('SIGTERM', server))
