@@ -89,6 +89,39 @@ describe('TaskExecutionCoordinator', () => {
     ])
   })
 
+  it('delivers an input queued before runtime registration exactly once after startup', async () => {
+    const fixture = await createFixture()
+    const claim = fixture.scheduler.claimNext(fixture.agent.id)!
+    const originalStart = fixture.runtime.start.bind(fixture.runtime)
+    let releaseRuntimeStart: (() => void) | undefined
+    const runtimeStartReached = new Promise<void>((resolve) => {
+      fixture.runtime.start = async (request, sink) => {
+        resolve()
+        await new Promise<void>((continueStart) => { releaseRuntimeStart = continueStart })
+        return originalStart(request, sink)
+      }
+    })
+
+    const starting = fixture.coordinator.startClaim(claim)
+    await runtimeStartReached
+    fixture.coordinator.queueInputForActiveAgent(fixture.agent.id, 'Runtime 启动后请先检查测试')
+
+    expect(fixture.runtime.inputs).toEqual([])
+    expect(fixture.repositories.getTaskDetails(claim.task.id)?.inputs).toEqual([
+      expect.objectContaining({ body: 'Runtime 启动后请先检查测试', consumedAt: null }),
+    ])
+
+    releaseRuntimeStart?.()
+    await starting
+
+    expect(fixture.runtime.inputs).toEqual([
+      expect.objectContaining({ input: 'Runtime 启动后请先检查测试' }),
+    ])
+    expect(fixture.repositories.getTaskDetails(claim.task.id)?.inputs).toEqual([
+      expect.objectContaining({ body: 'Runtime 启动后请先检查测试', consumedAt: expect.any(String) }),
+    ])
+  })
+
   it('marks a runtime decision request as waiting input and resumes execution after the response', async () => {
     const fixture = await createFixture()
     const claim = fixture.scheduler.claimNext(fixture.agent.id)!
@@ -158,6 +191,30 @@ describe('TaskExecutionCoordinator', () => {
 
     expect(fixture.repositories.getTask(claim.task.id)?.status).toBe('needs_human')
     expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('无法恢复原 Runtime 会话')
+  })
+
+  it('atomically settles a claimed returned task when its runtime resume rejects', async () => {
+    const fixture = await createFixture()
+    const claim = fixture.scheduler.claimNext(fixture.agent.id)!
+    await fixture.coordinator.startClaim(claim)
+    const worktree = fixture.repositories.getTask(claim.task.id)!.worktreePath!
+    await writeFile(path.join(worktree, 'resume.txt'), 'ready\n')
+    await commitFile(worktree, 'resume.txt', 'Prepare resume')
+    fixture.runtime.emit(claim.task.id, { kind: 'settled' })
+    await fixture.coordinator.flush(claim.task.id)
+    fixture.runtime.resume = async () => { throw new Error('runtime session unavailable') }
+
+    const reviews = new TaskReviewService(fixture.repositories, fixture.coordinator)
+    await expect(reviews.review(claim.task.id, 'return', '请继续修改')).rejects.toThrow('runtime session unavailable')
+
+    const details = fixture.repositories.getTaskDetails(claim.task.id)!
+    expect(details.task.status).toBe('needs_human')
+    expect(details.leases).toEqual([])
+    expect(fixture.repositories.getBootstrap().workspaces[0].agents[0].status).toBe('idle')
+    expect(details.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'task.status_changed', payload: expect.objectContaining({ to: 'needs_human' }) }),
+    ]))
+    expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('任务需要人工处理：runtime session unavailable')
   })
 
   async function createFixture(options: { worktrees?: WorktreeManager } = {}) {

@@ -66,6 +66,7 @@ export class TaskExecutionCoordinator {
       }, (event) => this.enqueue(event.taskId, () => this.handleRuntimeEvent(event)))
       this.executions.set(task.id, { taskId: task.id, agentId: agent.id, adapter, session, targetBranch: repository.defaultBranch })
       this.repositories.updateTaskSession(task.id, agent.id, { runtimeSessionId: session.sessionId, status: 'running' })
+      this.deliverUnconsumedInputs(task.id)
     } catch (error) {
       this.fail(task.id, agent.id, error instanceof Error ? error.message : 'Runtime 启动失败')
     }
@@ -98,12 +99,14 @@ export class TaskExecutionCoordinator {
     const claim = this.repositories.reclaimReturnedTask(taskId, execution.agentId, new Date())
     if (!claim) throw new DomainError('Task cannot be resumed by its original agent.')
     this.repositories.transitionTask(taskId, 'running', '人工退回后恢复原 Runtime 会话')
-    await execution.adapter.resume(execution.session, (event) => this.enqueue(event.taskId, () => this.handleRuntimeEvent(event)))
-    for (const input of this.repositories.getTaskDetails(taskId)?.inputs.filter((candidate) => !candidate.consumedAt) ?? []) {
-      execution.adapter.sendInput(execution.session, input.body, (event) => this.enqueue(event.taskId, () => this.handleRuntimeEvent(event)))
-      this.repositories.consumeTaskInput(input.id)
+    try {
+      await execution.adapter.resume(execution.session, (event) => this.enqueue(event.taskId, () => this.handleRuntimeEvent(event)))
+      this.deliverUnconsumedInputs(taskId)
+      this.repositories.updateTaskSession(taskId, execution.agentId, { status: 'running' })
+    } catch (error) {
+      this.fail(taskId, execution.agentId, error instanceof Error ? error.message : 'Runtime 会话恢复失败')
+      throw error
     }
-    this.repositories.updateTaskSession(taskId, execution.agentId, { status: 'running' })
   }
 
   async flush(taskId?: string): Promise<void> {
@@ -169,9 +172,23 @@ export class TaskExecutionCoordinator {
   }
 
   private fail(taskId: string, agentId: string, reason: string): void {
-    const task = this.task(taskId)
-    this.repositories.finishTaskExecution(taskId, agentId, 'needs_human', reason)
-    this.messages.postMilestone(task.channelId, taskId, `任务需要人工处理：${reason}`)
+    this.repositories.inTransaction((unitOfWork) => {
+      const task = this.task(taskId)
+      this.repositories.finishTaskExecution(taskId, agentId, 'needs_human', reason)
+      unitOfWork.createMessage({
+        channelId: task.channelId,
+        taskId,
+        senderType: 'system',
+        authorName: 'Sinapsis',
+        body: `任务需要人工处理：${reason}`,
+      })
+    })
+  }
+
+  private deliverUnconsumedInputs(taskId: string): void {
+    for (const input of this.repositories.getTaskDetails(taskId)?.inputs.filter((candidate) => !candidate.consumedAt) ?? []) {
+      this.deliverQueuedInput(taskId, input.id)
+    }
   }
 
   private async writeArtifact(taskId: string, kind: string, content: string): Promise<void> {
