@@ -26,6 +26,7 @@ interface ManagedExecution {
   adapter: RuntimeAdapter
   session: RuntimeSession
   targetBranch: string
+  testOutput: string[]
 }
 
 export class TaskExecutionCoordinator {
@@ -64,7 +65,7 @@ export class TaskExecutionCoordinator {
         worktreePath: allocation.worktreePath,
         profile: { runtime: agent.runtime, command: agent.command, args: agent.args, model: agent.model, env: agent.env, policy: 'task-worktree' },
       }, (event) => this.enqueue(event.taskId, () => this.handleRuntimeEvent(event)))
-      this.executions.set(task.id, { taskId: task.id, agentId: agent.id, adapter, session, targetBranch: repository.defaultBranch })
+      this.executions.set(task.id, { taskId: task.id, agentId: agent.id, adapter, session, targetBranch: repository.defaultBranch, testOutput: [] })
       this.repositories.updateTaskSession(task.id, agent.id, { runtimeSessionId: session.sessionId, status: 'running' })
       this.deliverUnconsumedInputs(task.id)
     } catch (error) {
@@ -132,9 +133,11 @@ export class TaskExecutionCoordinator {
     if (!execution) return
     switch (event.kind) {
       case 'artifact':
+        this.captureTestOutput(execution, event.content)
         await this.writeArtifact(event.taskId, event.artifactType, event.content)
         return
       case 'text':
+        this.captureTestOutput(execution, event.text)
         await this.writeArtifact(event.taskId, 'runtime-text', event.text)
         this.repositories.inTransaction((unitOfWork) => unitOfWork.recordTaskEvent(event.taskId, 'runtime.text', { text: event.text }))
         return
@@ -167,6 +170,7 @@ export class TaskExecutionCoordinator {
       this.fail(task.id, execution.agentId, 'Runtime 已完成，但任务分支没有可供评审的提交。')
       return
     }
+    await this.writeReviewEvidence(task, execution)
     this.repositories.finishTaskExecution(task.id, execution.agentId, 'in_review', 'Runtime 完成并检测到任务分支提交')
     this.messages.postMilestone(task.channelId, task.id, '任务已完成，等待人工验收。')
   }
@@ -189,6 +193,26 @@ export class TaskExecutionCoordinator {
     for (const input of this.repositories.getTaskDetails(taskId)?.inputs.filter((candidate) => !candidate.consumedAt) ?? []) {
       this.deliverQueuedInput(taskId, input.id)
     }
+  }
+
+  private captureTestOutput(execution: ManagedExecution, content: string): void {
+    if (/\b(test|tests|vitest|jest|pytest|mocha|passed|failed)\b/i.test(content)) {
+      execution.testOutput.push(content)
+    }
+  }
+
+  private async writeReviewEvidence(task: Task, execution: ManagedExecution): Promise<void> {
+    if (!task.worktreePath) throw new Error('Task worktree is required before collecting review evidence.')
+    const evidence = await collectGitReviewEvidence(task.worktreePath, execution.targetBranch)
+    const testOutput = execution.testOutput.length > 0
+      ? execution.testOutput.join('\n')
+      : '未在 Runtime 输出中检测到测试结果。请查看原始运行日志。'
+    await Promise.all([
+      this.writeArtifact(task.id, 'review-commit', evidence.commit),
+      this.writeArtifact(task.id, 'review-changed-files', evidence.changedFiles),
+      this.writeArtifact(task.id, 'review-test-output', testOutput),
+      this.writeArtifact(task.id, 'review-diff-summary', evidence.diffSummary),
+    ])
   }
 
   private async writeArtifact(taskId: string, kind: string, content: string): Promise<void> {
@@ -219,4 +243,19 @@ export class TaskExecutionCoordinator {
 async function hasTaskBranchCommit(worktreePath: string, targetBranch: string): Promise<boolean> {
   const { stdout } = await execFileAsync('git', ['-C', worktreePath, 'log', `${targetBranch}..HEAD`, '--format=%H', '-1'], { shell: false })
   return stdout.trim().length > 0
+}
+
+async function collectGitReviewEvidence(worktreePath: string, targetBranch: string): Promise<{ commit: string; changedFiles: string; diffSummary: string }> {
+  const range = `${targetBranch}..HEAD`
+  const [commit, changedFiles, diffSummary] = await Promise.all([
+    gitOutput(worktreePath, ['log', '-1', '--format=%H%n%s']),
+    gitOutput(worktreePath, ['diff', '--name-status', range]),
+    gitOutput(worktreePath, ['diff', '--stat', range]),
+  ])
+  return { commit, changedFiles, diffSummary }
+}
+
+async function gitOutput(worktreePath: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['-C', worktreePath, ...args], { shell: false })
+  return stdout.trim() || '无输出'
 }

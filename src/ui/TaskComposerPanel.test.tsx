@@ -1,5 +1,6 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentView, RepositoryView, TaskView } from '../domain/workspace-view'
 import { AgentConfigDialog } from './AgentConfigDialog'
@@ -45,4 +46,46 @@ describe('TaskComposerPanel', () => {
     expect(screen.getByText('API_TOKEN（已配置）')).toBeInTheDocument()
     expect(screen.queryByText('example-secret')).not.toBeInTheDocument()
   })
+
+  it('traps focus in the task dialog and restores the trigger after escape', async () => {
+    const user = userEvent.setup()
+    render(<TaskComposerHarness />)
+
+    const trigger = screen.getByRole('button', { name: '打开新任务' })
+    await user.click(trigger)
+    const title = await screen.findByLabelText('任务标题')
+    expect(title).toHaveFocus()
+    expect(trigger).toHaveAttribute('inert')
+
+    await user.keyboard('{Shift>}{Tab}{/Shift}')
+    expect(screen.getByRole('button', { name: '关闭新任务面板' })).toHaveFocus()
+    await user.keyboard('{Shift>}{Tab}{/Shift}')
+    expect(screen.getByRole('button', { name: '取消' })).toHaveFocus()
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it('focuses the Agent configuration dialog and restores its trigger after close', async () => {
+    const user = userEvent.setup()
+    render(<AgentConfigHarness />)
+
+    const trigger = screen.getByRole('button', { name: '查看 Agent 配置' })
+    await user.click(trigger)
+    expect(await screen.findByRole('button', { name: '关闭 Agent 配置' })).toHaveFocus()
+    expect(trigger).toHaveAttribute('inert')
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
 })
+
+function TaskComposerHarness() {
+  const [open, setOpen] = useState(false)
+  return <div className="workspace-shell"><button type="button" onClick={() => setOpen(true)}>打开新任务</button>{open && <TaskComposerPanel repository={repository} agents={[agent]} onCreate={vi.fn()} onClose={() => setOpen(false)} />}</div>
+}
+
+function AgentConfigHarness() {
+  const [open, setOpen] = useState(false)
+  return <div className="workspace-shell"><button type="button" onClick={() => setOpen(true)}>查看 Agent 配置</button>{open && <AgentConfigDialog agent={agent} onClose={() => setOpen(false)} />}</div>
+}

@@ -1,5 +1,5 @@
 import { SendHorizontal } from 'lucide-react'
-import { FormEvent, useState } from 'react'
+import { FormEvent, useEffect, useState } from 'react'
 import type { TaskDetailView } from '../domain/workspace-view'
 import { taskStatusLabel } from '../domain/workspace-view'
 import { RuntimeEvidence } from './RuntimeEvidence'
@@ -10,6 +10,7 @@ export function TaskDetailPanel({ details, onQueueInput, onReview, onReadArtifac
   const [acceptedTaskId, setAcceptedTaskId] = useState<string | null>(details.task.status === 'accepted' ? details.task.id : null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  useEffect(() => { setQueued(false) }, [details.task.id])
   const submitInput = async (event: FormEvent) => {
     event.preventDefault()
     if (!input.trim()) return

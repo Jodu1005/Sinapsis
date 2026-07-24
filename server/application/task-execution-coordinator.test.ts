@@ -66,11 +66,25 @@ describe('TaskExecutionCoordinator', () => {
     const worktree = fixture.repositories.getTask(second.id)!.worktreePath!
     await writeFile(path.join(worktree, 'implementation.txt'), 'done\n')
     await commitFile(worktree, 'implementation.txt', 'Implement task')
+    fixture.runtime.emit(second.id, { kind: 'artifact', artifactType: 'runtime-stderr', content: 'npm test\n  3 passed\n' })
+    await fixture.coordinator.flush(second.id)
     fixture.runtime.emit(second.id, { kind: 'settled' })
     await fixture.coordinator.flush(second.id)
 
     expect(fixture.repositories.getTask(second.id)?.status).toBe('in_review')
     expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('等待人工验收')
+    const artifacts = fixture.repositories.getTaskDetails(second.id)!.artifacts
+    expect(artifacts.map((artifact) => artifact.kind)).toEqual(expect.arrayContaining([
+      'review-commit', 'review-changed-files', 'review-test-output', 'review-diff-summary',
+    ]))
+    const evidence = Object.fromEntries(await Promise.all(artifacts
+      .filter((artifact) => artifact.kind.startsWith('review-'))
+      .map(async (artifact) => [artifact.kind, await readFile(artifact.path, 'utf8')]),
+    ))
+    expect(evidence['review-commit']).toMatch(/[0-9a-f]{40}/)
+    expect(evidence['review-changed-files']).toContain('implementation.txt')
+    expect(evidence['review-test-output']).toContain('3 passed')
+    expect(evidence['review-diff-summary']).toContain('implementation.txt')
   })
 
   it('queues an input for a busy mentioned agent and sends it to the active runtime session', async () => {

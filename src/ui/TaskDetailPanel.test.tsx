@@ -9,17 +9,35 @@ const task: TaskView = {
   acceptanceCriteria: '390px 可操作且没有遮挡。', labels: ['frontend'], status: 'in_review', queuedAt: '2026-07-25T08:00:00.000Z', attemptCount: 1,
   maxRetries: 2, timeoutMs: 3_600_000, leaseTtlMs: null, branchName: 'task/task-1', worktreePath: '/tmp/task-1', createdAt: '2026-07-25T08:00:00.000Z', updatedAt: '2026-07-25T08:00:00.000Z',
 }
-const details: TaskDetailView = { task, sessions: [], leases: [], inputs: [], decisions: [], artifacts: [{ id: 'artifact-1', taskId: 'task-1', kind: 'test-results', createdAt: '2026-07-25T08:01:00.000Z' }], events: [] }
+const details: TaskDetailView = { task, sessions: [], leases: [], inputs: [], decisions: [], artifacts: [
+  { id: 'artifact-commit', taskId: 'task-1', kind: 'review-commit', createdAt: '2026-07-25T08:01:00.000Z' },
+  { id: 'artifact-files', taskId: 'task-1', kind: 'review-changed-files', createdAt: '2026-07-25T08:01:00.000Z' },
+  { id: 'artifact-tests', taskId: 'task-1', kind: 'review-test-output', createdAt: '2026-07-25T08:01:00.000Z' },
+  { id: 'artifact-diff', taskId: 'task-1', kind: 'review-diff-summary', createdAt: '2026-07-25T08:01:00.000Z' },
+  { id: 'artifact-log', taskId: 'task-1', kind: 'runtime-stderr', createdAt: '2026-07-25T08:01:00.000Z' },
+], events: [] }
 
 describe('TaskDetailPanel', () => {
   it('shows overview, input queue, evidence and review, while acceptance explicitly does not merge', async () => {
     const onReview = vi.fn().mockResolvedValue({ ...task, status: 'accepted' })
-    render(<TaskDetailPanel details={details} onQueueInput={vi.fn()} onReview={onReview} onReadArtifact={vi.fn()} />)
+    const onReadArtifact = vi.fn((artifactId: string) => Promise.resolve({
+      'artifact-commit': 'abc123 Implement mobile drawer',
+      'artifact-files': 'M src/ui/WorkspaceShell.tsx',
+      'artifact-tests': 'npm test\\n 108 passed',
+      'artifact-diff': '2 files changed, 34 insertions(+)',
+      'artifact-log': 'raw runtime output',
+    }[artifactId] ?? ''))
+    render(<TaskDetailPanel details={details} onQueueInput={vi.fn()} onReview={onReview} onReadArtifact={onReadArtifact} />)
 
     expect(screen.getByRole('heading', { name: '概览' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '输入队列' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '证据' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '审查' })).toBeInTheDocument()
+    expect(await screen.findByText('abc123 Implement mobile drawer')).toBeInTheDocument()
+    expect(screen.getByText('M src/ui/WorkspaceShell.tsx')).toBeInTheDocument()
+    expect(screen.getByText('npm test\\n 108 passed')).toBeInTheDocument()
+    expect(screen.getByText('2 files changed, 34 insertions(+)')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '原始运行日志' })).toBeInTheDocument()
     await userEvent.setup().click(screen.getByRole('button', { name: '接受验收' }))
     expect(onReview).toHaveBeenCalledWith('accept')
     expect(await screen.findByText('验收已通过，尚未合并')).toBeInTheDocument()
@@ -36,5 +54,19 @@ describe('TaskDetailPanel', () => {
 
     expect(screen.getByRole('button', { name: '接受验收' })).toBeEnabled()
     expect(screen.queryByText('验收已通过，尚未合并')).not.toBeInTheDocument()
+  })
+
+  it('clears queued input feedback when selecting another task', async () => {
+    const runningDetails = { ...details, task: { ...task, status: 'running' as const } }
+    const view = render(<TaskDetailPanel details={runningDetails} onQueueInput={vi.fn().mockResolvedValue(undefined)} onReview={vi.fn()} onReadArtifact={vi.fn().mockResolvedValue('')} />)
+    const user = userEvent.setup()
+
+    await user.type(screen.getByRole('textbox', { name: '发送任务输入' }), '请补一组回归测试')
+    await user.click(screen.getByRole('button', { name: '发送任务输入' }))
+    expect(await screen.findByText('已排队，当前安全步骤结束后送达。')).toBeInTheDocument()
+
+    view.rerender(<TaskDetailPanel details={{ ...runningDetails, task: { ...runningDetails.task, id: 'task-2', title: '另一个运行任务' } }} onQueueInput={vi.fn()} onReview={vi.fn()} onReadArtifact={vi.fn().mockResolvedValue('')} />)
+
+    expect(screen.queryByText('已排队，当前安全步骤结束后送达。')).not.toBeInTheDocument()
   })
 })
