@@ -81,6 +81,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   claimNextTask(agentId: string, occurredAt: Date, leaseTtlMs: number): TaskClaim | undefined
   renewTaskLease(taskId: string, agentId: string, occurredAt: Date, leaseTtlMs: number): TaskLease | undefined
   findExpiredLeases(occurredAt: Date): ExpiredLease[]
-  recoverExpiredLease(leaseId: string, occurredAt: Date): LeaseRecovery | undefined
+  takeExpiredLease(leaseId: string, occurredAt: Date): ExpiredLease | undefined
+  finalizeExpiredLease(expiredLease: ExpiredLease, occurredAt: Date): LeaseRecovery | undefined
   getBootstrap(): BootstrapSnapshot
 }

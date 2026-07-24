@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
@@ -98,6 +98,32 @@ describe('TaskScheduler', () => {
     ])
   })
 
+  it('rechecks FIFO candidates when a conditional claim update loses its race', async () => {
+    const { database: sqlite, repositories, agents, createTask } = await createFixture()
+    const task = createTask({ title: 'Retry the conditional claim', labels: ['frontend'] })
+    const scheduler = new TaskScheduler(repositories)
+    const prepare = sqlite.database.prepare.bind(sqlite.database)
+    let rejectedFirstClaim = false
+
+    vi.spyOn(sqlite.database, 'prepare').mockImplementation(((source: string) => {
+      const statement = prepare(source)
+      if (!source.includes("UPDATE tasks SET status = 'claimed'")) return statement
+      return {
+        ...statement,
+        run: (...parameters: unknown[]) => {
+          if (!rejectedFirstClaim) {
+            rejectedFirstClaim = true
+            return { changes: 0 }
+          }
+          return statement.run(...(parameters as Parameters<typeof statement.run>))
+        },
+      }
+    }) as typeof sqlite.database.prepare)
+
+    expect(scheduler.claimNext(agents.frontend.id, at(2))?.task.id).toBe(task.id)
+    expect(rejectedFirstClaim).toBe(true)
+  })
+
   async function createFixture() {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-scheduler-'))
     database = createSqliteDatabase(path.join(temporaryDirectory, 'sinapsis.sqlite'))
@@ -117,6 +143,7 @@ describe('TaskScheduler', () => {
     repositories.setAgentStatus(backend.id, 'idle', at(0))
 
     return {
+      database,
       repositories,
       agents: { frontend, backend },
       createTask: (input: { title: string; labels: string[]; directAgentId?: string }) => repositories.createTask({

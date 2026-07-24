@@ -13,13 +13,15 @@ export class LeaseReaper {
     const expired = this.repositories.findExpiredLeases(occurredAt)
     let recovered = 0
     for (const { lease } of expired) {
+      const ownedLease = this.repositories.takeExpiredLease(lease.id, occurredAt)
+      if (!ownedLease) continue
       try {
-        await this.processTerminator.terminate(lease.taskId, lease.agentId)
+        await this.processTerminator.terminate(ownedLease.lease.taskId, ownedLease.lease.agentId)
       } catch {
         // The lease must still be recovered when a stale process is already gone.
       }
-      this.sessionStore.markTimedOut(lease.taskId, lease.agentId, occurredAt)
-      if (this.repositories.recoverExpiredLease(lease.id, occurredAt)) recovered += 1
+      this.sessionStore.markTimedOut(ownedLease.lease.taskId, ownedLease.lease.agentId, occurredAt)
+      if (this.repositories.finalizeExpiredLease(ownedLease, occurredAt)) recovered += 1
     }
     return recovered
   }

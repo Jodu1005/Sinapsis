@@ -365,6 +365,14 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
       JSON.stringify({ from: task.status, to: next, reason }),
       transitioned.updatedAt,
     )
+    if (next === 'cancelled') {
+      const leases = this.database.prepare('SELECT * FROM task_leases WHERE task_id = ?').all(taskId) as unknown as TaskLeaseRow[]
+      this.database.prepare('DELETE FROM task_leases WHERE task_id = ?').run(taskId)
+      for (const lease of leases) {
+        this.database.prepare('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?').run('idle', transitioned.updatedAt, lease.agent_id)
+        this.afterCommit(event('agent.status_changed', 'agent', lease.agent_id, transitioned.updatedAt))
+      }
+    }
     this.afterCommit(event('task.status_changed', 'task', taskId, transitioned.updatedAt))
     return transitioned
   }
@@ -503,19 +511,22 @@ export class SqliteRepositories implements WorkspaceRepositories {
       const agent = readAgent(database, agentId)
       if (!agent || agent.status !== 'idle' || hasActiveLease(database, agentId)) return undefined
 
-      const candidates = (database.prepare(`
-        SELECT * FROM tasks
-        WHERE status = 'queued' AND (direct_agent_id IS NULL OR direct_agent_id = ?)
-        ORDER BY queued_at ASC, rowid ASC
-      `).all(agentId) as unknown as TaskRow[]).map(mapTask)
-      const candidate = candidates.find((task) => labelsMatch(agent.capabilityTags, task.labels))
-      if (!candidate) return undefined
-
       const occurredAtIso = occurredAt.toISOString()
-      const taskUpdate = database.prepare(`
-        UPDATE tasks SET status = 'claimed', updated_at = ? WHERE id = ? AND status = 'queued'
-      `).run(occurredAtIso, candidate.id)
-      if (Number(taskUpdate.changes) !== 1) return undefined
+      let candidate: Task | undefined
+      while (true) {
+        const candidates = (database.prepare(`
+          SELECT * FROM tasks
+          WHERE status = 'queued' AND (direct_agent_id IS NULL OR direct_agent_id = ?)
+          ORDER BY queued_at ASC, rowid ASC
+        `).all(agentId) as unknown as TaskRow[]).map(mapTask)
+        candidate = candidates.find((task) => labelsMatch(agent.capabilityTags, task.labels))
+        if (!candidate) return undefined
+
+        const taskUpdate = database.prepare(`
+          UPDATE tasks SET status = 'claimed', updated_at = ? WHERE id = ? AND status = 'queued'
+        `).run(occurredAtIso, candidate.id)
+        if (Number(taskUpdate.changes) === 1) break
+      }
 
       const lease: TaskLease = {
         id: randomUUID(), taskId: candidate.id, agentId,
@@ -577,7 +588,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
     })
   }
 
-  recoverExpiredLease(leaseId: string, occurredAt: Date): LeaseRecovery | undefined {
+  takeExpiredLease(leaseId: string, occurredAt: Date): ExpiredLease | undefined {
     return this.inTransaction((unitOfWork) => {
       const database = this.sqlite.database
       const lease = readLease(database, leaseId)
@@ -585,15 +596,32 @@ export class SqliteRepositories implements WorkspaceRepositories {
       const task = readTask(database, lease.taskId)
       if (!task) return undefined
 
+      const leaseDeletion = database.prepare('DELETE FROM task_leases WHERE id = ? AND expires_at <= ?').run(lease.id, occurredAt.toISOString())
+      if (Number(leaseDeletion.changes) !== 1) return undefined
+      if (!canRecoverExpiredTask(task.status)) {
+        database.prepare('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?').run('idle', occurredAt.toISOString(), lease.agentId)
+        unitOfWork.afterCommit(event('agent.status_changed', 'agent', lease.agentId, occurredAt.toISOString()))
+        return undefined
+      }
+
+      return { lease, task }
+    })
+  }
+
+  finalizeExpiredLease(expiredLease: ExpiredLease, occurredAt: Date): LeaseRecovery | undefined {
+    return this.inTransaction((unitOfWork) => {
+      const database = this.sqlite.database
+      const { lease } = expiredLease
+      const task = readTask(database, lease.taskId)
+      if (!task || !canRecoverExpiredTask(task.status)) return undefined
+
       const outcome = task.attemptCount < task.maxRetries ? 'requeued' : 'needs_human'
       const nextStatus = outcome === 'requeued' ? 'queued' : 'needs_human'
       const updatedAt = occurredAt.toISOString()
       const nextAttemptCount = outcome === 'requeued' ? task.attemptCount + 1 : task.attemptCount
-      const leaseDeletion = database.prepare('DELETE FROM task_leases WHERE id = ? AND expires_at <= ?').run(lease.id, updatedAt)
-      if (Number(leaseDeletion.changes) !== 1) return undefined
       database.prepare(`
-        UPDATE tasks SET status = ?, queued_at = ?, attempt_count = ?, updated_at = ? WHERE id = ?
-      `).run(nextStatus, updatedAt, nextAttemptCount, updatedAt, task.id)
+        UPDATE tasks SET status = ?, queued_at = ?, attempt_count = ?, updated_at = ? WHERE id = ? AND status = ?
+      `).run(nextStatus, updatedAt, nextAttemptCount, updatedAt, task.id, task.status)
       database.prepare('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?').run('idle', updatedAt, lease.agentId)
       unitOfWork.recordTaskEvent(task.id, 'task.lease_expired', {
         agentId: lease.agentId, leaseId: lease.id, outcome, attemptCount: nextAttemptCount,
@@ -645,6 +673,10 @@ export class SqliteRepositories implements WorkspaceRepositories {
       }),
     }
   }
+}
+
+function canRecoverExpiredTask(status: TaskStatus): boolean {
+  return status === 'claimed' || status === 'running' || status === 'waiting_input'
 }
 
 function readTask(database: DatabaseSync, taskId: string): Task | undefined {

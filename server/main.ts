@@ -30,10 +30,10 @@ function closeGracefully(signal: NodeJS.Signals, service: Server): void {
   console.log(`${signal} received, stopping Sinapsis local service.`)
   schedulerLoop.stop()
   leaseReaperLoop.stop()
+  const closeSse = app.locals.closeSse as (() => void) | undefined
+  closeSse?.()
   service.close((error) => {
-    const closeSse = app.locals.closeSse as (() => void) | undefined
     const closeDatabase = app.locals.closeDatabase as (() => void) | undefined
-    closeSse?.()
     closeDatabase?.()
     if (error) {
       console.error('Unable to stop Sinapsis local service cleanly.', error)

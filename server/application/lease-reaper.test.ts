@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
@@ -66,6 +66,43 @@ describe('LeaseReaper', () => {
 
     expect(repositories.getTask(task.id)).toMatchObject({ status: 'claimed', attemptCount: 0 })
     expect(repositories.getTaskDetails(task.id)?.leases).toHaveLength(1)
+  })
+
+  it('does not terminate a lease when a heartbeat succeeds after the reaper reads an expired snapshot', async () => {
+    const { repositories, scheduler, agent, task } = await createClaimedTask({ maxRetries: 1 })
+    const terminator = new RecordingTerminator()
+    const sessionStore = new RecordingSessionStore()
+    const reaper = new LeaseReaper(repositories, terminator, sessionStore)
+    const findExpiredLeases = repositories.findExpiredLeases.bind(repositories)
+
+    vi.spyOn(repositories, 'findExpiredLeases').mockImplementation((occurredAt) => {
+      const staleSnapshot = findExpiredLeases(occurredAt)
+      expect(scheduler.renew(task.id, agent.id, at(29))).toBe(true)
+      return staleSnapshot
+    })
+
+    await expect(reaper.reap(at(31))).resolves.toBe(0)
+
+    expect(terminator.terminations).toEqual([])
+    expect(sessionStore.timeouts).toEqual([])
+    expect(repositories.getTask(task.id)).toMatchObject({ status: 'claimed', attemptCount: 0 })
+    expect(repositories.getTaskDetails(task.id)?.leases).toEqual([
+      expect.objectContaining({ taskId: task.id, agentId: agent.id, expiresAt: at(59).toISOString() }),
+    ])
+  })
+
+  it('cleans an expired lease from a cancelled task without reviving it', async () => {
+    const { repositories, agent, task } = await createClaimedTask({ maxRetries: 1 })
+    const reaper = new LeaseReaper(repositories, new RecordingTerminator(), new RecordingSessionStore())
+
+    repositories.transitionTask(task.id, 'cancelled', 'No longer needed.')
+
+    await expect(reaper.reap(at(31))).resolves.toBe(0)
+
+    expect(repositories.getTask(task.id)).toMatchObject({ status: 'cancelled', attemptCount: 0 })
+    expect(repositories.getTaskDetails(task.id)?.leases).toEqual([])
+    expect(repositories.getBootstrap().workspaces[0].agents.find((candidate) => candidate.id === agent.id))
+      .toMatchObject({ status: 'idle' })
   })
 
   it('recovers an expired lease even when its stale process has already exited', async () => {
