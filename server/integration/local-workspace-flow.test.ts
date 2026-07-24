@@ -40,6 +40,7 @@ describe('local workspace flow', () => {
     await execFileAsync('git', ['init', '--bare', remote], { shell: false })
     await execFileAsync('git', ['remote', 'add', 'origin', remote], { cwd: source.repositoryRoot, shell: false })
     await execFileAsync('git', ['push', '-u', 'origin', 'main'], { cwd: source.repositoryRoot, shell: false })
+    const initialRemoteMain = (await execFileAsync('git', ['--git-dir', remote, 'rev-parse', 'refs/heads/main'], { shell: false })).stdout.trim()
 
     const workspace = repositories.createWorkspace({ name: 'Local QA' })
     const repository = repositories.createRepository({
@@ -143,6 +144,8 @@ describe('local workspace flow', () => {
     await expect(execFileAsync('git', ['-C', source.repositoryRoot, 'merge-base', '--is-ancestor', commit, 'main'], { shell: false })).rejects.toThrow()
     const sourceBranch = (await execFileAsync('git', ['-C', source.repositoryRoot, 'branch', '--show-current'], { shell: false })).stdout.trim()
     expect(sourceBranch).toBe('main')
+    const remoteMain = (await execFileAsync('git', ['--git-dir', remote, 'rev-parse', 'refs/heads/main'], { shell: false })).stdout.trim()
+    expect(remoteMain).toBe(initialRemoteMain)
     const remoteBranches = (await execFileAsync('git', ['--git-dir', remote, 'for-each-ref', '--format=%(refname)', 'refs/heads'], { shell: false })).stdout
       .trim()
       .split('\n')
@@ -172,30 +175,15 @@ describe('local workspace flow', () => {
       runtimes: Array<{ runtime: string; command: string; status: string; agents: Array<{ mentionName: string }> }>
     }
 
-    expect(result.runtimes).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        runtime: 'opencode',
-        command: availableCommand,
-        status: 'available',
-        agents: [expect.objectContaining({ mentionName: 'first-opencode' })],
-      }),
-      expect.objectContaining({
-        runtime: 'opencode',
-        command: missingCommand,
-        status: 'missing',
-        agents: [expect.objectContaining({ mentionName: 'second-opencode' })],
-      }),
-      expect.objectContaining({
-        runtime: 'pi',
-        command: availableCommand,
-        status: 'available',
-        agents: [
-          expect.objectContaining({ mentionName: 'first-pi' }),
-          expect.objectContaining({ mentionName: 'second-pi' }),
-        ],
-      }),
+    const checks = new Map(result.runtimes.map((check) => [
+      `${check.runtime}\u0000${check.command}`,
+      { status: check.status, agents: check.agents.map((agent) => agent.mentionName).sort() },
     ]))
-    expect(result.runtimes).toHaveLength(3)
+    expect(checks).toEqual(new Map([
+      [`opencode\u0000${availableCommand}`, { status: 'available', agents: ['first-opencode'] }],
+      [`opencode\u0000${missingCommand}`, { status: 'missing', agents: ['second-opencode'] }],
+      [`pi\u0000${availableCommand}`, { status: 'available', agents: ['first-pi', 'second-pi'] }],
+    ]))
   })
 })
 

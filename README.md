@@ -31,7 +31,7 @@ npm run runtime:check
 
 The command runs only each configured `(Runtime, command)` pair's `--version` check and prints JSON. Identical pairs are checked once and list their associated Agents. It does not send a model prompt. On this machine, OpenCode is available and Pi is not installed, so Pi is reported as `missing` rather than treated as a failed test. Install Pi and run the command again before configuring Pi Agents.
 
-An Agent whose command is found enters the idle pool after the version check. This confirms the executable exists, not that its credentials, model access, or a real task run will succeed.
+Creating an Agent performs its local executable detection; an available executable with unverified task execution places that new Agent in the idle pool. `runtime:check` is observational and does not change Agent state. Either result confirms only that the executable exists, not that its credentials, model access, or a real task run will succeed.
 
 ## Local data and boundaries
 
@@ -53,4 +53,4 @@ npm run build
 npm run runtime:check
 ```
 
-The integration flow uses a temporary Git repository, a local bare Git remote, and `FakeRuntimeAdapter`. It verifies FIFO claims, distinct worktrees, queued input, committed task review, no automatic merge into `main`, and no task-branch ref pushed to the local remote after acceptance. It sends no real model request or network traffic.
+The integration flow uses a temporary Git repository, a local bare Git remote, and `FakeRuntimeAdapter`. It verifies FIFO claims, distinct worktrees, queued input, committed task review, no automatic merge into `main`, an unchanged remote `main` SHA, and no task-branch ref pushed to the local remote after acceptance. It sends no real model request or network traffic.
