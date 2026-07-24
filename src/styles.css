@@ -214,6 +214,51 @@ button:disabled {
   text-align: right;
 }
 
+.recent-activity {
+  padding: 15px 16px 18px;
+  border-top: 1px solid var(--line);
+}
+
+.recent-activity h3 {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.recent-activity p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.recent-activity ol {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recent-activity li {
+  display: grid;
+  gap: 3px;
+  padding-left: 9px;
+  border-left: 2px solid var(--review);
+}
+
+.recent-activity time {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.recent-activity span {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .task-board {
   display: grid;
   grid-auto-flow: column;
@@ -327,6 +372,11 @@ button:disabled {
   background: var(--surface);
 }
 
+.task-card[aria-pressed="true"]:focus-visible {
+  outline: 3px solid var(--review);
+  outline-offset: 2px;
+}
+
 .task-card-title {
   align-self: start;
   min-width: 0;
@@ -373,6 +423,27 @@ button:disabled {
 
 .task-inspector {
   min-height: 100%;
+}
+
+.task-inspector--empty {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  min-height: 240px;
+  padding: 24px;
+  text-align: center;
+}
+
+.task-inspector--empty h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.task-inspector--empty p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .inspector-heading {
@@ -727,6 +798,10 @@ button:disabled {
     grid-auto-flow: column;
     grid-auto-columns: 164px;
     overflow-x: auto;
+  }
+
+  .recent-activity {
+    border-top: 1px solid var(--line);
   }
 
   .agent-seat {

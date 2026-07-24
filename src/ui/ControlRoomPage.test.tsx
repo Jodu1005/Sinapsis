@@ -21,13 +21,38 @@ test('shows the three seats and all four initial task columns', () => {
   expect(screen.getByRole('heading', { name: '审查中' })).toBeInTheDocument()
 })
 
+test('shows a labeled recent activity region with an explicit empty state', () => {
+  renderPage()
+
+  const recentActivity = screen.getByRole('region', { name: '近期活动' })
+  expect(within(recentActivity).getByText('尚无活动')).toBeInTheDocument()
+
+  const timeline = screen.getByRole('region', { name: '活动时间轨' })
+  expect(within(timeline).queryByText('尚无活动')).not.toBeInTheDocument()
+})
+
 test('shows a textual empty state without a timeline rail for a task with no events', async () => {
   const user = renderPage()
 
   await user.click(screen.getByRole('button', { name: '补充队列可观测性' }))
 
-  expect(screen.queryByText('暂无活动')).toBeInTheDocument()
-  expect(screen.queryByRole('list', { name: '任务活动' })).not.toBeInTheDocument()
+  const timeline = screen.getByRole('region', { name: '活动时间轨' })
+  expect(within(timeline).getByText('暂无活动')).toBeInTheDocument()
+  expect(within(timeline).queryByRole('list', { name: '任务活动' })).not.toBeInTheDocument()
+})
+
+test('renders the real initial review evidence and typed timeline', () => {
+  renderPage()
+
+  expect(within(screen.getByRole('region', { name: '差异摘要' })).getByText(/速率限制/)).toBeInTheDocument()
+  expect(within(screen.getByRole('region', { name: '测试输出' })).getByText(/通过/)).toBeInTheDocument()
+
+  const timeline = screen.getByRole('list', { name: '任务活动' })
+  expect(within(timeline).getAllByRole('listitem').map((item) => item.dataset.kind)).toEqual([
+    'agent',
+    'artifact',
+    'checkpoint',
+  ])
 })
 
 test('renders selected typed task events in append order with rejected decision tone', () => {
@@ -109,7 +134,11 @@ test('accepting the selected review task updates its card and activity record', 
   const completedColumn = screen.getByRole('region', { name: '已完成' })
   const acceptedTask = within(completedColumn).getByRole('button', { name: '审查速率限制改动' })
   expect(within(acceptedTask).getByText('已接受')).toBeInTheDocument()
-  expect(screen.getByText('人工决定：已接受此改动')).toBeInTheDocument()
+
+  const recentActivity = screen.getByRole('region', { name: '近期活动' })
+  const timeline = screen.getByRole('region', { name: '活动时间轨' })
+  expect(within(recentActivity).getByText('人工决定：已接受此改动')).toBeInTheDocument()
+  expect(within(timeline).getByText('人工决定：已接受此改动')).toBeInTheDocument()
 })
 
 test('disables review decisions for a running task', async () => {
@@ -149,6 +178,8 @@ test('requesting a summary adds evidence to the selected task timeline', async (
 
   const timeline = screen.getByRole('list', { name: '任务活动' })
   expect(within(timeline).getByText('Agent 正在整理本次工作总结')).toBeInTheDocument()
+  const recentActivity = screen.getByRole('region', { name: '近期活动' })
+  expect(within(recentActivity).getByText('Agent 正在整理本次工作总结')).toBeInTheDocument()
 })
 
 test('requesting a decision moves the running task to waiting for input', async () => {
@@ -159,7 +190,10 @@ test('requesting a decision moves the running task to waiting for input', async 
 
   const needsInputColumn = screen.getByRole('region', { name: '等待输入' })
   expect(within(needsInputColumn).getByRole('button', { name: '重构身份验证中间件' })).toBeInTheDocument()
-  expect(screen.getByText('请求人工决策：请确认是否继续覆盖旧版分支')).toBeInTheDocument()
+  const timeline = screen.getByRole('region', { name: '活动时间轨' })
+  const recentActivity = screen.getByRole('region', { name: '近期活动' })
+  expect(within(timeline).getByText('请求人工决策：请确认是否继续覆盖旧版分支')).toBeInTheDocument()
+  expect(within(recentActivity).getByText('请求人工决策：请确认是否继续覆盖旧版分支')).toBeInTheDocument()
 })
 
 test('sending non-empty feedback adds it to the timeline and clears the textarea', async () => {
@@ -169,7 +203,10 @@ test('sending non-empty feedback adds it to the timeline and clears the textarea
   await user.type(feedback, '请补充边界条件测试')
   await user.click(screen.getByRole('button', { name: '发送反馈' }))
 
-  expect(screen.getByText('人工反馈：请补充边界条件测试')).toBeInTheDocument()
+  const timeline = screen.getByRole('region', { name: '活动时间轨' })
+  const recentActivity = screen.getByRole('region', { name: '近期活动' })
+  expect(within(timeline).getByText('人工反馈：请补充边界条件测试')).toBeInTheDocument()
+  expect(within(recentActivity).getByText('人工反馈：请补充边界条件测试')).toBeInTheDocument()
   expect(feedback).toHaveValue('')
 })
 
@@ -206,4 +243,31 @@ test('clears the feedback draft when switching between eligible tasks', async ()
   await user.click(sendFeedback)
   const timeline = screen.getByRole('region', { name: '活动时间轨' })
   expect(within(timeline).queryByText(`人工反馈：${staleDraft}`)).not.toBeInTheDocument()
+})
+
+test('selected task card keeps a distinct keyboard focus outline', () => {
+  renderPage()
+
+  const selectedTask = screen.getByRole('button', { name: '审查速率限制改动' })
+  selectedTask.focus()
+
+  expect(selectedTask).toHaveFocus()
+  expect(selectedTask).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('renders the control room and an inspector empty state when there are no tasks', () => {
+  const initial = createInMemoryControlRoomStore().getSnapshot()
+  const store = createInMemoryControlRoomStore({
+    ...initial,
+    tasks: [],
+  })
+  const service = createControlRoomService(store)
+
+  render(<ControlRoomPage service={service} />)
+
+  expect(screen.getByRole('heading', { name: '控制室' })).toBeInTheDocument()
+  expect(screen.getByRole('region', { name: '任务看板' })).toBeInTheDocument()
+  const inspector = screen.getByRole('complementary', { name: '任务详情与审查' })
+  expect(within(inspector).getByText('选择一个任务查看会话与审查记录')).toBeInTheDocument()
+  expect(within(inspector).queryByRole('button', { name: '接受改动' })).not.toBeInTheDocument()
 })

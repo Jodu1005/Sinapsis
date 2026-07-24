@@ -4,7 +4,7 @@ import { getTaskStatusLabel } from './TaskBoard'
 import { Timeline } from './Timeline'
 
 interface TaskInspectorProps {
-  task: Task
+  task: Task | undefined
   onRequestSummary: (taskId: string) => void
   onRequestDecision: (taskId: string) => void
   onSendFeedback: (taskId: string, feedback: string) => void
@@ -20,6 +20,15 @@ export function TaskInspector({
   onAccept,
   onReject,
 }: TaskInspectorProps) {
+  if (!task) {
+    return (
+      <div className="task-inspector task-inspector--empty">
+        <h2>任务详情</h2>
+        <p>选择一个任务查看会话与审查记录</p>
+      </div>
+    )
+  }
+
   return (
     <div className="task-inspector" data-status={task.status}>
       <header className="inspector-heading">

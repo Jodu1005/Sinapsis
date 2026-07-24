@@ -1,7 +1,7 @@
 import type { SessionEvent, TaskStatus } from '../domain/control-room'
 
 interface TimelineProps {
-  events: SessionEvent[]
+  events: readonly SessionEvent[]
   taskStatus: TaskStatus
 }
 

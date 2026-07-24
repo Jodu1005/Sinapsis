@@ -14,8 +14,6 @@ export function ControlRoomPage({ service }: ControlRoomPageProps) {
   const [selectedTaskId, setSelectedTaskId] = useState('review-rate-limit')
   const selectedTask = snapshot.tasks.find((task) => task.id === selectedTaskId) ?? snapshot.tasks[0]
 
-  if (!selectedTask) return null
-
   return (
     <main className="control-room-page">
       <h1 className="control-room-title">控制室</h1>
@@ -24,13 +22,14 @@ export function ControlRoomPage({ service }: ControlRoomPageProps) {
           projectName={snapshot.projectName}
           branch={snapshot.branch}
           agents={snapshot.agents}
+          activities={snapshot.activities}
         />
       </aside>
       <section className="board-panel" aria-label="任务看板">
         <TaskBoard
           tasks={snapshot.tasks}
           agents={snapshot.agents}
-          selectedTaskId={selectedTask.id}
+          selectedTaskId={selectedTask?.id}
           onSelectTask={setSelectedTaskId}
         />
       </section>

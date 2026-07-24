@@ -1,9 +1,10 @@
-import type { AgentSeat, ControlRoomSnapshot } from '../domain/control-room'
+import type { Activity, AgentSeat, ControlRoomSnapshot } from '../domain/control-room'
 
 interface ProjectSidebarProps {
   projectName: ControlRoomSnapshot['projectName']
   branch: ControlRoomSnapshot['branch']
-  agents: AgentSeat[]
+  agents: readonly AgentSeat[]
+  activities: readonly Activity[]
 }
 
 const agentStateLabels: Record<AgentSeat['state'], string> = {
@@ -12,7 +13,12 @@ const agentStateLabels: Record<AgentSeat['state'], string> = {
   reviewing: '审查中',
 }
 
-export function ProjectSidebar({ projectName, branch, agents }: ProjectSidebarProps) {
+export function ProjectSidebar({
+  projectName,
+  branch,
+  agents,
+  activities,
+}: ProjectSidebarProps) {
   return (
     <div className="project-sidebar">
       <header className="project-heading">
@@ -31,6 +37,21 @@ export function ProjectSidebar({ projectName, branch, agents }: ProjectSidebarPr
           </li>
         ))}
       </ul>
+      <section className="recent-activity" aria-labelledby="recent-activity-title">
+        <h3 id="recent-activity-title">近期活动</h3>
+        {activities.length === 0 ? (
+          <p>尚无活动</p>
+        ) : (
+          <ol aria-label="近期活动记录">
+            {activities.map((activity) => (
+              <li key={activity.id}>
+                <time dateTime={activity.at}>{activity.at}</time>
+                <span>{activity.message}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
     </div>
   )
 }

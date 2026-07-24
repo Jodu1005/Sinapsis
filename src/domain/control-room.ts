@@ -1,45 +1,54 @@
 export type TaskStatus = 'todo' | 'running' | 'needs_input' | 'in_review' | 'accepted' | 'rejected'
 export type EventKind = 'agent' | 'checkpoint' | 'feedback' | 'decision' | 'artifact'
+export type ReviewOutcome = 'accepted' | 'rejected'
 
 export interface AgentSeat {
-  id: string
-  name: string
-  role: string
-  runtime: string
-  state: 'active' | 'waiting' | 'reviewing'
+  readonly id: string
+  readonly name: string
+  readonly role: string
+  readonly runtime: string
+  readonly state: 'active' | 'waiting' | 'reviewing'
 }
 
 export interface SessionEvent {
-  id: string
-  kind: EventKind
-  message: string
-  at: string
+  readonly id: string
+  readonly kind: EventKind
+  readonly message: string
+  readonly at: string
 }
 
 export interface Task {
-  id: string
-  title: string
-  ownerId: string
-  status: TaskStatus
-  summary: string
-  updatedAt: string
-  events: SessionEvent[]
-  changedFiles: string[]
-  diffSummary?: string
-  testOutput?: string
+  readonly id: string
+  readonly title: string
+  readonly ownerId: string
+  readonly status: TaskStatus
+  readonly summary: string
+  readonly updatedAt: string
+  readonly events: readonly SessionEvent[]
+  readonly changedFiles: readonly string[]
+  readonly diffSummary?: string
+  readonly testOutput?: string
 }
 
 export interface Activity {
-  id: string
-  taskId: string
-  message: string
-  at: string
+  readonly id: string
+  readonly taskId: string
+  readonly message: string
+  readonly at: string
+}
+
+export interface ReviewDecision {
+  readonly id: string
+  readonly taskId: string
+  readonly outcome: ReviewOutcome
+  readonly message: string
+  readonly at: string
 }
 
 export interface ControlRoomSnapshot {
-  projectName: string
-  branch: string
-  agents: AgentSeat[]
-  tasks: Task[]
-  activities: Activity[]
+  readonly projectName: string
+  readonly branch: string
+  readonly agents: readonly AgentSeat[]
+  readonly tasks: readonly Task[]
+  readonly activities: readonly Activity[]
 }

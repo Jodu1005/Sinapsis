@@ -2,8 +2,8 @@ import type { AgentSeat, Task, TaskStatus } from '../domain/control-room'
 import { TaskCard } from './TaskCard'
 
 interface TaskBoardProps {
-  tasks: Task[]
-  agents: AgentSeat[]
+  tasks: readonly Task[]
+  agents: readonly AgentSeat[]
   selectedTaskId: string | undefined
   onSelectTask: (taskId: string) => void
 }

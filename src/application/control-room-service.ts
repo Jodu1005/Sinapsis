@@ -1,32 +1,42 @@
-import type { Activity, ControlRoomSnapshot, EventKind, Task, TaskStatus } from '../domain/control-room'
+import type {
+  Activity,
+  EventKind,
+  ReviewDecision,
+  ReviewOutcome,
+  TaskStatus,
+} from '../domain/control-room'
 import type { ControlRoomStore } from '../ports/control-room-store'
 
 export function createControlRoomService(store: ControlRoomStore) {
   let sequence = 0
 
-  function commit(taskId: string, status: TaskStatus, kind: EventKind, message: string) {
-    const snapshot = store.getSnapshot()
+  function createEntry(taskId: string, message: string) {
     const at = new Date().toISOString()
     const entryId = `${taskId}-${at}-${++sequence}`
-    const event = { id: entryId, kind, message, at }
     const activity: Activity = { id: `activity-${entryId}`, taskId, message, at }
-    let changed = false
-    const tasks = snapshot.tasks.map((task) => {
-      if (task.id !== taskId) return task
+    return { at, entryId, activity }
+  }
 
-      changed = true
-      const nextTask: Task = {
-        ...task,
-        status,
-        updatedAt: at,
-        events: [...task.events, event],
-      }
-      return nextTask
+  function commitEvent(taskId: string, status: TaskStatus, kind: EventKind, message: string) {
+    const { at, entryId, activity } = createEntry(taskId, message)
+    store.appendTaskEvent({
+      taskId,
+      status,
+      event: { id: entryId, kind, message, at },
+      activity,
     })
+  }
 
-    if (!changed) return
-
-    store.replace({ ...snapshot, tasks, activities: [activity, ...snapshot.activities] })
+  function commitDecision(taskId: string, outcome: ReviewOutcome, message: string) {
+    const { at, entryId } = createEntry(taskId, message)
+    const decision: ReviewDecision = {
+      id: entryId,
+      taskId,
+      outcome,
+      message,
+      at,
+    }
+    store.recordReviewDecision(decision)
   }
 
   function getTask(taskId: string) {
@@ -39,29 +49,29 @@ export function createControlRoomService(store: ControlRoomStore) {
     requestSummary(taskId: string) {
       const task = getTask(taskId)
       if (task?.status === 'running') {
-        commit(taskId, task.status, 'agent', 'Agent 正在整理本次工作总结')
+        commitEvent(taskId, task.status, 'agent', 'Agent 正在整理本次工作总结')
       }
     },
     requestDecision(taskId: string) {
       if (getTask(taskId)?.status === 'running') {
-        commit(taskId, 'needs_input', 'checkpoint', '请求人工决策：请确认是否继续覆盖旧版分支')
+        commitEvent(taskId, 'needs_input', 'checkpoint', '请求人工决策：请确认是否继续覆盖旧版分支')
       }
     },
     sendFeedback(taskId: string, feedback: string) {
       const task = getTask(taskId)
       const trimmedFeedback = feedback.trim()
       if (trimmedFeedback && (task?.status === 'needs_input' || task?.status === 'in_review')) {
-        commit(taskId, task.status, 'feedback', '人工反馈：' + trimmedFeedback)
+        commitEvent(taskId, task.status, 'feedback', '人工反馈：' + trimmedFeedback)
       }
     },
     accept(taskId: string) {
       if (getTask(taskId)?.status === 'in_review') {
-        commit(taskId, 'accepted', 'decision', '人工决定：已接受此改动')
+        commitDecision(taskId, 'accepted', '人工决定：已接受此改动')
       }
     },
     reject(taskId: string) {
       if (getTask(taskId)?.status === 'in_review') {
-        commit(taskId, 'rejected', 'decision', '人工决定：已驳回此改动')
+        commitDecision(taskId, 'rejected', '人工决定：已驳回此改动')
       }
     },
   }
