@@ -38,6 +38,7 @@ class FakeEventSource {
   static instances: FakeEventSource[] = []
   readonly listeners = new Map<string, Array<(event: Event) => void>>()
   onerror: ((event: Event) => void) | null = null
+  onopen: ((event: Event) => void) | null = null
 
   constructor(_url: string) { FakeEventSource.instances.push(this) }
   addEventListener(type: string, listener: (event: Event) => void) {
@@ -45,6 +46,7 @@ class FakeEventSource {
   }
   close() {}
   emit(type: string) { this.listeners.get(type)?.forEach((listener) => listener(new Event(type))) }
+  open() { this.onopen?.(new Event('open')) }
 }
 
 function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
@@ -53,6 +55,11 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     createWorkspace: vi.fn(),
     addRepository: vi.fn(),
     postMessage: vi.fn().mockResolvedValue(undefined),
+    createTask: vi.fn(),
+    getTaskDetails: vi.fn(),
+    queueTaskInput: vi.fn(),
+    reviewTask: vi.fn(),
+    readArtifact: vi.fn(),
     ...overrides,
   }
 }
@@ -109,6 +116,31 @@ describe('WorkspaceShell', () => {
     expect(api.getBootstrap).toHaveBeenCalledTimes(2)
   })
 
+  it('refreshes the bootstrap snapshot after the event stream reconnects without a domain event', async () => {
+    const api = makeApi({ getBootstrap: vi.fn().mockResolvedValue(snapshot) })
+    render(<WorkspaceShell api={api} />)
+
+    await screen.findByText('已连接')
+    FakeEventSource.instances[0].onerror?.(new Event('error'))
+    expect(await screen.findByText('正在重新连接')).toBeInTheDocument()
+
+    FakeEventSource.instances[0].open()
+    expect(await screen.findByText('已连接')).toBeInTheDocument()
+    expect(api.getBootstrap).toHaveBeenCalledTimes(2)
+  })
+
+  it('opens the selected repository task list without selecting an arbitrary channel', async () => {
+    render(<WorkspaceShell api={makeApi()} />)
+    const user = userEvent.setup()
+
+    await screen.findByRole('button', { name: '任务 1' })
+    await user.click(screen.getByRole('button', { name: '任务 1' }))
+
+    expect(screen.getByRole('heading', { name: 'sinapsis 任务' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /修复频道界面/ })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '# general' })).toBeInTheDocument()
+  })
+
   it('keeps the message area usable while narrow-screen drawers are closed', async () => {
     render(<WorkspaceShell api={makeApi()} />)
     const user = userEvent.setup()
@@ -120,5 +152,44 @@ describe('WorkspaceShell', () => {
 
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
     expect(within(screen.getByRole('main')).getByText('先看一下任务队列。')).toBeInTheDocument()
+  })
+
+  it('removes narrow-screen drawers from the accessibility tree until opened', async () => {
+    const originalMatchMedia = window.matchMedia
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query.includes('700px'),
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }))
+    try {
+      render(<WorkspaceShell api={makeApi()} />)
+      const user = userEvent.setup()
+
+      await screen.findByRole('textbox', { name: '发送消息' })
+      const navigation = document.querySelector<HTMLElement>('nav[aria-label="代码仓与频道"]')
+      expect(navigation).not.toBeNull()
+      expect(navigation).toHaveAttribute('aria-hidden', 'true')
+      expect(navigation).toHaveAttribute('inert')
+
+      await user.click(screen.getByRole('button', { name: '打开导航' }))
+      expect(navigation!).not.toHaveAttribute('aria-hidden')
+      expect(navigation!).not.toHaveAttribute('inert')
+    } finally {
+      window.matchMedia = originalMatchMedia
+    }
+  })
+
+  it('shows a composer error when sending a message fails', async () => {
+    const api = makeApi({ postMessage: vi.fn().mockRejectedValue(new Error('本机服务不可用')) })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await user.type(composer, '这条消息发送失败。')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('本机服务不可用')
+    expect(composer).toHaveValue('这条消息发送失败。')
   })
 })

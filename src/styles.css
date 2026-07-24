@@ -90,6 +90,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .message-composer:focus-within { border-color: #47a07e; box-shadow: 0 0 0 2px rgb(71 160 126 / 17%); }
 .message-composer textarea { width: 100%; min-height: 29px; max-height: 120px; resize: vertical; border: 0; color: var(--ink); background: transparent; outline: 0; }
 .message-composer textarea::placeholder { color: #849088; }
+.composer-error { grid-column: 1 / -1; margin: 0 5px 2px; }
 .send-button { display: inline-grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 4px; color: #fff; background: var(--green); transition: background-color .16s ease; }
 .send-button:hover:not(:disabled) { background: #05664f; }
 
