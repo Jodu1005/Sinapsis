@@ -84,6 +84,27 @@ describe('SQLite workspace repositories', () => {
     expect(publisher.events).toEqual([])
   })
 
+  it('does not publish repository events when a database transaction rolls back', async () => {
+    const { repositories, publisher } = await createRepositories()
+    const channel = createChannel(repositories)
+
+    expect(() => {
+      database!.transaction(() => {
+        repositories.createMessage({
+          channelId: channel.id,
+          senderType: 'human',
+          authorName: 'Jodu',
+          body: 'This message must disappear with the database transaction.',
+        })
+
+        throw new Error('roll back database transaction')
+      })
+    }).toThrow('roll back database transaction')
+
+    expect(publisher.events).toEqual([])
+    expect(repositories.getBootstrap().workspaces[0]?.recentMessages).toEqual([])
+  })
+
   it('rejects moving an accepted task back to queued', () => {
     const acceptedTask: Task = {
       id: 'task-1',
