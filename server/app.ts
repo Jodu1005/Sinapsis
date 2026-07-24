@@ -1,22 +1,33 @@
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from 'express'
 import path from 'node:path'
 import { CommandGitClient } from './adapters/git/git-client'
+import { GitWorktreeManager } from './adapters/git/git-worktree-manager'
+import { OpenCodeRuntimeAdapter } from './adapters/runtime/opencode-runtime-adapter'
+import { PiRuntimeAdapter } from './adapters/runtime/pi-runtime-adapter'
 import { CommandRuntimeAvailabilityDetector, runtimeKinds, type RuntimeAvailabilityDetector } from './adapters/runtime/runtime-profile'
 import { SseDomainEventPublisher } from './adapters/sse/sse-domain-event-publisher'
 import { createSqliteDatabase } from './adapters/sqlite/database'
 import { SqliteRepositories } from './adapters/sqlite/sqlite-repositories'
 import { AgentService } from './application/agent-service'
+import { ChannelMessageService } from './application/channel-message-service'
+import { TaskExecutionCoordinator } from './application/task-execution-coordinator'
+import { TaskReviewService } from './application/task-review-service'
+import { TaskScheduler } from './application/task-scheduler'
 import { TaskService } from './application/task-service'
 import { NotFoundError, ValidationError, WorkspaceService, type WorkspaceCatalog, type WorkspaceMutationCatalog } from './application/workspace-service'
 import { getServiceConfig } from './config'
 import { DomainError } from './domain/task'
 import type { GitClient } from './ports/git-client'
+import { NodeProcessRunner } from './ports/process-runner'
 import type { WorkspaceRepositories, WorkspaceUnitOfWork } from './ports/repositories'
 
 export interface CreateAppOptions {
   databasePath?: string
   gitClient?: GitClient
   runtimeAvailabilityDetector?: RuntimeAvailabilityDetector
+  executionCoordinator?: TaskExecutionCoordinator
+  scheduler?: TaskScheduler
+  reviewService?: TaskReviewService
 }
 
 export function createApp(options: CreateAppOptions = {}): Express {
@@ -29,10 +40,25 @@ export function createApp(options: CreateAppOptions = {}): Express {
   const workspaceService = new WorkspaceService(catalog, options.gitClient ?? new CommandGitClient())
   const agentService = new AgentService(catalog, options.runtimeAvailabilityDetector ?? new CommandRuntimeAvailabilityDetector())
   const taskService = new TaskService(repositories)
+  const messages = new ChannelMessageService(repositories)
+  const coordinator = options.executionCoordinator ?? new TaskExecutionCoordinator({
+    repositories,
+    runtimes: {
+      opencode: new OpenCodeRuntimeAdapter(new NodeProcessRunner()),
+      pi: new PiRuntimeAdapter(new NodeProcessRunner()),
+    },
+    worktrees: new GitWorktreeManager({ dataDir: path.dirname(databasePath) }),
+    artifactDirectory: path.join(path.dirname(databasePath), 'artifacts'),
+    messages,
+  })
+  const scheduler = options.scheduler ?? new TaskScheduler(repositories, coordinator)
+  const reviewService = options.reviewService ?? new TaskReviewService(repositories, coordinator, messages)
 
   app.locals.closeDatabase = () => database.close()
   app.locals.closeSse = () => eventPublisher.close()
   app.locals.repositories = repositories
+  app.locals.scheduler = scheduler
+  app.locals.executionCoordinator = coordinator
   app.use(express.json())
 
   app.get('/api/health', (_request, response) => {
@@ -124,7 +150,41 @@ export function createApp(options: CreateAppOptions = {}): Express {
     const body = objectBody(request.body)
     assertOnlyKeys(body, ['body'])
     const input = taskService.queueHumanInput(requiredParam(request.params.taskId, 'taskId'), requiredString(body, 'body'))
+    coordinator.deliverQueuedInput(input.taskId, input.id)
     response.status(201).json(input)
+  }))
+
+  app.post('/api/channels/:channelId/messages', asyncRoute(async (request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['body', 'taskId'])
+    const channelId = requiredParam(request.params.channelId, 'channelId')
+    const taskId = optionalString(body, 'taskId')
+    const message = messages.postHuman(channelId, requiredString(body, 'body'), taskId)
+    const mention = findMentionedAgent(repositories, channelId, message.body)
+    if (mention?.status === 'busy') {
+      coordinator.queueInputForActiveAgent(mention.id, message.body)
+    }
+    if (mention?.status === 'idle' && taskId) {
+      const task = repositories.getTask(taskId)
+      if (task?.status === 'queued' && task.directAgentId === mention.id) {
+        scheduler.claimNext(mention.id)
+        await coordinator.flush(taskId)
+      }
+    }
+    response.status(201).json(message)
+  }))
+
+  app.post('/api/tasks/:taskId/review', asyncRoute(async (request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['action', 'message'])
+    const action = requiredString(body, 'action')
+    if (action !== 'accept' && action !== 'return') throw new ValidationError('action must be accept or return.')
+    const task = await reviewService.review(requiredParam(request.params.taskId, 'taskId'), action, requiredString(body, 'message'))
+    response.json(task)
+  }))
+
+  app.post('/api/tasks/:taskId/merge', asyncRoute((_request, response) => {
+    response.status(501).json({ error: '第一版只记录验收，合并需要独立人工流程。' })
   }))
 
   app.post('/api/tasks/:taskId/cancel', asyncRoute((request, response) => {
@@ -148,6 +208,19 @@ export function createApp(options: CreateAppOptions = {}): Express {
   app.use(errorHandler)
 
   return app
+}
+
+function findMentionedAgent(repositories: WorkspaceRepositories, channelId: string, body: string) {
+  for (const workspace of repositories.getBootstrap().workspaces) {
+    if (!workspace.repositories.some((repository) => repository.channels.some((channel) => channel.id === channelId))) continue
+    return workspace.agents.find((agent) => exactMention(body, agent.mentionName))
+  }
+  return undefined
+}
+
+function exactMention(body: string, mention: string): boolean {
+  const escaped = mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(^|\\s)@${escaped}(?=$|\\s|[,.!?，。！？])`, 'i').test(body)
 }
 
 class RepositoryWorkspaceCatalog implements WorkspaceCatalog {

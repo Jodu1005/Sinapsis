@@ -10,6 +10,7 @@ export type RuntimeEvent =
   | { kind: 'error'; taskId: string; message: string }
   | { kind: 'session'; taskId: string; sessionId: string; sessionFile?: string }
   | { kind: 'queue'; taskId: string; queueLength: number }
+  | { kind: 'needs_input'; taskId: string; prompt: string }
   | { kind: 'settled'; taskId: string }
 
 export type RuntimeEventSink = (event: RuntimeEvent) => void

@@ -385,6 +385,74 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     return transitioned
   }
 
+  allocateTaskWorktree(taskId: string, branchName: string, worktreePath: string): Task {
+    const task = readTask(this.database, taskId)
+    if (!task) throw new Error(`Task ${taskId} does not exist.`)
+    const updatedAt = now()
+    this.database.prepare('UPDATE tasks SET branch_name = ?, worktree_path = ?, updated_at = ? WHERE id = ?').run(
+      requireText(branchName, 'Task branch name'), requireText(worktreePath, 'Task worktree path'), updatedAt, taskId,
+    )
+    this.recordTaskEvent(taskId, 'task.worktree_allocated', { branchName, worktreePath })
+    return { ...task, branchName, worktreePath, updatedAt }
+  }
+
+  createTaskSession(taskId: string, agentId: string): TaskSession {
+    if (!readTask(this.database, taskId)) throw new Error(`Task ${taskId} does not exist.`)
+    if (!readAgent(this.database, agentId)) throw new Error(`Agent ${agentId} does not exist.`)
+    const createdAt = now()
+    const session: TaskSession = {
+      id: randomUUID(), taskId, agentId, runtimeSessionId: null, status: 'preparing', createdAt, updatedAt: createdAt,
+    }
+    this.database.prepare(`
+      INSERT INTO task_sessions (id, task_id, agent_id, runtime_session_id, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(session.id, session.taskId, session.agentId, session.runtimeSessionId, session.status, session.createdAt, session.updatedAt)
+    this.recordTaskEvent(taskId, 'task.session_created', { sessionId: session.id, agentId })
+    return session
+  }
+
+  updateTaskSession(taskId: string, agentId: string, input: { runtimeSessionId?: string | null; status?: string }): TaskSession {
+    const session = this.database.prepare(`
+      SELECT * FROM task_sessions WHERE task_id = ? AND agent_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1
+    `).get(taskId, agentId) as TaskSessionRow | undefined
+    if (!session) throw new Error(`No task session exists for task ${taskId} and agent ${agentId}.`)
+    const updatedAt = now()
+    const runtimeSessionId = input.runtimeSessionId === undefined ? session.runtime_session_id : input.runtimeSessionId
+    const status = input.status ?? session.status
+    this.database.prepare('UPDATE task_sessions SET runtime_session_id = ?, status = ?, updated_at = ? WHERE id = ?').run(
+      runtimeSessionId, status, updatedAt, session.id,
+    )
+    this.recordTaskEvent(taskId, 'task.session_updated', { sessionId: session.id, status })
+    return { ...mapTaskSession(session), runtimeSessionId, status, updatedAt }
+  }
+
+  consumeTaskInput(inputId: string): TaskInput {
+    const input = this.database.prepare('SELECT * FROM task_input_queue WHERE id = ?').get(inputId) as TaskInputRow | undefined
+    if (!input) throw new Error(`Task input ${inputId} does not exist.`)
+    const consumedAt = now()
+    this.database.prepare('UPDATE task_input_queue SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL').run(consumedAt, inputId)
+    return { ...mapTaskInput(input), consumedAt }
+  }
+
+  createTaskArtifact(taskId: string, kind: string, artifactPath: string): TaskArtifact {
+    if (!readTask(this.database, taskId)) throw new Error(`Task ${taskId} does not exist.`)
+    const artifact: TaskArtifact = { id: randomUUID(), taskId, kind: requireText(kind, 'Artifact kind'), path: requireText(artifactPath, 'Artifact path'), createdAt: now() }
+    this.database.prepare('INSERT INTO task_artifacts (id, task_id, kind, path, created_at) VALUES (?, ?, ?, ?, ?)').run(
+      artifact.id, artifact.taskId, artifact.kind, artifact.path, artifact.createdAt,
+    )
+    this.afterCommit(event('task.artifact_created', 'task', taskId, artifact.createdAt))
+    return artifact
+  }
+
+  createReviewDecision(taskId: string, decision: string, reason: string): void {
+    if (!readTask(this.database, taskId)) throw new Error(`Task ${taskId} does not exist.`)
+    const createdAt = now()
+    this.database.prepare('INSERT INTO review_decisions (id, task_id, decision, reason, created_at) VALUES (?, ?, ?, ?, ?)').run(
+      randomUUID(), taskId, requireText(decision, 'Review decision'), requireText(reason, 'Review reason'), createdAt,
+    )
+    this.afterCommit(event('task.review_recorded', 'task', taskId, createdAt))
+  }
+
   recordTaskEvent(taskId: string, type: string, payload: Record<string, unknown>): void {
     if (!readTask(this.database, taskId)) {
       throw new Error(`Task ${taskId} does not exist.`)
@@ -453,6 +521,81 @@ export class SqliteRepositories implements WorkspaceRepositories {
 
   transitionTask(taskId: string, next: TaskStatus, reason: string): Task {
     return this.inTransaction((unitOfWork) => unitOfWork.transitionTask(taskId, next, reason))
+  }
+
+  allocateTaskWorktree(taskId: string, branchName: string, worktreePath: string): Task {
+    return this.inTransaction((unitOfWork) => unitOfWork.allocateTaskWorktree(taskId, branchName, worktreePath))
+  }
+
+  createTaskSession(taskId: string, agentId: string): TaskSession {
+    return this.inTransaction((unitOfWork) => unitOfWork.createTaskSession(taskId, agentId))
+  }
+
+  updateTaskSession(taskId: string, agentId: string, input: { runtimeSessionId?: string | null; status?: string }): TaskSession {
+    return this.inTransaction((unitOfWork) => unitOfWork.updateTaskSession(taskId, agentId, input))
+  }
+
+  consumeTaskInput(inputId: string): TaskInput {
+    return this.inTransaction((unitOfWork) => unitOfWork.consumeTaskInput(inputId))
+  }
+
+  createTaskArtifact(taskId: string, kind: string, artifactPath: string): TaskArtifact {
+    return this.inTransaction((unitOfWork) => unitOfWork.createTaskArtifact(taskId, kind, artifactPath))
+  }
+
+  createReviewDecision(taskId: string, decision: string, reason: string): void {
+    this.inTransaction((unitOfWork) => unitOfWork.createReviewDecision(taskId, decision, reason))
+  }
+
+  finishTaskExecution(taskId: string, agentId: string, next: Extract<TaskStatus, 'in_review' | 'needs_human'>, reason: string): Task {
+    return this.inTransaction((unitOfWork) => {
+      const task = readTask(this.sqlite.database, taskId)
+      if (!task) throw new Error(`Task ${taskId} does not exist.`)
+      const transitioned = unitOfWork.transitionTask(taskId, next, reason)
+      const updatedAt = new Date(transitioned.updatedAt)
+      this.sqlite.database.prepare('DELETE FROM task_leases WHERE task_id = ? AND agent_id = ?').run(taskId, agentId)
+      this.sqlite.database.prepare('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?').run('idle', transitioned.updatedAt, agentId)
+      const sessionStatus = next === 'in_review' ? 'completed' : 'failed'
+      const sessionUpdate = this.sqlite.database.prepare(`
+        UPDATE task_sessions SET status = ?, updated_at = ?
+        WHERE id = (
+          SELECT id FROM task_sessions WHERE task_id = ? AND agent_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1
+        )
+      `).run(sessionStatus, transitioned.updatedAt, taskId, agentId)
+      if (Number(sessionUpdate.changes) === 1) {
+        unitOfWork.recordTaskEvent(taskId, 'task.session_updated', { agentId, status: sessionStatus })
+      }
+      unitOfWork.afterCommit(event('agent.status_changed', 'agent', agentId, updatedAt.toISOString()))
+      return transitioned
+    })
+  }
+
+  getActiveTaskForAgent(agentId: string): Task | undefined {
+    const row = this.sqlite.database.prepare(`
+      SELECT tasks.* FROM tasks JOIN task_leases ON task_leases.task_id = tasks.id
+      WHERE task_leases.agent_id = ? LIMIT 1
+    `).get(agentId) as TaskRow | undefined
+    return row ? mapTask(row) : undefined
+  }
+
+  reclaimReturnedTask(taskId: string, agentId: string, occurredAt: Date): TaskClaim | undefined {
+    return this.inTransaction((unitOfWork) => {
+      const database = this.sqlite.database
+      const task = readTask(database, taskId)
+      const agent = readAgent(database, agentId)
+      if (!task || !agent || task.status !== 'returned' || agent.status !== 'idle') return undefined
+      const claimed = unitOfWork.transitionTask(taskId, 'claimed', '人工退回后恢复原会话')
+      const lease: TaskLease = {
+        id: randomUUID(), taskId, agentId,
+        expiresAt: new Date(occurredAt.getTime() + resolveLeaseTtlMs(database, task)).toISOString(), createdAt: occurredAt.toISOString(),
+      }
+      database.prepare('INSERT INTO task_leases (id, task_id, agent_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)').run(
+        lease.id, lease.taskId, lease.agentId, lease.expiresAt, lease.createdAt,
+      )
+      database.prepare('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?').run('busy', occurredAt.toISOString(), agentId)
+      unitOfWork.afterCommit(event('agent.status_changed', 'agent', agentId, occurredAt.toISOString()))
+      return { task: claimed, lease }
+    })
   }
 
   getTask(taskId: string): Task | undefined {

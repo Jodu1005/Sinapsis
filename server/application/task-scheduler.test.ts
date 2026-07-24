@@ -71,6 +71,18 @@ describe('TaskScheduler', () => {
     expect(scheduler.claimNext(agents.frontend.id, at(3))?.task.id).toBe(direct.id)
   })
 
+  it('hands a new claim to the execution coordinator hook', async () => {
+    const { repositories, agents, createTask } = await createFixture()
+    const task = createTask({ title: 'Start through coordinator', labels: ['frontend'] })
+    const received: string[] = []
+    const scheduler = new TaskScheduler(repositories, { startClaim: async (claim) => { received.push(claim.task.id) } })
+
+    scheduler.claimNext(agents.frontend.id, at(2))
+    await Promise.resolve()
+
+    expect(received).toEqual([task.id])
+  })
+
   it('keeps one active lease per agent even if its status is reset incorrectly', async () => {
     const { repositories, agents, createTask } = await createFixture()
     createTask({ title: 'First task', labels: ['frontend'] })

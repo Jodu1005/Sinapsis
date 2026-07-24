@@ -32,6 +32,11 @@ export async function createGitFixture(): Promise<GitFixture> {
   }
 }
 
+export async function commitFile(repositoryRoot: string, file: string, message: string): Promise<void> {
+  await git(repositoryRoot, ['add', file])
+  await git(repositoryRoot, ['commit', '-m', message])
+}
+
 async function git(cwd: string, args: string[]): Promise<void> {
   await execFileAsync('git', args, { cwd })
 }

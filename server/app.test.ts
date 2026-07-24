@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp } from './app'
 import { startHttpTestServer } from './test/http-test-server'
+import type { WorkspaceRepositories } from './ports/repositories'
 
 describe('local service API', () => {
   let closeServer: (() => Promise<void>) | undefined
@@ -147,5 +148,34 @@ describe('local service API', () => {
     ])
 
     expect(responses.map((response) => response.status).sort()).toEqual([201, 409])
+  })
+
+  it('persists ordinary channel messages without waking an agent and makes merge explicitly unavailable', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
+    const agent = repositories.createAgent({
+      workspaceId: workspace.id, identity: 'Build', mentionName: 'build', runtime: 'opencode', capabilityTags: ['typescript'],
+      maxConcurrentTasks: 1, command: 'opencode', args: ['run'], model: '', env: {},
+    })
+    const task = repositories.createTask({
+      repositoryId: repository.id, channelId: channel.id, directAgentId: agent.id, title: 'Task', description: 'Description',
+      acceptanceCriteria: 'Criteria', labels: ['typescript'],
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const messageResponse = await fetch(`${server.baseUrl}/api/channels/${channel.id}/messages`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ body: '这是一条普通频道消息。', taskId: task.id }),
+    })
+    const mergeResponse = await fetch(`${server.baseUrl}/api/tasks/${task.id}/merge`, { method: 'POST' })
+
+    expect(messageResponse.status).toBe(201)
+    expect(repositories.getTaskDetails(task.id)?.inputs).toEqual([])
+    expect(repositories.getBootstrap().workspaces[0].agents[0].status).toBe('offline')
+    expect(mergeResponse.status).toBe(501)
+    await expect(mergeResponse.json()).resolves.toEqual({ error: '第一版只记录验收，合并需要独立人工流程。' })
   })
 })

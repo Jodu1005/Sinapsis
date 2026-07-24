@@ -1,17 +1,22 @@
 import type { RuntimeAvailability } from './runtime-profile'
 import type { RuntimeAdapter, RuntimeEventSink, RuntimeSession, RuntimeTaskRequest } from '../../ports/runtime'
 
+type RuntimeEventWithoutTaskId<T> = T extends { taskId: string } ? Omit<T, 'taskId'> : never
+
 export class FakeRuntimeAdapter implements RuntimeAdapter {
   readonly starts: RuntimeTaskRequest[] = []
   readonly inputs: Array<{ session: RuntimeSession; input: string }> = []
+  readonly resumes: RuntimeSession[] = []
   availability: RuntimeAvailability = { executable: 'available', taskExecution: 'unverified' }
+  private readonly sinks = new Map<string, RuntimeEventSink>()
 
   detect(): Promise<RuntimeAvailability> {
     return Promise.resolve(this.availability)
   }
 
-  async start(task: RuntimeTaskRequest, _sink: RuntimeEventSink): Promise<RuntimeSession> {
+  async start(task: RuntimeTaskRequest, sink: RuntimeEventSink): Promise<RuntimeSession> {
     this.starts.push(task)
+    this.sinks.set(task.taskId, sink)
     return {
       taskId: task.taskId,
       runtime: task.profile.runtime,
@@ -29,5 +34,13 @@ export class FakeRuntimeAdapter implements RuntimeAdapter {
     this.inputs.push({ session, input })
   }
 
-  async resume(_session: RuntimeSession, _sink: RuntimeEventSink): Promise<void> {}
+  async resume(session: RuntimeSession, _sink: RuntimeEventSink): Promise<void> {
+    this.resumes.push(session)
+  }
+
+  emit(taskId: string, event: RuntimeEventWithoutTaskId<import('../../ports/runtime').RuntimeEvent>): void {
+    const sink = this.sinks.get(taskId)
+    if (!sink) throw new Error(`No runtime sink for task ${taskId}.`)
+    sink({ ...event, taskId } as import('../../ports/runtime').RuntimeEvent)
+  }
 }

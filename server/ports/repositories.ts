@@ -1,7 +1,7 @@
 import type { Agent, AgentStatus, CreateAgentInput } from '../domain/agent'
 import type { DomainEvent } from '../domain/events'
 import type { CreateMessageInput, Message } from '../domain/message'
-import type { CreateTaskInput, Task, TaskArtifact, TaskDetails, TaskInput, TaskLease, TaskStatus } from '../domain/task'
+import type { CreateTaskInput, Task, TaskArtifact, TaskDetails, TaskInput, TaskLease, TaskSession, TaskStatus } from '../domain/task'
 import type { TaskSessionStore } from './task-session-store'
 import type {
   Channel,
@@ -54,6 +54,12 @@ export interface WorkspaceUnitOfWork {
   updateMessageBody(messageId: string, body: string): Message
   deleteMessage(messageId: string): void
   transitionTask(taskId: string, next: TaskStatus, reason: string): Task
+  allocateTaskWorktree(taskId: string, branchName: string, worktreePath: string): Task
+  createTaskSession(taskId: string, agentId: string): TaskSession
+  updateTaskSession(taskId: string, agentId: string, input: { runtimeSessionId?: string | null; status?: string }): TaskSession
+  consumeTaskInput(inputId: string): TaskInput
+  createTaskArtifact(taskId: string, kind: string, path: string): TaskArtifact
+  createReviewDecision(taskId: string, decision: string, reason: string): void
   recordTaskEvent(taskId: string, type: string, payload: Record<string, unknown>): void
   afterCommit(event: DomainEvent): void
 }
@@ -70,6 +76,15 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   updateMessageBody(messageId: string, body: string): Message
   deleteMessage(messageId: string): void
   transitionTask(taskId: string, next: TaskStatus, reason: string): Task
+  allocateTaskWorktree(taskId: string, branchName: string, worktreePath: string): Task
+  createTaskSession(taskId: string, agentId: string): TaskSession
+  updateTaskSession(taskId: string, agentId: string, input: { runtimeSessionId?: string | null; status?: string }): TaskSession
+  consumeTaskInput(inputId: string): TaskInput
+  createTaskArtifact(taskId: string, kind: string, path: string): TaskArtifact
+  createReviewDecision(taskId: string, decision: string, reason: string): void
+  finishTaskExecution(taskId: string, agentId: string, next: Extract<TaskStatus, 'in_review' | 'needs_human'>, reason: string): Task
+  getActiveTaskForAgent(agentId: string): Task | undefined
+  reclaimReturnedTask(taskId: string, agentId: string, occurredAt: Date): TaskClaim | undefined
   getTask(taskId: string): Task | undefined
   getTasksForRepository(repositoryId: string): Task[]
   getTaskDetails(taskId: string): TaskDetails | undefined

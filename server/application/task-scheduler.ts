@@ -2,11 +2,22 @@ import type { TaskClaim, WorkspaceRepositories } from '../ports/repositories'
 
 export const defaultLeaseTtlMs = 30_000
 
+export interface TaskClaimStarter {
+  startClaim(claim: TaskClaim): Promise<void>
+}
+
 export class TaskScheduler {
-  constructor(private readonly repositories: WorkspaceRepositories) {}
+  constructor(
+    private readonly repositories: WorkspaceRepositories,
+    private readonly claimStarter?: TaskClaimStarter,
+  ) {}
 
   claimNext(agentId: string, occurredAt = new Date()): TaskClaim | undefined {
-    return this.repositories.claimNextTask(agentId, occurredAt)
+    const claim = this.repositories.claimNextTask(agentId, occurredAt)
+    if (claim && this.claimStarter) {
+      void this.claimStarter.startClaim(claim).catch(() => undefined)
+    }
+    return claim
   }
 
   renew(taskId: string, agentId: string, occurredAt = new Date()): boolean {
