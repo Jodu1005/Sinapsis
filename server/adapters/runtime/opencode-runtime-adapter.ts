@@ -31,6 +31,10 @@ export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
     this.drain(session, sink)
   }
 
+  cancel(session: RuntimeSession): void {
+    this.processes.get(session)?.kill()
+  }
+
   private drain(session: RuntimeSession, sink: RuntimeEventSink): void {
     if (session.isStreaming) return
     const input = session.pendingInputs.shift()
@@ -67,8 +71,15 @@ export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
         artifactType: 'runtime-exit',
         content: JSON.stringify({ command: session.profile.command, args, cwd: session.worktreePath, code, signal }),
       })
-      if (code !== 0) sink({ kind: 'error', taskId: session.taskId, message: `OpenCode exited with ${code ?? signal ?? 'an unknown status'}.` })
-      this.drain(session, sink)
+      if (code !== 0) {
+        sink({ kind: 'error', taskId: session.taskId, message: `OpenCode exited with ${code ?? signal ?? 'an unknown status'}.` })
+        return
+      }
+      if (session.pendingInputs.length > 0) {
+        this.drain(session, sink)
+        return
+      }
+      sink({ kind: 'settled', taskId: session.taskId })
     })
   }
 

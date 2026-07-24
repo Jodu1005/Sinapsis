@@ -45,7 +45,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     repositories,
     runtimes: {
       opencode: new OpenCodeRuntimeAdapter(new NodeProcessRunner()),
-      pi: new PiRuntimeAdapter(new NodeProcessRunner()),
+      pi: new PiRuntimeAdapter(new NodeProcessRunner(), path.dirname(databasePath)),
     },
     worktrees: new GitWorktreeManager({ dataDir: path.dirname(databasePath) }),
     artifactDirectory: path.join(path.dirname(databasePath), 'artifacts'),

@@ -7,6 +7,7 @@ export class FakeRuntimeAdapter implements RuntimeAdapter {
   readonly starts: RuntimeTaskRequest[] = []
   readonly inputs: Array<{ session: RuntimeSession; input: string }> = []
   readonly resumes: RuntimeSession[] = []
+  readonly cancellations: RuntimeSession[] = []
   availability: RuntimeAvailability = { executable: 'available', taskExecution: 'unverified' }
   private readonly sinks = new Map<string, RuntimeEventSink>()
 
@@ -36,6 +37,10 @@ export class FakeRuntimeAdapter implements RuntimeAdapter {
 
   async resume(session: RuntimeSession, _sink: RuntimeEventSink): Promise<void> {
     this.resumes.push(session)
+  }
+
+  cancel(session: RuntimeSession): void {
+    this.cancellations.push(session)
   }
 
   emit(taskId: string, event: RuntimeEventWithoutTaskId<import('../../ports/runtime').RuntimeEvent>): void {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { resolveRuntimeProfile } from './runtime-profile'
 import { PiRuntimeAdapter } from './pi-runtime-adapter'
 import { FakeProcessRunner } from '../../test/fake-process-runner'
@@ -17,7 +17,7 @@ describe('PiRuntimeAdapter', () => {
   it('captures its session state before sending the initial prompt', async () => {
     const runner = new FakeProcessRunner()
     const events: RuntimeEvent[] = []
-    const adapter = new PiRuntimeAdapter(runner)
+    const adapter = new PiRuntimeAdapter(runner, '/tmp/sinapsis-data')
 
     const session = await adapter.start(task, (event) => events.push(event))
     const process = runner.spawns[0]?.process
@@ -25,7 +25,7 @@ describe('PiRuntimeAdapter', () => {
     expect(runner.spawns[0]?.options).toMatchObject({
       command: 'pi-bin',
       cwd: '/tmp/task-2',
-      args: ['--mode', 'rpc'],
+      args: ['--mode', 'rpc', '--session-dir', '/tmp/sinapsis-data/pi-sessions', '--name', 'sinapsis:task-2'],
     })
     expect(JSON.parse(process?.stdin[0] ?? '{}')).toMatchObject({ command: 'get_state' })
     expect(process?.stdin).toHaveLength(1)
@@ -89,5 +89,17 @@ describe('PiRuntimeAdapter', () => {
     ]))
     expect(session.isStreaming).toBe(false)
     expect(session).toMatchObject({ sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session.jsonl' })
+  })
+
+  it('cancels its managed process for a session', async () => {
+    const runner = new FakeProcessRunner()
+    const adapter = new PiRuntimeAdapter(runner, '/tmp/sinapsis-data')
+    const session = await adapter.start(task, () => {})
+    const process = runner.spawns[0]?.process
+    const kill = vi.spyOn(process!, 'kill')
+
+    adapter.cancel(session)
+
+    expect(kill).toHaveBeenCalledOnce()
   })
 })

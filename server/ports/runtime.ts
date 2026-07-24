@@ -40,6 +40,7 @@ export interface RuntimeAdapter extends RuntimeAvailabilityDetector {
   start(task: RuntimeTaskRequest, sink: RuntimeEventSink): Promise<RuntimeSession>
   sendInput(session: RuntimeSession, input: string, sink: RuntimeEventSink): void
   resume(session: RuntimeSession, sink: RuntimeEventSink): Promise<void>
+  cancel(session: RuntimeSession): void
 }
 
 export type { RuntimeAvailability }

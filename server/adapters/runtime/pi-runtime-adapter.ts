@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { CommandRuntimeAvailabilityDetector, type RuntimeAvailability, type RuntimeAvailabilityDetector } from './runtime-profile'
 import { LfJsonlParser } from './lf-jsonl-parser'
 import type { ProcessHandle, ProcessRunner } from '../../ports/process-runner'
@@ -11,6 +12,7 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
 
   constructor(
     private readonly processRunner: ProcessRunner,
+    private readonly dataDirectory = process.cwd(),
     private readonly availabilityDetector: RuntimeAvailabilityDetector = new CommandRuntimeAvailabilityDetector(),
   ) {}
 
@@ -46,8 +48,16 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
     this.request(session, 'get_state', {})
   }
 
+  cancel(session: RuntimeSession): void {
+    this.processes.get(session)?.kill()
+  }
+
   private launch(session: RuntimeSession, sink: RuntimeEventSink): void {
-    const args = [...session.profile.args]
+    const args = [
+      ...session.profile.args,
+      '--session-dir', path.join(this.dataDirectory, 'pi-sessions'),
+      '--name', `sinapsis:${session.taskId}`,
+    ]
     const process = this.processRunner.spawn({
       command: session.profile.command,
       args,

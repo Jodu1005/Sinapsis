@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { resolveRuntimeProfile } from './runtime-profile'
 import { OpenCodeRuntimeAdapter } from './opencode-runtime-adapter'
 import { FakeProcessRunner } from '../../test/fake-process-runner'
@@ -63,5 +63,65 @@ describe('OpenCodeRuntimeAdapter', () => {
       taskId: task.taskId,
       message: 'spawn opencode-bin ENOENT',
     }))
+  })
+
+  it('emits settled exactly once when a successful final run has no pending input', async () => {
+    const runner = new FakeProcessRunner()
+    const events: RuntimeEvent[] = []
+    const adapter = new OpenCodeRuntimeAdapter(runner)
+
+    await adapter.start(task, (event) => events.push(event))
+    runner.spawns[0]?.process.exit(0)
+
+    expect(events.filter((event) => event.kind === 'settled')).toEqual([
+      { kind: 'settled', taskId: task.taskId },
+    ])
+  })
+
+  it('starts a queued follow-up after a successful run without settling early', async () => {
+    const runner = new FakeProcessRunner()
+    const events: RuntimeEvent[] = []
+    const adapter = new OpenCodeRuntimeAdapter(runner)
+
+    const session = await adapter.start(task, (event) => events.push(event))
+    adapter.sendInput(session, 'Please check one more thing.', (event) => events.push(event))
+    runner.spawns[0]?.process.exit(0)
+
+    expect(runner.spawns).toHaveLength(2)
+    expect(events.filter((event) => event.kind === 'settled')).toEqual([])
+
+    runner.spawns[1]?.process.exit(0)
+
+    expect(events.filter((event) => event.kind === 'settled')).toEqual([
+      { kind: 'settled', taskId: task.taskId },
+    ])
+  })
+
+  it('reports a non-zero exit as an error rather than settling the task', async () => {
+    const runner = new FakeProcessRunner()
+    const events: RuntimeEvent[] = []
+    const adapter = new OpenCodeRuntimeAdapter(runner)
+
+    await adapter.start(task, (event) => events.push(event))
+    runner.spawns[0]?.process.exit(1)
+
+    expect(events).toContainEqual({
+      kind: 'error',
+      taskId: task.taskId,
+      message: 'OpenCode exited with 1.',
+    })
+    expect(events.filter((event) => event.kind === 'settled')).toEqual([])
+  })
+
+  it('cancels its managed process for a session', async () => {
+    const runner = new FakeProcessRunner()
+    const adapter = new OpenCodeRuntimeAdapter(runner)
+    const session = await adapter.start(task, () => {})
+    const process = runner.spawns[0]?.process
+    const kill = vi.spyOn(process!, 'kill')
+
+    adapter.cancel(session)
+
+    expect(kill).toHaveBeenCalledOnce()
   })
 })
