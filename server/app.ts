@@ -187,10 +187,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
     response.status(501).json({ error: '第一版只记录验收，合并需要独立人工流程。' })
   }))
 
-  app.post('/api/tasks/:taskId/cancel', asyncRoute((request, response) => {
+  app.post('/api/tasks/:taskId/cancel', asyncRoute(async (request, response) => {
     const body = objectBody(request.body)
     assertOnlyKeys(body, ['reason'])
-    const task = taskService.cancelTask(requiredParam(request.params.taskId, 'taskId'), requiredString(body, 'reason'))
+    const task = await coordinator.cancelTask(requiredParam(request.params.taskId, 'taskId'), requiredString(body, 'reason'))
     response.json(task)
   }))
 

@@ -82,7 +82,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   consumeTaskInput(inputId: string): TaskInput
   createTaskArtifact(taskId: string, kind: string, path: string): TaskArtifact
   createReviewDecision(taskId: string, decision: string, reason: string): void
-  finishTaskExecution(taskId: string, agentId: string, next: Extract<TaskStatus, 'in_review' | 'needs_human'>, reason: string): Task
+  finishTaskExecution(taskId: string, agentId: string, next: Extract<TaskStatus, 'in_review' | 'needs_human' | 'cancelled'>, reason: string): Task
   getActiveTaskForAgent(agentId: string): Task | undefined
   reclaimReturnedTask(taskId: string, agentId: string, occurredAt: Date): TaskClaim | undefined
   getTask(taskId: string): Task | undefined

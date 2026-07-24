@@ -79,7 +79,7 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
         kind: 'artifact',
         taskId: session.taskId,
         artifactType: 'runtime-exit',
-        content: JSON.stringify({ command: session.profile.command, args, cwd: session.worktreePath, code, signal }),
+        content: JSON.stringify({ command: session.profile.command, args: redactArgs(args), cwd: session.worktreePath, code, signal }),
       })
       if (code !== 0) sink({ kind: 'error', taskId: session.taskId, message: `Pi exited with ${code ?? signal ?? 'an unknown status'}.` })
     })
@@ -119,8 +119,11 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
     }
     if (type === 'agent_settled') {
       session.isStreaming = false
+      if (session.pendingInputs.length > 0) {
+        this.drain(session)
+        return
+      }
       sink({ kind: 'settled', taskId: session.taskId })
-      this.drain(session)
     }
     if (type === 'get_state' || type === 'state') {
       this.saveSession(session, value, sink)
@@ -191,4 +194,10 @@ function stringValue(value: unknown): string | undefined {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function redactArgs(args: string[]): string[] {
+  return args.map((arg, index) => index > 0 && /^(--(?:token|api[-_]?key|secret|password)|-[kK])$/i.test(args[index - 1])
+    ? '[REDACTED]'
+    : /^(--(?:token|api[-_]?key|secret|password)=).+/i.test(arg) ? `${arg.split('=')[0]}=[REDACTED]` : arg)
 }

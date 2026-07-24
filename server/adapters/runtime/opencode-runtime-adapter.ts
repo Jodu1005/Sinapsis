@@ -69,7 +69,7 @@ export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
         kind: 'artifact',
         taskId: session.taskId,
         artifactType: 'runtime-exit',
-        content: JSON.stringify({ command: session.profile.command, args, cwd: session.worktreePath, code, signal }),
+        content: JSON.stringify({ command: session.profile.command, args: redactArgs(args), cwd: session.worktreePath, code, signal }),
       })
       if (code !== 0) {
         sink({ kind: 'error', taskId: session.taskId, message: `OpenCode exited with ${code ?? signal ?? 'an unknown status'}.` })
@@ -129,4 +129,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
+}
+
+function redactArgs(args: string[]): string[] {
+  return args.map((arg, index) => index > 0 && /^(--(?:token|api[-_]?key|secret|password)|-[kK])$/i.test(args[index - 1])
+    ? '[REDACTED]'
+    : /^(--(?:token|api[-_]?key|secret|password)=).+/i.test(arg) ? `${arg.split('=')[0]}=[REDACTED]` : arg)
 }

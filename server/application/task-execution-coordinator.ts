@@ -154,6 +154,26 @@ export class TaskExecutionCoordinator {
     }
   }
 
+  async cancelTask(taskId: string, reason: string): Promise<Task> {
+    const task = this.task(taskId)
+    const execution = this.executions.get(taskId)
+    if (execution) await this.terminate(taskId, execution.agentId)
+    const activeLease = this.repositories.getTaskDetails(taskId)?.leases[0]
+    if (activeLease) return this.repositories.finishTaskExecution(taskId, activeLease.agentId, 'cancelled', reason)
+    return this.repositories.transitionTask(taskId, 'cancelled', reason)
+  }
+
+  async shutdown(): Promise<void> {
+    await Promise.all([...this.executions.values()].map(async (execution) => {
+      try {
+        await this.terminate(execution.taskId, execution.agentId)
+        this.repositories.finishTaskExecution(execution.taskId, execution.agentId, 'needs_human', '本机服务正在关闭，Runtime 已终止。')
+      } catch {
+        // Best effort shutdown: stale leases will be recovered on the next service start.
+      }
+    }))
+  }
+
   private enqueue(taskId: string, work: () => Promise<void>): void {
     const previous = this.pending.get(taskId) ?? Promise.resolve()
     const next = previous.then(work, work)

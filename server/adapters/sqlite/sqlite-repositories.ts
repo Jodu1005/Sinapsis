@@ -547,7 +547,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
     this.inTransaction((unitOfWork) => unitOfWork.createReviewDecision(taskId, decision, reason))
   }
 
-  finishTaskExecution(taskId: string, agentId: string, next: Extract<TaskStatus, 'in_review' | 'needs_human'>, reason: string): Task {
+  finishTaskExecution(taskId: string, agentId: string, next: Extract<TaskStatus, 'in_review' | 'needs_human' | 'cancelled'>, reason: string): Task {
     return this.inTransaction((unitOfWork) => {
       const task = readTask(this.sqlite.database, taskId)
       if (!task) throw new Error(`Task ${taskId} does not exist.`)
@@ -555,7 +555,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
       const updatedAt = new Date(transitioned.updatedAt)
       this.sqlite.database.prepare('DELETE FROM task_leases WHERE task_id = ? AND agent_id = ?').run(taskId, agentId)
       this.sqlite.database.prepare('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?').run('idle', transitioned.updatedAt, agentId)
-      const sessionStatus = next === 'in_review' ? 'completed' : 'failed'
+      const sessionStatus = next === 'in_review' ? 'completed' : next === 'cancelled' ? 'cancelled' : 'failed'
       const sessionUpdate = this.sqlite.database.prepare(`
         UPDATE task_sessions SET status = ?, updated_at = ?
         WHERE id = (
