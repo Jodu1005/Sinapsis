@@ -36,3 +36,40 @@ Implemented only the Task 4 runtime/process boundary. No frontend files, databas
 - Pi is not installed on this machine, and Task 4 explicitly forbids starting a real model or making network requests. Both adapters are therefore verified through their process-level protocol fakes; a real authenticated runtime smoke test belongs to the later end-to-end task.
 
 Status: `DONE`.
+
+## Review Follow-up: Pi Session Restore and Fixed Protocol Arguments
+
+Implemented the Task 4 review corrections without changing database or frontend code.
+
+1. Pi now requests `get_state` before its first `prompt`, persists `sessionId` and `sessionFile` from both direct state events and RPC `response.result`, then starts the task prompt.
+2. Pi buffers human input while starting or resuming. A resumed process receives `switch_session` first; only its successful response releases queued input in FIFO order, so no `steer` can target an empty session.
+3. Runtime profile overrides now append to the fixed protocol arguments. `opencode run` and `pi --mode rpc` are always retained.
+
+### TDD Evidence
+
+- Added failing tests for initial `get_state` ordering, resumed-session input buffering, and fixed protocol argument retention. The focused run failed with the expected missing `get_state`, premature `steer`, and replaced-argument assertions.
+- Added a failing RPC `response.result` session-state fixture, then updated the adapter to parse that transport shape before releasing the initial prompt.
+
+### Verification
+
+- `npm run test -- --run server/adapters/runtime/pi-runtime-adapter.test.ts`: passed, 3 tests.
+- `npm run test -- --run server/adapters/runtime`: passed, 4 files and 10 tests.
+- `git diff --check`: passed.
+- `npm run build`: attempted but currently blocked by concurrent, out-of-scope uncommitted changes in `server/adapters/sqlite/sqlite-repositories.test.ts` and `server/application/workspace-service.test.ts` (missing `databasePath` scope and incompatible test-double return type). Runtime production code typechecks through its focused suite; those files were not modified for this scoped fix.
+
+## Review Follow-up: Lock Runtime Protocol Flags
+
+The fixed protocol is now enforced at profile resolution rather than relying on argument order. Pi rejects both split and inline mode overrides (`--mode json` and `--mode=json`), so the managed adapter always launches with `--mode rpc`. OpenCode rejects its top-level CLI subcommands as supplemental arguments, keeping the fixed `opencode run` execution shape intact. Ordinary runtime options remain valid additions.
+
+### TDD Evidence
+
+1. Added RED examples for Pi `args: ['--mode', 'json']`, Pi `args: ['--mode=json']`, and OpenCode supplemental `run` / `serve` subcommands.
+2. Ran `npm run test -- --run server/adapters/runtime/runtime-profile.test.ts`; all four new examples failed because the profile appended them unchanged.
+3. Added the smallest profile-level validation before fixed and user arguments are combined.
+
+### Verification
+
+- `npm run test -- --run server/adapters/runtime/runtime-profile.test.ts`: passed, 6 tests.
+- `npm run test -- --run server/adapters/runtime`: passed, 4 files and 14 tests.
+- `npm run build`: passed.
+- `git diff --check`: passed.

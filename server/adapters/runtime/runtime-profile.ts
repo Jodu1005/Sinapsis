@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { ValidationError } from '../../application/workspace-service'
 
 export const runtimeKinds = ['opencode', 'pi'] as const
 export type RuntimeKind = (typeof runtimeKinds)[number]
@@ -30,13 +31,29 @@ export const runtimePresets = {
 
 export function resolveRuntimeProfile(runtime: RuntimeKind, overrides: RuntimeProfileOverrides = {}): RuntimeProfile {
   const preset = runtimePresets[runtime]
+  const additionalArgs = overrides.args ?? []
+  validateAdditionalArgs(runtime, additionalArgs)
   return {
     runtime,
     command: overrides.command ?? preset.command,
-    args: [...preset.args, ...(overrides.args ?? [])],
+    args: [...preset.args, ...additionalArgs],
     model: overrides.model ?? preset.model,
     env: overrides.env ?? { ...preset.env },
     policy: preset.policy,
+  }
+}
+
+const openCodeSubcommands = new Set([
+  'acp', 'agent', 'attach', 'completion', 'db', 'debug', 'export', 'github', 'import', 'mcp',
+  'models', 'pr', 'providers', 'auth', 'run', 'serve', 'session', 'stats', 'uninstall', 'upgrade', 'web',
+])
+
+function validateAdditionalArgs(runtime: RuntimeKind, args: string[]): void {
+  if (runtime === 'pi' && args.some((arg) => arg === '--mode' || arg.startsWith('--mode='))) {
+    throw new ValidationError('Pi runtime arguments cannot override --mode rpc.')
+  }
+  if (runtime === 'opencode' && args.some((arg) => openCodeSubcommands.has(arg))) {
+    throw new ValidationError('OpenCode runtime arguments cannot include command subcommands.')
   }
 }
 
