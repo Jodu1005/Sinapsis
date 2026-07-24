@@ -36,6 +36,10 @@ describe('local workspace flow', () => {
     database = createSqliteDatabase(path.join(dataDirectory, 'sinapsis.sqlite'))
     const repositories = new SqliteRepositories(database, new NoopEventPublisher())
     source = await createGitFixture()
+    const remote = path.join(source.directory, 'remote.git')
+    await execFileAsync('git', ['init', '--bare', remote], { shell: false })
+    await execFileAsync('git', ['remote', 'add', 'origin', remote], { cwd: source.repositoryRoot, shell: false })
+    await execFileAsync('git', ['push', '-u', 'origin', 'main'], { cwd: source.repositoryRoot, shell: false })
 
     const workspace = repositories.createWorkspace({ name: 'Local QA' })
     const repository = repositories.createRepository({
@@ -139,8 +143,76 @@ describe('local workspace flow', () => {
     await expect(execFileAsync('git', ['-C', source.repositoryRoot, 'merge-base', '--is-ancestor', commit, 'main'], { shell: false })).rejects.toThrow()
     const sourceBranch = (await execFileAsync('git', ['-C', source.repositoryRoot, 'branch', '--show-current'], { shell: false })).stdout.trim()
     expect(sourceBranch).toBe('main')
+    const remoteBranches = (await execFileAsync('git', ['--git-dir', remote, 'for-each-ref', '--format=%(refname)', 'refs/heads'], { shell: false })).stdout
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+    expect(remoteBranches).toEqual(['refs/heads/main'])
+  })
+
+  it('checks every configured runtime-command pair, without starting a model session', async () => {
+    dataDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-runtime-health-'))
+    database = createSqliteDatabase(path.join(dataDirectory, 'sinapsis.sqlite'))
+    const repositories = new SqliteRepositories(database, new NoopEventPublisher())
+    const workspace = repositories.createWorkspace({ name: 'Runtime health' })
+    const availableCommand = process.execPath
+    const missingCommand = 'sinapsis-missing-runtime-command'
+
+    repositories.createAgent(agentInput(workspace.id, 'first-opencode', 'opencode', availableCommand))
+    repositories.createAgent(agentInput(workspace.id, 'second-opencode', 'opencode', missingCommand))
+    repositories.createAgent(agentInput(workspace.id, 'first-pi', 'pi', availableCommand))
+    repositories.createAgent(agentInput(workspace.id, 'second-pi', 'pi', availableCommand))
+
+    const script = path.resolve(process.cwd(), 'scripts/runtime-health-check.mjs')
+    const { stdout } = await execFileAsync(process.execPath, [script], {
+      env: { ...process.env, SINAPSIS_DATA_DIR: dataDirectory },
+      shell: false,
+    })
+    const result = JSON.parse(stdout) as {
+      runtimes: Array<{ runtime: string; command: string; status: string; agents: Array<{ mentionName: string }> }>
+    }
+
+    expect(result.runtimes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        runtime: 'opencode',
+        command: availableCommand,
+        status: 'available',
+        agents: [expect.objectContaining({ mentionName: 'first-opencode' })],
+      }),
+      expect.objectContaining({
+        runtime: 'opencode',
+        command: missingCommand,
+        status: 'missing',
+        agents: [expect.objectContaining({ mentionName: 'second-opencode' })],
+      }),
+      expect.objectContaining({
+        runtime: 'pi',
+        command: availableCommand,
+        status: 'available',
+        agents: [
+          expect.objectContaining({ mentionName: 'first-pi' }),
+          expect.objectContaining({ mentionName: 'second-pi' }),
+        ],
+      }),
+    ]))
+    expect(result.runtimes).toHaveLength(3)
   })
 })
+
+function agentInput(workspaceId: string, mentionName: string, runtime: 'opencode' | 'pi', command: string) {
+  return {
+    workspaceId,
+    identity: mentionName,
+    mentionName,
+    runtime,
+    capabilityTags: [],
+    maxConcurrentTasks: 1 as const,
+    command,
+    args: [],
+    model: '',
+    env: {},
+  }
+}
 
 class NoopEventPublisher implements DomainEventPublisher {
   publish(_event: DomainEvent): void {}

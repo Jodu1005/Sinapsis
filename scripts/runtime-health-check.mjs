@@ -9,7 +9,7 @@ const defaults = [
   { runtime: 'pi', command: 'pi' },
 ]
 const configured = readConfiguredCommands(path.join(dataDir, 'sinapsis.sqlite'))
-const runtimes = defaults.map((fallback) => configured.find((candidate) => candidate.runtime === fallback.runtime) ?? fallback)
+const runtimes = selectRuntimeCommands(configured)
 
 const results = await Promise.all(runtimes.map(checkCommand))
 console.log(JSON.stringify({ checkedAt: new Date().toISOString(), dataDir, runtimes: results }, null, 2))
@@ -20,8 +20,13 @@ function readConfiguredCommands(databasePath) {
     const { DatabaseSync } = requireNodeSqlite()
     const database = new DatabaseSync(databasePath, { readOnly: true })
     try {
-      return database.prepare('SELECT runtime, command FROM agents ORDER BY created_at').all()
-        .map((row) => ({ runtime: row.runtime, command: row.command }))
+      return database.prepare('SELECT id, mention_name, runtime, command FROM agents ORDER BY created_at, id').all()
+        .map((row) => ({
+          agentId: row.id,
+          mentionName: row.mention_name,
+          runtime: row.runtime,
+          command: row.command,
+        }))
     } finally {
       database.close()
     }
@@ -30,11 +35,36 @@ function readConfiguredCommands(databasePath) {
   }
 }
 
+function selectRuntimeCommands(configured) {
+  const configuredRuntimes = new Set(configured.map(({ runtime }) => runtime))
+  const candidates = [
+    ...configured,
+    ...defaults.filter(({ runtime }) => !configuredRuntimes.has(runtime)),
+  ]
+  const unique = new Map()
+  for (const candidate of candidates) {
+    const key = `${candidate.runtime}\u0000${candidate.command}`
+    const existing = unique.get(key)
+    if (existing) {
+      if (candidate.agentId) {
+        existing.agents.push({ id: candidate.agentId, mentionName: candidate.mentionName })
+      }
+      continue
+    }
+    unique.set(key, {
+      runtime: candidate.runtime,
+      command: candidate.command,
+      agents: candidate.agentId ? [{ id: candidate.agentId, mentionName: candidate.mentionName }] : [],
+    })
+  }
+  return [...unique.values()]
+}
+
 function requireNodeSqlite() {
   return process.getBuiltinModule('node:sqlite')
 }
 
-function checkCommand({ runtime, command }) {
+function checkCommand({ runtime, command, agents }) {
   return new Promise((resolve) => {
     const child = spawn(command, ['--version'], { shell: false, stdio: ['ignore', 'pipe', 'pipe'] })
     const output = []
@@ -44,7 +74,7 @@ function checkCommand({ runtime, command }) {
       if (settled) return
       settled = true
       clearTimeout(timeout)
-      resolve({ runtime, command, ...result })
+      resolve({ runtime, command, agents, ...result })
     }
     const timeout = setTimeout(() => {
       child.kill()

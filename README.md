@@ -29,7 +29,7 @@ The local service listens only on `127.0.0.1:4174`. The browser uses `/api` and 
 npm run runtime:check
 ```
 
-The command runs only each Runtime command's `--version` check and prints JSON. It does not send a model prompt. On this machine, OpenCode is available and Pi is not installed, so Pi is reported as `missing` rather than treated as a failed test. Install Pi and run the command again before configuring Pi Agents.
+The command runs only each configured `(Runtime, command)` pair's `--version` check and prints JSON. Identical pairs are checked once and list their associated Agents. It does not send a model prompt. On this machine, OpenCode is available and Pi is not installed, so Pi is reported as `missing` rather than treated as a failed test. Install Pi and run the command again before configuring Pi Agents.
 
 An Agent whose command is found enters the idle pool after the version check. This confirms the executable exists, not that its credentials, model access, or a real task run will succeed.
 
@@ -53,4 +53,4 @@ npm run build
 npm run runtime:check
 ```
 
-The integration flow uses a temporary Git repository and `FakeRuntimeAdapter`. It verifies FIFO claims, distinct worktrees, queued input, committed task review, and the absence of automatic merge or push without sending a real model request.
+The integration flow uses a temporary Git repository, a local bare Git remote, and `FakeRuntimeAdapter`. It verifies FIFO claims, distinct worktrees, queued input, committed task review, no automatic merge into `main`, and no task-branch ref pushed to the local remote after acceptance. It sends no real model request or network traffic.
