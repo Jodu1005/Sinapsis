@@ -15,10 +15,23 @@ export class CommandGitClient implements GitClient {
 async function remoteDefaultBranch(rootPath: string, fallback: string): Promise<string> {
   try {
     const remoteReference = (await runGit(rootPath, ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'])).trim()
-    return remoteReference.startsWith('origin/') ? remoteReference.slice('origin/'.length) : fallback
+    if (remoteReference.startsWith('origin/')) {
+      return remoteReference.slice('origin/'.length)
+    }
   } catch {
-    return fallback
+    // A local clone may not have an origin/HEAD symbolic ref.
   }
+
+  for (const branch of ['main', 'master']) {
+    try {
+      await runGit(rootPath, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
+      return branch
+    } catch {
+      // Try the next known default branch.
+    }
+  }
+
+  return fallback
 }
 
 function runGit(directory: string, args: string[]): Promise<string> {
