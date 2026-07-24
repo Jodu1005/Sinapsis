@@ -6,6 +6,7 @@ import { SseDomainEventPublisher } from './adapters/sse/sse-domain-event-publish
 import { createSqliteDatabase } from './adapters/sqlite/database'
 import { SqliteRepositories } from './adapters/sqlite/sqlite-repositories'
 import { AgentService } from './application/agent-service'
+import { TaskService } from './application/task-service'
 import { NotFoundError, ValidationError, WorkspaceService, type WorkspaceCatalog, type WorkspaceMutationCatalog } from './application/workspace-service'
 import { getServiceConfig } from './config'
 import { DomainError } from './domain/task'
@@ -27,6 +28,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
   const catalog = new RepositoryWorkspaceCatalog(repositories)
   const workspaceService = new WorkspaceService(catalog, options.gitClient ?? new CommandGitClient())
   const agentService = new AgentService(catalog, options.runtimeAvailabilityDetector ?? new CommandRuntimeAvailabilityDetector())
+  const taskService = new TaskService(repositories)
 
   app.locals.closeDatabase = () => database.close()
   app.use(express.json())
@@ -82,6 +84,55 @@ export function createApp(options: CreateAppOptions = {}): Express {
       ...agent,
       profile: { ...agent.profile, env: Object.keys(agent.profile.env) },
     })
+  }))
+
+  app.post('/api/repositories/:repositoryId/tasks', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['title', 'description', 'acceptanceCriteria', 'labels', 'directAgentId', 'timeoutMs', 'maxRetries'])
+    const task = taskService.createTask({
+      repositoryId: requiredParam(request.params.repositoryId, 'repositoryId'),
+      title: requiredString(body, 'title'),
+      description: requiredString(body, 'description'),
+      acceptanceCriteria: requiredString(body, 'acceptanceCriteria'),
+      labels: body.labels === undefined ? undefined : requiredStringArray(body, 'labels'),
+      directAgentId: optionalString(body, 'directAgentId'),
+      timeoutMs: optionalPositiveInteger(body, 'timeoutMs'),
+      maxRetries: optionalNonNegativeInteger(body, 'maxRetries'),
+    })
+    response.status(201).json(task)
+  }))
+
+  app.get('/api/repositories/:repositoryId/tasks', asyncRoute((request, response) => {
+    response.json(taskService.listTasks(requiredParam(request.params.repositoryId, 'repositoryId')))
+  }))
+
+  app.get('/api/tasks/:taskId', asyncRoute((request, response) => {
+    const details = taskService.getTaskDetails(requiredParam(request.params.taskId, 'taskId'))
+    response.json({
+      ...details,
+      artifacts: details.artifacts.map(({ path: _path, ...artifact }) => artifact),
+    })
+  }))
+
+  app.post('/api/tasks/:taskId/input', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['body'])
+    const input = taskService.queueHumanInput(requiredParam(request.params.taskId, 'taskId'), requiredString(body, 'body'))
+    response.status(201).json(input)
+  }))
+
+  app.post('/api/tasks/:taskId/cancel', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['reason'])
+    const task = taskService.cancelTask(requiredParam(request.params.taskId, 'taskId'), requiredString(body, 'reason'))
+    response.json(task)
+  }))
+
+  app.get('/api/tasks/:taskId/artifacts/:artifactId', asyncRoute(async (request, response) => {
+    const artifact = await taskService.readArtifact(
+      requiredParam(request.params.taskId, 'taskId'), requiredParam(request.params.artifactId, 'artifactId'),
+    )
+    response.type(artifact.kind === 'runtime-stderr' ? 'text/plain' : 'application/json').send(artifact.content)
   }))
 
   app.get('/events', (request, response) => {
@@ -170,6 +221,31 @@ function requiredStringArray(body: Record<string, unknown>, key: string): string
     throw new ValidationError(`${key} must be an array of non-empty strings.`)
   }
   return value.map((item) => item.trim())
+}
+
+function optionalPositiveInteger(body: Record<string, unknown>, key: string): number | undefined {
+  if (body[key] === undefined) return undefined
+  const value = body[key]
+  if (!Number.isInteger(value) || (value as number) < 1) {
+    throw new ValidationError(`${key} must be a positive integer.`)
+  }
+  return value as number
+}
+
+function optionalNonNegativeInteger(body: Record<string, unknown>, key: string): number | undefined {
+  if (body[key] === undefined) return undefined
+  const value = body[key]
+  if (!Number.isInteger(value) || (value as number) < 0) {
+    throw new ValidationError(`${key} must be a non-negative integer.`)
+  }
+  return value as number
+}
+
+function assertOnlyKeys(body: Record<string, unknown>, acceptedKeys: string[]): void {
+  const unknownKeys = Object.keys(body).filter((key) => !acceptedKeys.includes(key))
+  if (unknownKeys.length > 0) {
+    throw new ValidationError(`Unsupported field: ${unknownKeys[0]}.`)
+  }
 }
 
 function runtimeOverrides(body: Record<string, unknown>) {

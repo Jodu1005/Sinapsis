@@ -3,7 +3,19 @@ import type { DatabaseSync } from 'node:sqlite'
 import type { Agent, CreateAgentInput } from '../../domain/agent'
 import type { DomainEvent } from '../../domain/events'
 import type { CreateMessageInput, Message, MessageSenderType } from '../../domain/message'
-import { type CreateTaskInput, type Task, type TaskStatus, transitionTask as transitionTaskDomain } from '../../domain/task'
+import {
+  type CreateTaskInput,
+  type ReviewDecision,
+  type Task,
+  type TaskArtifact,
+  type TaskDetails,
+  type TaskEventRecord,
+  type TaskInput,
+  type TaskLease,
+  type TaskSession,
+  type TaskStatus,
+  transitionTask as transitionTaskDomain,
+} from '../../domain/task'
 import type {
   Channel,
   CreateChannelInput,
@@ -58,6 +70,56 @@ interface TaskRow {
   worktree_path: string | null
   created_at: string
   updated_at: string
+}
+
+interface TaskInputRow {
+  id: string
+  task_id: string
+  body: string
+  created_at: string
+  consumed_at: string | null
+}
+
+interface TaskSessionRow {
+  id: string
+  task_id: string
+  agent_id: string
+  runtime_session_id: string | null
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+interface TaskLeaseRow {
+  id: string
+  task_id: string
+  agent_id: string
+  expires_at: string
+  created_at: string
+}
+
+interface TaskArtifactRow {
+  id: string
+  task_id: string
+  kind: string
+  path: string
+  created_at: string
+}
+
+interface TaskEventRow {
+  id: string
+  task_id: string
+  type: string
+  payload_json: string
+  created_at: string
+}
+
+interface ReviewDecisionRow {
+  id: string
+  task_id: string
+  decision: string
+  reason: string
+  created_at: string
 }
 
 interface MessageRow {
@@ -216,6 +278,20 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     return task
   }
 
+  createTaskInput(taskId: string, body: string): TaskInput {
+    if (!readTask(this.database, taskId)) {
+      throw new Error(`Task ${taskId} does not exist.`)
+    }
+    const input: TaskInput = {
+      id: randomUUID(), taskId, body: requireText(body, 'Task input'), createdAt: now(), consumedAt: null,
+    }
+    this.database.prepare(`
+      INSERT INTO task_input_queue (id, task_id, body, created_at, consumed_at) VALUES (?, ?, ?, ?, ?)
+    `).run(input.id, input.taskId, input.body, input.createdAt, input.consumedAt)
+    this.recordTaskEvent(taskId, 'task.input_queued', { inputId: input.id })
+    return input
+  }
+
   createMessage(input: CreateMessageInput): Message {
     const createdAt = now()
     const message: Message = {
@@ -286,6 +362,17 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     return transitioned
   }
 
+  recordTaskEvent(taskId: string, type: string, payload: Record<string, unknown>): void {
+    if (!readTask(this.database, taskId)) {
+      throw new Error(`Task ${taskId} does not exist.`)
+    }
+    const createdAt = now()
+    this.database.prepare('INSERT INTO task_events (id, task_id, type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)').run(
+      randomUUID(), taskId, requireText(type, 'Task event type'), JSON.stringify(payload), createdAt,
+    )
+    this.afterCommit(event(type, 'task', taskId, createdAt))
+  }
+
   afterCommit(domainEvent: DomainEvent): void {
     this.deferUntilCommit(domainEvent)
   }
@@ -325,6 +412,10 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return this.inTransaction((unitOfWork) => unitOfWork.createTask(input))
   }
 
+  createTaskInput(taskId: string, body: string): TaskInput {
+    return this.inTransaction((unitOfWork) => unitOfWork.createTaskInput(taskId, body))
+  }
+
   createMessage(input: CreateMessageInput): Message {
     return this.inTransaction((unitOfWork) => unitOfWork.createMessage(input))
   }
@@ -343,6 +434,31 @@ export class SqliteRepositories implements WorkspaceRepositories {
 
   getTask(taskId: string): Task | undefined {
     return readTask(this.sqlite.database, taskId)
+  }
+
+  getTasksForRepository(repositoryId: string): Task[] {
+    return (this.sqlite.database.prepare('SELECT * FROM tasks WHERE repository_id = ? ORDER BY queued_at').all(repositoryId) as unknown as TaskRow[])
+      .map(mapTask)
+  }
+
+  getTaskDetails(taskId: string): TaskDetails | undefined {
+    const task = this.getTask(taskId)
+    if (!task) return undefined
+    const database = this.sqlite.database
+    return {
+      task,
+      sessions: (database.prepare('SELECT * FROM task_sessions WHERE task_id = ? ORDER BY created_at').all(taskId) as unknown as TaskSessionRow[]).map(mapTaskSession),
+      leases: (database.prepare('SELECT * FROM task_leases WHERE task_id = ? ORDER BY created_at').all(taskId) as unknown as TaskLeaseRow[]).map(mapTaskLease),
+      inputs: (database.prepare('SELECT * FROM task_input_queue WHERE task_id = ? ORDER BY created_at').all(taskId) as unknown as TaskInputRow[]).map(mapTaskInput),
+      decisions: (database.prepare('SELECT * FROM review_decisions WHERE task_id = ? ORDER BY created_at').all(taskId) as unknown as ReviewDecisionRow[]).map(mapReviewDecision),
+      artifacts: (database.prepare('SELECT * FROM task_artifacts WHERE task_id = ? ORDER BY created_at').all(taskId) as unknown as TaskArtifactRow[]).map(mapTaskArtifact),
+      events: (database.prepare('SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at').all(taskId) as unknown as TaskEventRow[]).map(mapTaskEvent),
+    }
+  }
+
+  getTaskArtifact(taskId: string, artifactId: string): TaskArtifact | undefined {
+    const row = this.sqlite.database.prepare('SELECT * FROM task_artifacts WHERE task_id = ? AND id = ?').get(taskId, artifactId) as TaskArtifactRow | undefined
+    return row ? mapTaskArtifact(row) : undefined
   }
 
   getMessage(messageId: string): Message | undefined {
@@ -438,6 +554,33 @@ function mapTask(row: TaskRow): Task {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
+}
+
+function mapTaskInput(row: TaskInputRow): TaskInput {
+  return { id: row.id, taskId: row.task_id, body: row.body, createdAt: row.created_at, consumedAt: row.consumed_at }
+}
+
+function mapTaskSession(row: TaskSessionRow): TaskSession {
+  return {
+    id: row.id, taskId: row.task_id, agentId: row.agent_id, runtimeSessionId: row.runtime_session_id,
+    status: row.status, createdAt: row.created_at, updatedAt: row.updated_at,
+  }
+}
+
+function mapTaskLease(row: TaskLeaseRow): TaskLease {
+  return { id: row.id, taskId: row.task_id, agentId: row.agent_id, expiresAt: row.expires_at, createdAt: row.created_at }
+}
+
+function mapTaskArtifact(row: TaskArtifactRow): TaskArtifact {
+  return { id: row.id, taskId: row.task_id, kind: row.kind, path: row.path, createdAt: row.created_at }
+}
+
+function mapTaskEvent(row: TaskEventRow): TaskEventRecord {
+  return { id: row.id, taskId: row.task_id, type: row.type, payload: JSON.parse(row.payload_json) as Record<string, unknown>, createdAt: row.created_at }
+}
+
+function mapReviewDecision(row: ReviewDecisionRow): ReviewDecision {
+  return { id: row.id, taskId: row.task_id, decision: row.decision, reason: row.reason, createdAt: row.created_at }
 }
 
 function mapMessage(row: MessageRow): Message {

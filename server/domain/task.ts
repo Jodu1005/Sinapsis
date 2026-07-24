@@ -51,6 +51,66 @@ export interface CreateTaskInput {
   timeoutMs?: number
 }
 
+export interface TaskInput {
+  id: string
+  taskId: string
+  body: string
+  createdAt: string
+  consumedAt: string | null
+}
+
+export interface TaskSession {
+  id: string
+  taskId: string
+  agentId: string
+  runtimeSessionId: string | null
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TaskLease {
+  id: string
+  taskId: string
+  agentId: string
+  expiresAt: string
+  createdAt: string
+}
+
+export interface TaskArtifact {
+  id: string
+  taskId: string
+  kind: string
+  path: string
+  createdAt: string
+}
+
+export interface TaskEventRecord {
+  id: string
+  taskId: string
+  type: string
+  payload: Record<string, unknown>
+  createdAt: string
+}
+
+export interface ReviewDecision {
+  id: string
+  taskId: string
+  decision: string
+  reason: string
+  createdAt: string
+}
+
+export interface TaskDetails {
+  task: Task
+  sessions: TaskSession[]
+  leases: TaskLease[]
+  inputs: TaskInput[]
+  decisions: ReviewDecision[]
+  artifacts: TaskArtifact[]
+  events: TaskEventRecord[]
+}
+
 const allowedTransitions: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
   queued: ['claimed', 'cancelled'],
   claimed: ['running', 'queued', 'needs_human', 'cancelled'],
