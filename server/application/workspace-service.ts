@@ -4,10 +4,7 @@ import path from 'node:path'
 export class NotFoundError extends Error {}
 export class ValidationError extends Error {}
 
-export interface WorkspaceCatalog {
-  hasWorkspace(workspaceId: string): boolean
-  hasRepository(repositoryId: string): boolean
-  createWorkspace(input: { name: string }): { id: string; name: string; createdAt: string }
+export interface WorkspaceMutationCatalog {
   createRepository(input: {
     workspaceId: string
     name: string
@@ -17,6 +14,15 @@ export interface WorkspaceCatalog {
     isClean: boolean
   }): { id: string; workspaceId: string; name: string; path: string; currentBranch: string; defaultBranch: string; isClean: boolean; createdAt: string }
   createChannel(input: { repositoryId: string; name: string }): { id: string; repositoryId: string; name: string; createdAt: string }
+}
+
+export interface WorkspaceCatalog {
+  hasWorkspace(workspaceId: string): boolean
+  hasRepository(repositoryId: string): boolean
+  createWorkspace(input: { name: string }): { id: string; name: string; createdAt: string }
+  inTransaction<T>(work: (catalog: WorkspaceMutationCatalog) => T): T
+  createRepository: WorkspaceMutationCatalog['createRepository']
+  createChannel: WorkspaceMutationCatalog['createChannel']
 }
 
 export interface ManagedRepository {
@@ -51,15 +57,18 @@ export class WorkspaceService {
     } catch (error) {
       throw new ValidationError(error instanceof Error ? error.message : 'Repository directory is not a Git repository.')
     }
-    const repository = this.catalog.createRepository({
-      workspaceId: input.workspaceId,
-      name: input.name === undefined ? path.basename(inspection.rootPath) : requiredText(input.name, 'Repository name'),
-      path: inspection.rootPath,
-      currentBranch: inspection.currentBranch,
-      defaultBranch: inspection.defaultBranch,
-      isClean: inspection.isClean,
+    const repository = this.catalog.inTransaction((catalog) => {
+      const repository = catalog.createRepository({
+        workspaceId: input.workspaceId,
+        name: input.name === undefined ? path.basename(inspection.rootPath) : requiredText(input.name, 'Repository name'),
+        path: inspection.rootPath,
+        currentBranch: inspection.currentBranch,
+        defaultBranch: inspection.defaultBranch,
+        isClean: inspection.isClean,
+      })
+      catalog.createChannel({ repositoryId: repository.id, name: 'general' })
+      return repository
     })
-    this.catalog.createChannel({ repositoryId: repository.id, name: 'general' })
     return toManagedRepository(repository, inspection)
   }
 

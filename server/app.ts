@@ -6,11 +6,11 @@ import { SseDomainEventPublisher } from './adapters/sse/sse-domain-event-publish
 import { createSqliteDatabase } from './adapters/sqlite/database'
 import { SqliteRepositories } from './adapters/sqlite/sqlite-repositories'
 import { AgentService } from './application/agent-service'
-import { NotFoundError, ValidationError, WorkspaceService, type WorkspaceCatalog } from './application/workspace-service'
+import { NotFoundError, ValidationError, WorkspaceService, type WorkspaceCatalog, type WorkspaceMutationCatalog } from './application/workspace-service'
 import { getServiceConfig } from './config'
 import { DomainError } from './domain/task'
 import type { GitClient } from './ports/git-client'
-import type { WorkspaceRepositories } from './ports/repositories'
+import type { WorkspaceRepositories, WorkspaceUnitOfWork } from './ports/repositories'
 
 export interface CreateAppOptions {
   databasePath?: string
@@ -114,6 +114,10 @@ class RepositoryWorkspaceCatalog implements WorkspaceCatalog {
     return this.repositories.createWorkspace(input)
   }
 
+  inTransaction<T>(work: (catalog: WorkspaceMutationCatalog) => T): T {
+    return this.repositories.inTransaction((unitOfWork) => work(new TransactionWorkspaceCatalog(unitOfWork)))
+  }
+
   createRepository(input: Parameters<WorkspaceRepositories['createRepository']>[0]) {
     return this.repositories.createRepository(input)
   }
@@ -125,6 +129,13 @@ class RepositoryWorkspaceCatalog implements WorkspaceCatalog {
   createAgent(input: Parameters<WorkspaceRepositories['createAgent']>[0]) {
     return this.repositories.createAgent(input)
   }
+}
+
+class TransactionWorkspaceCatalog {
+  constructor(private readonly unitOfWork: WorkspaceUnitOfWork) {}
+
+  createRepository: WorkspaceCatalog['createRepository'] = (input) => this.unitOfWork.createRepository(input)
+  createChannel: WorkspaceCatalog['createChannel'] = (input) => this.unitOfWork.createChannel(input)
 }
 
 function asyncRoute(handler: (request: express.Request, response: express.Response) => void | Promise<void>): RequestHandler {

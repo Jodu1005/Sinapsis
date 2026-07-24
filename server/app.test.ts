@@ -50,7 +50,7 @@ describe('local service API', () => {
   it('persists Agent configuration without returning environment variable values', async () => {
     const server = await startHttpTestServer(createApp({
       runtimeAvailabilityDetector: {
-        detect: async () => ({ executable: 'available', taskExecution: 'ready' }),
+        detect: async () => ({ executable: 'available', taskExecution: 'unverified' }),
       },
     }))
     closeServer = server.close
@@ -109,5 +109,43 @@ describe('local service API', () => {
     expect(bootstrap.workspaces[0].repositories[0]).toMatchObject({
       currentBranch: 'feature/local-service', defaultBranch: 'main', isClean: false, channels: [{ name: 'general' }],
     })
+  })
+
+  it('returns a conflict when concurrent agent creation races at the SQLite mention constraint', async () => {
+    let detections = 0
+    let releaseDetections: (() => void) | undefined
+    const detectionsReady = new Promise<void>((resolve) => {
+      releaseDetections = resolve
+    })
+    const server = await startHttpTestServer(createApp({
+      runtimeAvailabilityDetector: {
+        detect: async () => {
+          detections += 1
+          if (detections === 2) releaseDetections?.()
+          await detectionsReady
+          return { executable: 'available', taskExecution: 'unverified' }
+        },
+      },
+    }))
+    closeServer = server.close
+
+    const workspaceResponse = await fetch(`${server.baseUrl}/api/workspaces`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Sinapsis' }),
+    })
+    const workspace = await workspaceResponse.json() as { id: string }
+    const body = JSON.stringify({
+      identity: 'Build engineer', mention: '@Build', runtime: 'opencode', capabilityTags: ['typescript'],
+    })
+
+    const responses = await Promise.all([
+      fetch(`${server.baseUrl}/api/workspaces/${workspace.id}/agents`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body,
+      }),
+      fetch(`${server.baseUrl}/api/workspaces/${workspace.id}/agents`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body,
+      }),
+    ])
+
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 409])
   })
 })

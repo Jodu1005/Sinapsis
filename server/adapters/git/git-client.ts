@@ -5,9 +5,19 @@ export class CommandGitClient implements GitClient {
   async inspectRepository(directory: string): Promise<RepositoryInspection> {
     const rootPath = (await runGit(directory, ['rev-parse', '--show-toplevel'])).trim()
     const currentBranch = (await runGit(directory, ['symbolic-ref', '--short', 'HEAD'])).trim()
+    const defaultBranch = await remoteDefaultBranch(rootPath, currentBranch)
     const status = await runGit(directory, ['status', '--porcelain=v1'])
 
-    return { rootPath, currentBranch, defaultBranch: currentBranch, isClean: status.trim().length === 0 }
+    return { rootPath, currentBranch, defaultBranch, isClean: status.trim().length === 0 }
+  }
+}
+
+async function remoteDefaultBranch(rootPath: string, fallback: string): Promise<string> {
+  try {
+    const remoteReference = (await runGit(rootPath, ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'])).trim()
+    return remoteReference.startsWith('origin/') ? remoteReference.slice('origin/'.length) : fallback
+  } catch {
+    return fallback
   }
 }
 

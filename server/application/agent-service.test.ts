@@ -22,7 +22,7 @@ describe('AgentService', () => {
       maxConcurrentTasks: 1,
       runtime: 'opencode',
       capabilityTags: ['typescript'],
-      availability: { executable: 'available', taskExecution: 'ready' },
+      availability: { executable: 'available', taskExecution: 'unverified' },
     })
     expect(repository.createdAgents).toContainEqual(expect.objectContaining({
       workspaceId: 'workspace-1',
@@ -74,11 +74,29 @@ describe('AgentService', () => {
 
     expect(detector.detect).toHaveBeenCalledWith(expect.objectContaining({ command: 'pi-local', args: ['--mode', 'rpc'] }))
   })
+
+  it('normalizes one optional at prefix and rejects ambiguous or invalid mention names', async () => {
+    const repository = new RecordingAgentRepository(['workspace-1'])
+    const service = new AgentService(repository, availableDetector())
+
+    const agent = await service.createAgent({
+      workspaceId: 'workspace-1', identity: 'Build engineer', mention: ' @Build ', runtime: 'opencode', capabilityTags: [],
+    })
+
+    expect(agent.mention).toBe('build')
+    expect(repository.createdAgents[0]).toMatchObject({ mentionName: 'build' })
+    await expect(service.createAgent({
+      workspaceId: 'workspace-1', identity: 'Second engineer', mention: '@@build', runtime: 'opencode', capabilityTags: [],
+    })).rejects.toThrow('Agent mention must contain only lowercase letters, numbers, hyphens, or underscores.')
+    await expect(service.createAgent({
+      workspaceId: 'workspace-1', identity: 'Third engineer', mention: 'build/name', runtime: 'opencode', capabilityTags: [],
+    })).rejects.toThrow('Agent mention must contain only lowercase letters, numbers, hyphens, or underscores.')
+  })
 })
 
 function availableDetector(): RuntimeAvailabilityDetector & { detect: ReturnType<typeof vi.fn> } {
   return {
-    detect: vi.fn().mockResolvedValue({ executable: 'available', taskExecution: 'ready' }),
+    detect: vi.fn().mockResolvedValue({ executable: 'available', taskExecution: 'unverified' }),
   }
 }
 

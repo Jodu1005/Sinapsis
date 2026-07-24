@@ -16,7 +16,7 @@ export type RuntimeProfileOverrides = Partial<Pick<RuntimeProfile, 'command' | '
 
 export interface RuntimeAvailability {
   executable: 'available' | 'missing'
-  taskExecution: 'ready' | 'unhealthy' | 'unavailable'
+  taskExecution: 'unverified' | 'unhealthy' | 'unavailable'
 }
 
 export interface RuntimeAvailabilityDetector {
@@ -65,7 +65,7 @@ export class CommandRuntimeAvailabilityDetector implements RuntimeAvailabilityDe
       })
       child.once('close', (code) => {
         finish(code === 0
-          ? { executable: 'available', taskExecution: 'ready' }
+          ? { executable: 'available', taskExecution: 'unverified' }
           : { executable: 'available', taskExecution: 'unhealthy' })
       })
     })

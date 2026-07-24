@@ -68,18 +68,26 @@ export class AgentService {
 
     const profile = this.profiles.resolve(input.runtime, input.runtimeOverrides)
     const availability = await this.availabilityDetector.detect(profile)
-    const storedAgent = this.workspaces.createAgent({
-      workspaceId: input.workspaceId,
-      identity: requiredText(input.identity, 'Agent identity'),
-      mentionName: mention,
-      runtime: input.runtime,
-      capabilityTags: input.capabilityTags.map((tag) => requiredText(tag, 'Capability tag')),
-      maxConcurrentTasks: 1,
-      command: profile.command,
-      args: profile.args,
-      model: profile.model,
-      env: profile.env,
-    })
+    let storedAgent: { id: string; createdAt: string }
+    try {
+      storedAgent = this.workspaces.createAgent({
+        workspaceId: input.workspaceId,
+        identity: requiredText(input.identity, 'Agent identity'),
+        mentionName: mention,
+        runtime: input.runtime,
+        capabilityTags: input.capabilityTags.map((tag) => requiredText(tag, 'Capability tag')),
+        maxConcurrentTasks: 1,
+        command: profile.command,
+        args: profile.args,
+        model: profile.model,
+        env: profile.env,
+      })
+    } catch (error) {
+      if (isMentionUniqueConstraint(error)) {
+        throw new DomainError(`Agent mention @${mention} already exists in this workspace.`)
+      }
+      throw error
+    }
     return {
       id: storedAgent.id,
       workspaceId: input.workspaceId,
@@ -96,9 +104,17 @@ export class AgentService {
 }
 
 function requiredMention(value: string): string {
-  const mention = requiredText(value, 'Agent mention').replace(/^@/, '')
+  const rawMention = requiredText(value, 'Agent mention')
+  const mention = rawMention.startsWith('@') ? rawMention.slice(1) : rawMention
   if (!mention) throw new ValidationError('Agent mention is required.')
-  return mention
+  if (!/^[a-z0-9][a-z0-9_-]*$/i.test(mention)) {
+    throw new ValidationError('Agent mention must contain only lowercase letters, numbers, hyphens, or underscores.')
+  }
+  return mention.toLowerCase()
+}
+
+function isMentionUniqueConstraint(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('UNIQUE constraint failed: agents.workspace_id, agents.mention_name')
 }
 
 function requiredText(value: string, name: string): string {

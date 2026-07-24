@@ -41,6 +41,23 @@ describe('WorkspaceService', () => {
     await expect(service.addRepository({ workspaceId: 'workspace-1', directory: '/tmp/not-a-repository', name: 'Scratch' }))
       .rejects.toThrow('Not a Git repository.')
   })
+
+  it('rolls back repository creation when creating its general channel fails', async () => {
+    const gitClient: GitClient = {
+      inspectRepository: vi.fn().mockResolvedValue({
+        rootPath: '/projects/sinapsis', currentBranch: 'feature/task-3', defaultBranch: 'main', isClean: true,
+      }),
+    }
+    const repositories = new TransactionalWorkspaceRepository('workspace-1', true)
+    const service = new WorkspaceService(repositories, gitClient)
+
+    await expect(service.addRepository({
+      workspaceId: 'workspace-1', directory: '/projects/sinapsis', name: 'Sinapsis',
+    })).rejects.toThrow('Channel insert failed.')
+
+    expect(repositories.persistedRepositories).toEqual([])
+    expect(repositories.persistedChannels).toEqual([])
+  })
 })
 
 class RecordingWorkspaceRepository {
@@ -61,6 +78,10 @@ class RecordingWorkspaceRepository {
     return { id: this.workspaceId, ...input, createdAt: '2026-07-25T00:00:00.000Z' }
   }
 
+  inTransaction<T>(work: (catalog: this) => T): T {
+    return work(this)
+  }
+
   createRepository(input: {
     workspaceId: string
     name: string
@@ -76,5 +97,48 @@ class RecordingWorkspaceRepository {
   createChannel(input: { repositoryId: string; name: string }) {
     this.createdChannels.push(input)
     return { id: `channel-${this.createdChannels.length}`, ...input, createdAt: '2026-07-25T00:00:00.000Z' }
+  }
+}
+
+class TransactionalWorkspaceRepository extends RecordingWorkspaceRepository {
+  readonly persistedRepositories: Array<{ id: string; workspaceId: string; name: string }> = []
+  readonly persistedChannels: Array<{ repositoryId: string; name: string }> = []
+
+  constructor(workspaceId: string, private readonly failGeneralChannel: boolean) {
+    super(workspaceId)
+  }
+
+  inTransaction<T>(work: (catalog: this) => T): T {
+    const repositorySnapshot = [...this.persistedRepositories]
+    const channelSnapshot = [...this.persistedChannels]
+    try {
+      return work(this)
+    } catch (error) {
+      this.persistedRepositories.splice(0, this.persistedRepositories.length, ...repositorySnapshot)
+      this.persistedChannels.splice(0, this.persistedChannels.length, ...channelSnapshot)
+      throw error
+    }
+  }
+
+  override createRepository(input: {
+    workspaceId: string
+    name: string
+    path: string
+    currentBranch: string
+    defaultBranch: string
+    isClean: boolean
+  }) {
+    const repository = super.createRepository(input)
+    this.persistedRepositories.push(repository)
+    return repository
+  }
+
+  override createChannel(input: { repositoryId: string; name: string }) {
+    if (this.failGeneralChannel && input.name === 'general') {
+      throw new Error('Channel insert failed.')
+    }
+    const channel = super.createChannel(input)
+    this.persistedChannels.push(channel)
+    return channel
   }
 }
