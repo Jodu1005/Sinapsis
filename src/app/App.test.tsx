@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import App from './App'
 
-test('renders the control room heading', () => {
+test('renders the workspace loading state', () => {
   render(<App />)
-  expect(screen.getByRole('heading', { name: '控制室' })).toBeInTheDocument()
+  expect(screen.getByText('正在连接本机工作空间...')).toBeInTheDocument()
 })
