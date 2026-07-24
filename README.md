@@ -43,7 +43,11 @@ By default data lives in `~/.sinapsis`. Set `SINAPSIS_DATA_DIR` to use another l
 
 This first version does not automatically remove task worktrees. After a human has reviewed a task and no longer needs its evidence, clean up the corresponding Git worktree manually with normal Git commands. Do not delete a worktree that still belongs to an active task.
 
-Agents may edit their assigned task worktree, run tests, and create a commit. Sinapsis does not expose automatic `git push` or merge actions. Acceptance is not a merge, and any push, merge, deletion outside the task worktree, or other external side effect remains a separate human decision.
+Agents are instructed to edit their assigned task worktree, run tests, and create a commit. The built-in API has no automatic `git push` or merge action. Acceptance is not a merge; pushing, merging, or other external side effects remain separate human decisions.
+
+This first version has no OS-level sandbox. A task worktree is a collaboration convention, not a filesystem permission boundary. Run a local CLI only after you trust it: an untrusted process can still access files, the network, or credentials available to the current OS user, and can explicitly provide its own credentials.
+
+Runtime processes start with a small inherited environment (`PATH`, `HOME`, locale, temporary-directory, and timezone settings). Inherited Git, SSH, CI, and common remote-credential variables are not passed through; Git is configured to avoid terminal prompts and ignore global credential helpers. Explicit Agent profile environment variables are still passed to the process. This reduces accidental credential inheritance; it is not an OS sandbox and does not prevent a trusted or untrusted CLI from explicitly supplying credentials.
 
 ## Verify
 

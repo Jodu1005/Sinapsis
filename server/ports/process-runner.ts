@@ -25,11 +25,37 @@ export interface ProcessRunner {
   spawn(options: SpawnProcessOptions): ProcessHandle
 }
 
+const inheritedEnvironmentKeys = ['HOME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'PATH', 'TEMP', 'TMP', 'TMPDIR', 'TZ'] as const
+
+export function buildProcessEnvironment(
+  inheritedEnvironment: NodeJS.ProcessEnv,
+  profileEnvironment: Record<string, string>,
+): Record<string, string> {
+  const environment: Record<string, string> = {}
+  for (const key of inheritedEnvironmentKeys) {
+    const value = inheritedEnvironment[key]
+    if (value !== undefined) environment[key] = value
+  }
+
+  return {
+    ...environment,
+    ...profileEnvironment,
+    GCM_INTERACTIVE: 'Never',
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+    GIT_CONFIG_KEY_0: 'credential.helper',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_VALUE_0: '',
+    GIT_SSH_COMMAND: 'ssh -oBatchMode=yes',
+    GIT_TERMINAL_PROMPT: '0',
+  }
+}
+
 export class NodeProcessRunner implements ProcessRunner {
   spawn(options: SpawnProcessOptions): ProcessHandle {
     const child = spawn(options.command, options.args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env: buildProcessEnvironment(process.env, options.env),
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
     })

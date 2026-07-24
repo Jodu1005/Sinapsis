@@ -18,7 +18,7 @@ const details: TaskDetailView = { task, sessions: [], leases: [], inputs: [], de
 ], events: [] }
 
 describe('TaskDetailPanel', () => {
-  it('shows overview, input queue, evidence and review, while acceptance explicitly does not merge', async () => {
+  it('shows review boundaries without claiming an OS sandbox or automatic repository actions', async () => {
     const onReview = vi.fn().mockResolvedValue({ ...task, status: 'accepted' })
     const onReadArtifact = vi.fn((artifactId: string) => Promise.resolve({
       'artifact-commit': 'abc123 Implement mobile drawer',
@@ -33,6 +33,10 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByRole('heading', { name: '输入队列' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '证据' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '审查' })).toBeInTheDocument()
+    expect(screen.getByText(/此版本没有 OS 级沙箱/)).toBeInTheDocument()
+    expect(screen.getByText(/工作树隔离是约定而非权限边界/)).toBeInTheDocument()
+    expect(screen.getByText(/运行未经信任的本地 CLI 前，请先确认信任它/)).toBeInTheDocument()
+    expect(screen.getByText(/内置 API 不会自动 push 或 merge/)).toBeInTheDocument()
     expect(await screen.findByText('abc123 Implement mobile drawer')).toBeInTheDocument()
     expect(screen.getByText('M src/ui/WorkspaceShell.tsx')).toBeInTheDocument()
     expect(screen.getByText('受控进程 stderr（非测试结论）')).toBeInTheDocument()
