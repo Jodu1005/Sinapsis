@@ -61,7 +61,8 @@ export function createControlRoomService(store: ControlRoomStore) {
       const task = getTask(taskId)
       const trimmedFeedback = feedback.trim()
       if (trimmedFeedback && (task?.status === 'needs_input' || task?.status === 'in_review')) {
-        commitEvent(taskId, task.status, 'feedback', '人工反馈：' + trimmedFeedback)
+        const nextStatus = task.status === 'needs_input' ? 'running' : task.status
+        commitEvent(taskId, nextStatus, 'feedback', '人工反馈：' + trimmedFeedback)
       }
     },
     accept(taskId: string) {

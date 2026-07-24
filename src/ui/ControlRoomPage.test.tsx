@@ -196,6 +196,23 @@ test('requesting a decision moves the running task to waiting for input', async 
   expect(within(recentActivity).getByText('请求人工决策：请确认是否继续覆盖旧版分支')).toBeInTheDocument()
 })
 
+test('submitting requested input returns the task to running', async () => {
+  const user = renderPage()
+
+  await user.click(screen.getByRole('button', { name: '重构身份验证中间件' }))
+  await user.click(screen.getByRole('button', { name: '需要决策' }))
+  await user.type(
+    screen.getByRole('textbox', { name: '发送给 Agent 的反馈' }),
+    '继续覆盖旧版分支',
+  )
+  await user.click(screen.getByRole('button', { name: '发送反馈' }))
+
+  const runningColumn = screen.getByRole('region', { name: '执行中' })
+  expect(within(runningColumn).getByRole('button', { name: '重构身份验证中间件' })).toBeInTheDocument()
+  const timeline = screen.getByRole('region', { name: '活动时间轨' })
+  expect(within(timeline).getByText('人工反馈：继续覆盖旧版分支')).toBeInTheDocument()
+})
+
 test('sending non-empty feedback adds it to the timeline and clears the textarea', async () => {
   const user = renderPage()
   const feedback = screen.getByRole('textbox', { name: '发送给 Agent 的反馈' })

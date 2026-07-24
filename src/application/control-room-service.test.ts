@@ -122,6 +122,20 @@ test('requesting a decision moves only a running task to needs input', () => {
   expect(snapshot.tasks.find((task) => task.id === 'review-rate-limit')?.status).toBe('in_review')
 })
 
+test('feedback resolves a needs-input task back to running', () => {
+  const service = createSubject()
+
+  service.requestDecision('refactor-auth')
+  service.sendFeedback('refactor-auth', '继续覆盖旧版分支')
+
+  const task = service.getSnapshot().tasks.find((candidate) => candidate.id === 'refactor-auth')!
+  expect(task.status).toBe('running')
+  expect(task.events.at(-1)).toMatchObject({
+    kind: 'feedback',
+    message: '人工反馈：继续覆盖旧版分支',
+  })
+})
+
 test('requesting a summary records matching task and activity entries', () => {
   const service = createSubject()
 
@@ -160,11 +174,13 @@ test('non-empty feedback records unique task events and activities within one mi
   vi.setSystemTime(new Date('2026-07-23T12:00:00.000Z'))
   const service = createSubject()
 
-  service.sendFeedback('test-legacy-login', '  请补充回归测试  ')
-  service.sendFeedback('test-legacy-login', '确认兼容旧版分支')
+  service.sendFeedback('review-rate-limit', '  请补充回归测试  ')
+  service.sendFeedback('review-rate-limit', '确认兼容旧版分支')
 
   const snapshot = service.getSnapshot()
-  const events = snapshot.tasks.find((task) => task.id === 'test-legacy-login')!.events
+  const events = snapshot.tasks
+    .find((task) => task.id === 'review-rate-limit')!
+    .events.filter((event) => event.kind === 'feedback')
   expect(events.map((event) => event.message)).toEqual([
     '人工反馈：请补充回归测试',
     '人工反馈：确认兼容旧版分支',
@@ -262,7 +278,7 @@ const transitionCases = [
   {
     name: '发送反馈',
     allowed: ['needs_input', 'in_review'] as TaskStatus[],
-    expectedStatus: (status: TaskStatus) => status,
+    expectedStatus: (status: TaskStatus) => status === 'needs_input' ? 'running' : status,
     invoke: (service: ReturnType<typeof createControlRoomService>) => (
       service.sendFeedback('matrix-task', '补充边界说明')
     ),
