@@ -29,6 +29,6 @@ export function RuntimeEvidence({ artifacts, onReadArtifact }: { artifacts: Task
 const reviewEvidenceLabels: Record<string, string> = {
   'review-commit': 'Commit',
   'review-changed-files': '改动文件',
-  'review-test-output': '测试结果',
+  'review-test-output': '测试结果（受控输出）',
   'review-diff-summary': 'Diff 摘要',
 }

@@ -18,7 +18,11 @@ export interface TaskExecutionCoordinatorOptions {
   worktrees: WorktreeManager
   artifactDirectory: string
   messages?: ChannelMessageService
+  collectReviewEvidence?: ReviewEvidenceCollector
 }
+
+type ReviewEvidence = { commit: string; changedFiles: string; diffSummary: string }
+type ReviewEvidenceCollector = (worktreePath: string, targetBranch: string) => Promise<ReviewEvidence>
 
 interface ManagedExecution {
   taskId: string
@@ -35,6 +39,7 @@ export class TaskExecutionCoordinator {
   private readonly worktrees: WorktreeManager
   private readonly artifactDirectory: string
   private readonly messages: ChannelMessageService
+  private readonly collectReviewEvidence: ReviewEvidenceCollector
   private readonly executions = new Map<string, ManagedExecution>()
   private readonly pending = new Map<string, Promise<void>>()
 
@@ -44,6 +49,7 @@ export class TaskExecutionCoordinator {
     this.worktrees = options.worktrees
     this.artifactDirectory = options.artifactDirectory
     this.messages = options.messages ?? new ChannelMessageService(options.repositories)
+    this.collectReviewEvidence = options.collectReviewEvidence ?? collectGitReviewEvidence
   }
 
   async startClaim(claim: TaskClaim): Promise<void> {
@@ -133,11 +139,10 @@ export class TaskExecutionCoordinator {
     if (!execution) return
     switch (event.kind) {
       case 'artifact':
-        this.captureTestOutput(execution, event.content)
+        if (event.artifactType === 'runtime-stderr') this.captureTestOutput(execution, event.content)
         await this.writeArtifact(event.taskId, event.artifactType, event.content)
         return
       case 'text':
-        this.captureTestOutput(execution, event.text)
         await this.writeArtifact(event.taskId, 'runtime-text', event.text)
         this.repositories.inTransaction((unitOfWork) => unitOfWork.recordTaskEvent(event.taskId, 'runtime.text', { text: event.text }))
         return
@@ -165,19 +170,36 @@ export class TaskExecutionCoordinator {
 
   private async settle(execution: ManagedExecution): Promise<void> {
     const task = this.task(execution.taskId)
-    const hasCommit = task.worktreePath && await hasTaskBranchCommit(task.worktreePath, execution.targetBranch)
+    let hasCommit: boolean | null
+    try {
+      hasCommit = task.worktreePath ? await hasTaskBranchCommit(task.worktreePath, execution.targetBranch) : false
+    } catch (error) {
+      this.failReviewEvidence(task, execution.agentId, error)
+      return
+    }
     if (!hasCommit) {
       this.fail(task.id, execution.agentId, 'Runtime 已完成，但任务分支没有可供评审的提交。')
       return
     }
-    await this.writeReviewEvidence(task, execution)
+    try {
+      await this.writeReviewEvidence(task, execution)
+    } catch (error) {
+      this.failReviewEvidence(task, execution.agentId, error)
+      return
+    }
     this.repositories.finishTaskExecution(task.id, execution.agentId, 'in_review', 'Runtime 完成并检测到任务分支提交')
     this.messages.postMilestone(task.channelId, task.id, '任务已完成，等待人工验收。')
   }
 
-  private fail(taskId: string, agentId: string, reason: string): void {
+  private failReviewEvidence(task: Task, agentId: string, error: unknown): void {
+    const detail = error instanceof Error ? error.message : '未知错误'
+    this.fail(task.id, agentId, `评审证据收集失败：${detail}`, 'task.review_evidence_failed')
+  }
+
+  private fail(taskId: string, agentId: string, reason: string, eventType = 'task.execution_failed'): void {
     this.repositories.inTransaction((unitOfWork) => {
       const task = this.task(taskId)
+      unitOfWork.recordTaskEvent(taskId, eventType, { reason })
       this.repositories.finishTaskExecution(taskId, agentId, 'needs_human', reason)
       unitOfWork.createMessage({
         channelId: task.channelId,
@@ -203,10 +225,10 @@ export class TaskExecutionCoordinator {
 
   private async writeReviewEvidence(task: Task, execution: ManagedExecution): Promise<void> {
     if (!task.worktreePath) throw new Error('Task worktree is required before collecting review evidence.')
-    const evidence = await collectGitReviewEvidence(task.worktreePath, execution.targetBranch)
+    const evidence = await this.collectReviewEvidence(task.worktreePath, execution.targetBranch)
     const testOutput = execution.testOutput.length > 0
       ? execution.testOutput.join('\n')
-      : '未在 Runtime 输出中检测到测试结果。请查看原始运行日志。'
+      : '未在受控 Runtime 工具输出中检测到测试结果。请查看原始运行日志。'
     await Promise.all([
       this.writeArtifact(task.id, 'review-commit', evidence.commit),
       this.writeArtifact(task.id, 'review-changed-files', evidence.changedFiles),
@@ -245,7 +267,7 @@ async function hasTaskBranchCommit(worktreePath: string, targetBranch: string): 
   return stdout.trim().length > 0
 }
 
-async function collectGitReviewEvidence(worktreePath: string, targetBranch: string): Promise<{ commit: string; changedFiles: string; diffSummary: string }> {
+async function collectGitReviewEvidence(worktreePath: string, targetBranch: string): Promise<ReviewEvidence> {
   const range = `${targetBranch}..HEAD`
   const [commit, changedFiles, diffSummary] = await Promise.all([
     gitOutput(worktreePath, ['log', '-1', '--format=%H%n%s']),

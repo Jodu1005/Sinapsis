@@ -87,6 +87,52 @@ describe('TaskExecutionCoordinator', () => {
     expect(evidence['review-diff-summary']).toContain('implementation.txt')
   })
 
+  it('does not treat assistant text as verified test evidence', async () => {
+    const fixture = await createFixture()
+    const claim = fixture.scheduler.claimNext(fixture.agent.id)!
+    await fixture.coordinator.startClaim(claim)
+    const worktree = fixture.repositories.getTask(claim.task.id)!.worktreePath!
+    await writeFile(path.join(worktree, 'text-only.txt'), 'done\n')
+    await commitFile(worktree, 'text-only.txt', 'Add text-only evidence fixture')
+
+    fixture.runtime.emit(claim.task.id, { kind: 'text', text: '我已经运行测试，所有 108 tests passed。' })
+    fixture.runtime.emit(claim.task.id, { kind: 'settled' })
+    await fixture.coordinator.flush(claim.task.id)
+
+    const testEvidence = fixture.repositories.getTaskDetails(claim.task.id)!.artifacts.find((artifact) => artifact.kind === 'review-test-output')!
+    await expect(readFile(testEvidence.path, 'utf8')).resolves.toBe('未在受控 Runtime 工具输出中检测到测试结果。请查看原始运行日志。')
+  })
+
+  it('moves a settled task to human handling when Git review evidence collection fails', async () => {
+    const fixture = await createFixture({
+      collectReviewEvidence: async () => { throw new Error('git diff unavailable') },
+    })
+    const claim = fixture.scheduler.claimNext(fixture.agent.id)!
+    await fixture.coordinator.startClaim(claim)
+    const worktree = fixture.repositories.getTask(claim.task.id)!.worktreePath!
+    await writeFile(path.join(worktree, 'git-failure.txt'), 'done\n')
+    await commitFile(worktree, 'git-failure.txt', 'Prepare Git failure fixture')
+
+    fixture.runtime.emit(claim.task.id, { kind: 'settled' })
+    await fixture.coordinator.flush(claim.task.id)
+
+    expectTaskSettledForEvidenceFailure(fixture, claim.task.id, 'git diff unavailable')
+  })
+
+  it('moves a settled task to human handling when review artifact persistence fails', async () => {
+    const fixture = await createFixture({ failReviewArtifactPersistence: true })
+    const claim = fixture.scheduler.claimNext(fixture.agent.id)!
+    await fixture.coordinator.startClaim(claim)
+    const worktree = fixture.repositories.getTask(claim.task.id)!.worktreePath!
+    await writeFile(path.join(worktree, 'sqlite-failure.txt'), 'done\n')
+    await commitFile(worktree, 'sqlite-failure.txt', 'Prepare SQLite failure fixture')
+
+    fixture.runtime.emit(claim.task.id, { kind: 'settled' })
+    await fixture.coordinator.flush(claim.task.id)
+
+    expectTaskSettledForEvidenceFailure(fixture, claim.task.id, 'review artifact persistence unavailable')
+  })
+
   it('queues an input for a busy mentioned agent and sends it to the active runtime session', async () => {
     const fixture = await createFixture()
     const claim = fixture.scheduler.claimNext(fixture.agent.id)!
@@ -231,10 +277,21 @@ describe('TaskExecutionCoordinator', () => {
     expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('任务需要人工处理：runtime session unavailable')
   })
 
-  async function createFixture(options: { worktrees?: WorktreeManager } = {}) {
+  async function createFixture(options: {
+    worktrees?: WorktreeManager
+    collectReviewEvidence?: () => Promise<never>
+    failReviewArtifactPersistence?: boolean
+  } = {}) {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-coordinator-'))
     database = createSqliteDatabase(path.join(temporaryDirectory, 'sinapsis.sqlite'))
     const repositories = new SqliteRepositories(database, new RecordingPublisher())
+    if (options.failReviewArtifactPersistence) {
+      const createTaskArtifact = repositories.createTaskArtifact.bind(repositories)
+      repositories.createTaskArtifact = (taskId, kind, artifactPath) => {
+        if (kind.startsWith('review-')) throw new Error('review artifact persistence unavailable')
+        return createTaskArtifact(taskId, kind, artifactPath)
+      }
+    }
     const source = await createGitFixture()
     gitFixture = source
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
@@ -253,6 +310,7 @@ describe('TaskExecutionCoordinator', () => {
       runtimes: { opencode: runtime, pi: runtime },
       worktrees: options.worktrees ?? new GitWorktreeManager({ dataDir: temporaryDirectory, repositoryRoots: [source.repositoryRoot] }),
       artifactDirectory: path.join(temporaryDirectory, 'artifacts'),
+      collectReviewEvidence: options.collectReviewEvidence,
     })
     const scheduler = new TaskScheduler(repositories)
     const createTask = (input: { title: string }) => repositories.createTask({
@@ -265,6 +323,21 @@ describe('TaskExecutionCoordinator', () => {
       createTask,
       channelMessages: () => repositories.getBootstrap().workspaces[0].recentMessages.filter((message) => message.channelId === channel.id),
     }
+  }
+
+  function expectTaskSettledForEvidenceFailure(
+    fixture: Awaited<ReturnType<typeof createFixture>>,
+    taskId: string,
+    reason: string,
+  ): void {
+    const details = fixture.repositories.getTaskDetails(taskId)!
+    expect(details.task.status).toBe('needs_human')
+    expect(details.leases).toEqual([])
+    expect(fixture.repositories.getBootstrap().workspaces[0].agents[0].status).toBe('idle')
+    expect(details.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'task.review_evidence_failed', payload: expect.objectContaining({ reason: expect.stringContaining(reason) }) }),
+    ]))
+    expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain(`评审证据收集失败：${reason}`)
   }
 })
 
