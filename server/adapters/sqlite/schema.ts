@@ -155,9 +155,44 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(3, new Date().toISOString())
     }
 
+    const fourthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 4').get()
+    if (!fourthMigration) {
+      normalizeLegacyDuplicateChannelNames(database)
+      database.exec('CREATE UNIQUE INDEX channels_repository_name_unique_idx ON channels(repository_id, name)')
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(4, new Date().toISOString())
+    }
+
     database.exec('COMMIT')
   } catch (error) {
     database.exec('ROLLBACK')
     throw error
+  }
+}
+
+function normalizeLegacyDuplicateChannelNames(database: DatabaseSync): void {
+  const duplicateGroups = database.prepare(`
+    SELECT repository_id, name FROM channels
+    GROUP BY repository_id, name
+    HAVING COUNT(*) > 1
+  `).all() as Array<{ repository_id: string; name: string }>
+  const listChannels = database.prepare(`
+    SELECT id FROM channels
+    WHERE repository_id = ? AND name = ?
+    ORDER BY created_at, id
+  `)
+  const channelExists = database.prepare('SELECT 1 FROM channels WHERE repository_id = ? AND name = ? LIMIT 1')
+  const renameChannel = database.prepare('UPDATE channels SET name = ? WHERE id = ?')
+
+  for (const group of duplicateGroups) {
+    const duplicates = listChannels.all(group.repository_id, group.name) as Array<{ id: string }>
+    for (let index = 1; index < duplicates.length; index += 1) {
+      let suffix = 2
+      let candidateName = `${group.name}-${suffix}`
+      while (channelExists.get(group.repository_id, candidateName)) {
+        suffix += 1
+        candidateName = `${group.name}-${suffix}`
+      }
+      renameChannel.run(candidateName, duplicates[index].id)
+    }
   }
 }

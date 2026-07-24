@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { WorkspaceService } from './workspace-service'
 import type { GitClient } from '../ports/git-client'
+import { DomainError } from '../domain/task'
 
 describe('WorkspaceService', () => {
   it('inspects a directory as a Git repository and creates its general channel', async () => {
@@ -57,6 +58,15 @@ describe('WorkspaceService', () => {
 
     expect(repositories.persistedRepositories).toEqual([])
     expect(repositories.persistedChannels).toEqual([])
+  })
+
+  it('maps a repository-local channel uniqueness constraint to a domain conflict', () => {
+    const gitClient: GitClient = { inspectRepository: vi.fn() }
+    const repositories = new DuplicateChannelWorkspaceRepository('workspace-1')
+    const service = new WorkspaceService(repositories, gitClient)
+
+    expect(() => service.createChannel({ repositoryId: 'repository-1', name: 'general' }))
+      .toThrow(new DomainError('Channel #general already exists in this repository.'))
   })
 })
 
@@ -140,5 +150,15 @@ class TransactionalWorkspaceRepository extends RecordingWorkspaceRepository {
     const channel = super.createChannel(input)
     this.persistedChannels.push(channel)
     return channel
+  }
+}
+
+class DuplicateChannelWorkspaceRepository extends RecordingWorkspaceRepository {
+  override hasRepository(repositoryId: string): boolean {
+    return repositoryId === 'repository-1'
+  }
+
+  override createChannel(_input: { repositoryId: string; name: string }): never {
+    throw new Error('UNIQUE constraint failed: channels.repository_id, channels.name')
   }
 }

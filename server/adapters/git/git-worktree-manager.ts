@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { access, mkdir } from 'node:fs/promises'
+import { lstat, mkdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import type { WorktreeAllocation, WorktreeManager, WorktreeRequest } from '../../ports/worktree-manager'
@@ -21,23 +21,30 @@ export class GitWorktreeManager implements WorktreeManager {
   }
 
   async create(task: WorktreeRequest): Promise<WorktreeAllocation> {
-    const repositoryRoot = path.resolve(task.repositoryRoot)
-    const worktreePath = path.resolve(this.worktreesRoot, pathSegment(task.repositoryId, 'repository ID'), pathSegment(task.id, 'task ID'))
+    const repositoryRoot = await resolveExistingPath(task.repositoryRoot, 'Repository root')
+    const worktreePath = path.resolve(
+      this.worktreesRoot,
+      pathSegment(task.repositoryId, 'repository ID'),
+      pathSegment(task.id, 'task ID'),
+    )
     assertInside(worktreePath, this.worktreesRoot, 'Worktree path must be inside the configured worktrees directory.')
+    const resolvedWorktreesRoot = await resolvePathForCreation(this.worktreesRoot)
+    let resolvedWorktreePath = await resolvePathForCreation(worktreePath)
+    const protectedRoots = await Promise.all([repositoryRoot, ...this.repositoryRoots].map((root) => resolveExistingPath(root, 'Repository root')))
 
-    for (const protectedRoot of [repositoryRoot, ...this.repositoryRoots]) {
-      if (isInside(worktreePath, protectedRoot)) {
-        throw new Error('Worktree path must not be inside the repository root.')
-      }
-    }
+    assertOutsideProtectedRoots(resolvedWorktreePath, protectedRoots)
+    assertInside(resolvedWorktreePath, resolvedWorktreesRoot, 'Worktree path must be inside the configured worktrees directory.')
 
     await assertMissing(worktreePath)
     await mkdir(path.dirname(worktreePath), { recursive: true })
+    resolvedWorktreePath = await resolvePathForCreation(worktreePath)
+    assertOutsideProtectedRoots(resolvedWorktreePath, protectedRoots)
+    assertInside(resolvedWorktreePath, resolvedWorktreesRoot, 'Worktree path must be inside the configured worktrees directory.')
 
     const branchName = `sinapsis/task-${pathSegment(task.id, 'task ID')}`
     await execFileAsync('git', [
       '-C', repositoryRoot,
-      'worktree', 'add', '-b', branchName, worktreePath, requiredBranch(task.targetBranch),
+      'worktree', 'add', '-b', branchName, resolvedWorktreePath, requiredBranch(task.targetBranch),
     ], { shell: false })
 
     return { branchName, worktreePath }
@@ -60,7 +67,7 @@ function requiredBranch(value: string): string {
 
 async function assertMissing(targetPath: string): Promise<void> {
   try {
-    await access(targetPath)
+    await lstat(targetPath)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return
@@ -68,6 +75,46 @@ async function assertMissing(targetPath: string): Promise<void> {
     throw error
   }
   throw new Error(`Worktree path already exists: ${targetPath}`)
+}
+
+async function resolveExistingPath(targetPath: string, label: string): Promise<string> {
+  try {
+    return await realpath(path.resolve(targetPath))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`${label} does not exist.`)
+    }
+    throw error
+  }
+}
+
+async function resolvePathForCreation(targetPath: string): Promise<string> {
+  let currentPath = path.resolve(targetPath)
+  const missingSegments: string[] = []
+
+  while (true) {
+    try {
+      return path.join(await realpath(currentPath), ...missingSegments)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error
+      }
+      const parentPath = path.dirname(currentPath)
+      if (parentPath === currentPath) {
+        throw new Error(`Unable to resolve worktree path: ${targetPath}`)
+      }
+      missingSegments.unshift(path.basename(currentPath))
+      currentPath = parentPath
+    }
+  }
+}
+
+function assertOutsideProtectedRoots(targetPath: string, protectedRoots: readonly string[]): void {
+  for (const protectedRoot of protectedRoots) {
+    if (isInside(targetPath, protectedRoot)) {
+      throw new Error('Worktree path must not be inside the repository root.')
+    }
+  }
 }
 
 function assertInside(targetPath: string, parentPath: string, message: string): void {

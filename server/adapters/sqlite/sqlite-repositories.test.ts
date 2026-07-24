@@ -169,16 +169,41 @@ describe('SQLite workspace repositories', () => {
     }
   })
 
+  it('migrates legacy duplicate channel names without deleting channels and then enforces repository-local uniqueness', async () => {
+    const { repositories, databasePath } = await createRepositories()
+    const channel = createChannel(repositories)
+    database!.database.exec('DROP INDEX channels_repository_name_unique_idx')
+    database!.database.prepare('DELETE FROM schema_migrations WHERE version = 4').run()
+    database!.database.prepare('INSERT INTO channels (id, repository_id, name, created_at) VALUES (?, ?, ?, ?)').run(
+      'legacy-duplicate-channel', channel.repositoryId, channel.name, '2026-07-24T00:00:00.000Z',
+    )
+    database!.close()
+    database = undefined
+    database = createSqliteDatabase(databasePath)
+
+    const channels = database.database.prepare('SELECT id, name FROM channels WHERE repository_id = ? ORDER BY created_at, id').all(channel.repositoryId)
+    expect(channels).toEqual([
+      { id: 'legacy-duplicate-channel', name: 'engineering' },
+      expect.objectContaining({ name: 'engineering-2' }),
+    ])
+    expect(() => database!.database.prepare('INSERT INTO channels (id, repository_id, name, created_at) VALUES (?, ?, ?, ?)').run(
+      'another-duplicate-channel', channel.repositoryId, 'engineering', '2026-07-25T00:00:00.000Z',
+    )).toThrow('UNIQUE constraint failed: channels.repository_id, channels.name')
+  })
+
   async function createRepositories(): Promise<{
     repositories: SqliteRepositories
     publisher: RecordingPublisher
+    databasePath: string
   }> {
-    database = createSqliteDatabase(await createDatabasePath())
+    const databasePath = await createDatabasePath()
+    database = createSqliteDatabase(databasePath)
     const publisher = new RecordingPublisher()
 
     return {
       repositories: new SqliteRepositories(database, publisher),
       publisher,
+      databasePath,
     }
   }
 

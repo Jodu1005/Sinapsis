@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { access } from 'node:fs/promises'
+import { access, mkdir, symlink } from 'node:fs/promises'
+import path from 'node:path'
 import { GitWorktreeManager } from './git-worktree-manager'
 import { createGitFixture, type GitFixture } from '../../test/git-fixture'
 
@@ -37,5 +38,19 @@ describe('GitWorktreeManager', () => {
     await expect(manager.create({
       id: 'task-a', repositoryId: 'repository-1', repositoryRoot: fixture.repositoryRoot, targetBranch: 'main',
     })).rejects.toThrow('must not be inside the repository root')
+  })
+
+  it('rejects an existing symlink ancestor that would place a worktree in the source repository', async () => {
+    fixture = await createGitFixture()
+    const worktreesDirectory = path.join(fixture.dataDir, 'worktrees')
+    await mkdir(worktreesDirectory, { recursive: true })
+    await symlink(fixture.repositoryRoot, path.join(worktreesDirectory, 'repository-1'))
+    const manager = new GitWorktreeManager({ dataDir: fixture.dataDir })
+
+    await expect(manager.create({
+      id: 'task-a', repositoryId: 'repository-1', repositoryRoot: fixture.repositoryRoot, targetBranch: 'main',
+    })).rejects.toThrow('inside the repository root')
+
+    await expect(access(path.join(fixture.repositoryRoot, 'task-a'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

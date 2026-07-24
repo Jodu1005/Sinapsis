@@ -1,5 +1,6 @@
 import type { GitClient, RepositoryInspection } from '../ports/git-client'
 import path from 'node:path'
+import { DomainError } from '../domain/task'
 
 export class NotFoundError extends Error {}
 export class ValidationError extends Error {}
@@ -77,8 +78,20 @@ export class WorkspaceService {
       throw new NotFoundError(`Repository ${input.repositoryId} does not exist.`)
     }
 
-    return this.catalog.createChannel({ repositoryId: input.repositoryId, name: requiredText(input.name, 'Channel name') })
+    const name = requiredText(input.name, 'Channel name')
+    try {
+      return this.catalog.createChannel({ repositoryId: input.repositoryId, name })
+    } catch (error) {
+      if (isChannelUniqueConstraint(error)) {
+        throw new DomainError(`Channel #${name} already exists in this repository.`)
+      }
+      throw error
+    }
   }
+}
+
+function isChannelUniqueConstraint(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('UNIQUE constraint failed: channels.repository_id, channels.name')
 }
 
 function toManagedRepository(

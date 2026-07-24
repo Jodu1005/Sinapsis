@@ -1,7 +1,7 @@
 import { inferCapabilityTags } from './capability-labeler'
 import { NotFoundError } from './workspace-service'
 import { readFile } from 'node:fs/promises'
-import type { CreateTaskInput, Task, TaskDetails, TaskInput } from '../domain/task'
+import { DomainError, type CreateTaskInput, type Task, type TaskDetails, type TaskInput, type TaskStatus } from '../domain/task'
 import type { BootstrapWorkspace, WorkspaceRepositories, WorkspaceUnitOfWork } from '../ports/repositories'
 
 export interface CreateLabeledTaskInput {
@@ -63,7 +63,10 @@ export class TaskService {
   }
 
   queueHumanInput(taskId: string, body: string): TaskInput {
-    this.getTaskDetails(taskId)
+    const details = this.getTaskDetails(taskId)
+    if (!canAcceptHumanInput(details.task.status)) {
+      throw new DomainError('Task input can only be queued while an agent is active.')
+    }
     return this.repositories.createTaskInput(taskId, body)
   }
 
@@ -81,6 +84,10 @@ export class TaskService {
   private requireRepository(repositoryId: string): void {
     findWorkspaceForRepository(this.repositories.getBootstrap().workspaces, repositoryId)
   }
+}
+
+function canAcceptHumanInput(status: TaskStatus): boolean {
+  return status === 'claimed' || status === 'running' || status === 'waiting_input'
 }
 
 function findWorkspaceForRepository(workspaces: BootstrapWorkspace[], repositoryId: string): BootstrapWorkspace {
