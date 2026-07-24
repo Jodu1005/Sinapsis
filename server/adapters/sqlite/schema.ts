@@ -4,19 +4,19 @@ const migrationVersion = 1
 
 export function migrateSchema(database: DatabaseSync): void {
   database.exec('PRAGMA foreign_keys = ON')
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version INTEGER PRIMARY KEY,
-      applied_at TEXT NOT NULL
-    );
-  `)
+  database.exec('BEGIN IMMEDIATE')
 
-  const migration = database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migrationVersion)
-  if (migration) {
-    return
-  }
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      );
+    `)
 
-  database.exec(`
+    const migration = database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(migrationVersion)
+    if (!migration) {
+      database.exec(`
     CREATE TABLE workspaces (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -130,5 +130,12 @@ export function migrateSchema(database: DatabaseSync): void {
     CREATE INDEX task_leases_task_expires_at_idx ON task_leases(task_id, expires_at);
   `)
 
-  database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(migrationVersion, new Date().toISOString())
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(migrationVersion, new Date().toISOString())
+    }
+
+    database.exec('COMMIT')
+  } catch (error) {
+    database.exec('ROLLBACK')
+    throw error
+  }
 }

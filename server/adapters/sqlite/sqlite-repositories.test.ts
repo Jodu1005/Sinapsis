@@ -62,6 +62,28 @@ describe('SQLite workspace repositories', () => {
     expect(messageWasVisibleWhenPublished).toBe(true)
   })
 
+  it('does not publish nested transaction events when the enclosing transaction rolls back', async () => {
+    const { repositories, publisher } = await createRepositories()
+    const channel = createChannel(repositories)
+
+    expect(() => {
+      repositories.inTransaction(() => {
+        repositories.inTransaction((unitOfWork) => {
+          unitOfWork.createMessage({
+            channelId: channel.id,
+            senderType: 'human',
+            authorName: 'Jodu',
+            body: 'This message must disappear with the enclosing transaction.',
+          })
+        })
+
+        throw new Error('roll back enclosing transaction')
+      })
+    }).toThrow('roll back enclosing transaction')
+
+    expect(publisher.events).toEqual([])
+  })
+
   it('rejects moving an accepted task back to queued', () => {
     const acceptedTask: Task = {
       id: 'task-1',

@@ -82,11 +82,9 @@ interface AgentRow {
 }
 
 export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
-  private readonly events: DomainEvent[] = []
-
   constructor(
     private readonly database: DatabaseSync,
-    private readonly publisher: DomainEventPublisher,
+    private readonly deferUntilCommit: (domainEvent: DomainEvent) => void,
   ) {}
 
   createWorkspace(input: CreateWorkspaceInput): Workspace {
@@ -240,27 +238,48 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
   }
 
   afterCommit(domainEvent: DomainEvent): void {
-    this.events.push(domainEvent)
-  }
-
-  publishCommittedEvents(): void {
-    for (const domainEvent of this.events) {
-      this.publisher.publish(domainEvent)
-    }
+    this.deferUntilCommit(domainEvent)
   }
 }
 
 export class SqliteRepositories implements WorkspaceRepositories {
+  private transactionDepth = 0
+  private deferredEvents: DomainEvent[] | undefined
+
   constructor(
     private readonly sqlite: SqliteDatabase,
     private readonly publisher: DomainEventPublisher,
   ) {}
 
   inTransaction<T>(work: (unitOfWork: SqliteUnitOfWork) => T): T {
-    const unitOfWork = new SqliteUnitOfWork(this.sqlite.database, this.publisher)
-    const result = this.sqlite.transaction(() => work(unitOfWork))
-    unitOfWork.publishCommittedEvents()
-    return result
+    const isOutermostTransaction = this.transactionDepth === 0
+    if (isOutermostTransaction) {
+      this.deferredEvents = []
+    }
+
+    this.transactionDepth += 1
+    const unitOfWork = new SqliteUnitOfWork(this.sqlite.database, (domainEvent) => {
+      this.deferredEvents?.push(domainEvent)
+    })
+
+    try {
+      const result = this.sqlite.transaction(() => work(unitOfWork))
+      if (isOutermostTransaction) {
+        const committedEvents = this.deferredEvents ?? []
+        this.deferredEvents = undefined
+        for (const domainEvent of committedEvents) {
+          this.publisher.publish(domainEvent)
+        }
+      }
+      return result
+    } catch (error) {
+      if (isOutermostTransaction) {
+        this.deferredEvents = undefined
+      }
+      throw error
+    } finally {
+      this.transactionDepth -= 1
+    }
   }
 
   createWorkspace(input: CreateWorkspaceInput): Workspace {
