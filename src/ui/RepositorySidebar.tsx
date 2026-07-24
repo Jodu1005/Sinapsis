@@ -1,5 +1,5 @@
-import { FolderGit2, Hash, ListTodo, Menu, X } from 'lucide-react'
-import type { WorkspaceView } from '../domain/workspace-view'
+import { FolderGit2, Hash, ListTodo, Menu, Plus, X } from 'lucide-react'
+import type { AgentView, WorkspaceView } from '../domain/workspace-view'
 import { AgentStatusList } from './AgentStatusList'
 
 interface RepositorySidebarProps {
@@ -7,12 +7,14 @@ interface RepositorySidebarProps {
   selectedChannelId: string | null
   onSelectChannel(channelId: string): void
   onSelectTasks(repositoryId: string): void
+  onCreateTask(repositoryId: string): void
+  onSelectAgent(agent: AgentView): void
   mobileOpen: boolean
   mobileHidden: boolean
   onClose(): void
 }
 
-export function RepositorySidebar({ workspace, selectedChannelId, onSelectChannel, onSelectTasks, mobileOpen, mobileHidden, onClose }: RepositorySidebarProps) {
+export function RepositorySidebar({ workspace, selectedChannelId, onSelectChannel, onSelectTasks, onCreateTask, onSelectAgent, mobileOpen, mobileHidden, onClose }: RepositorySidebarProps) {
   return <nav className="repository-sidebar" aria-label="代码仓与频道" aria-hidden={mobileHidden || undefined} inert={mobileHidden} data-mobile-open={mobileOpen}>
     <div className="sidebar-topline">
       <div className="workspace-lockup"><span className="workspace-mark">S</span><strong>{workspace.name}</strong></div>
@@ -21,7 +23,7 @@ export function RepositorySidebar({ workspace, selectedChannelId, onSelectChanne
     <div className="sidebar-section-label">代码仓</div>
     <div className="repository-list">
       {workspace.repositories.map((repository) => <section className="repository-group" key={repository.id}>
-        <div className="repository-name"><FolderGit2 size={16} /><span>{repository.name}</span><span className="branch-name">{repository.currentBranch}</span></div>
+        <div className="repository-name"><FolderGit2 size={16} /><span>{repository.name}</span><span className="branch-name">{repository.currentBranch}</span><button type="button" className="icon-button repository-task-create" aria-label={`新建 ${repository.name} 任务`} data-tooltip="新建任务" onClick={() => onCreateTask(repository.id)}><Plus size={15} /></button></div>
         <div className="channel-list">
           {repository.channels.map((channel) => <button key={channel.id} type="button" className="channel-button" aria-label={`# ${channel.name}`} aria-current={selectedChannelId === channel.id ? 'page' : undefined} onClick={() => onSelectChannel(channel.id)}>
             <Hash size={15} /> <span>{channel.name}</span>
@@ -30,7 +32,7 @@ export function RepositorySidebar({ workspace, selectedChannelId, onSelectChanne
         <button type="button" className="task-entry" onClick={() => onSelectTasks(repository.id)}><ListTodo size={15} /> <span>任务 {repository.tasks.length}</span></button>
       </section>)}
     </div>
-    <AgentStatusList agents={workspace.agents} />
+    <AgentStatusList agents={workspace.agents} onSelect={onSelectAgent} />
   </nav>
 }
 

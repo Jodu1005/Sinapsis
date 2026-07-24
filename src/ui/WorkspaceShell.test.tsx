@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceApi } from '../api/client'
-import type { WorkspaceSnapshot } from '../domain/workspace-view'
+import type { TaskDetailView, TaskView, WorkspaceSnapshot } from '../domain/workspace-view'
 import { WorkspaceShell } from './WorkspaceShell'
 
 const snapshot: WorkspaceSnapshot = {
@@ -62,6 +62,23 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     readArtifact: vi.fn(),
     ...overrides,
   }
+}
+
+const createdTask: TaskView = {
+  id: 'task-new', repositoryId: 'repository-1', channelId: 'channel-general', directAgentId: 'agent-1', title: '补齐任务详情', description: '将任务面板接入工作台。',
+  acceptanceCriteria: '可以查看证据并人工验收。', labels: ['frontend'], status: 'in_review', queuedAt: '2026-07-25T09:00:00.000Z', attemptCount: 1,
+  maxRetries: 2, timeoutMs: 3_600_000, leaseTtlMs: null, branchName: 'task/task-new', worktreePath: '/tmp/task-new',
+  createdAt: '2026-07-25T09:00:00.000Z', updatedAt: '2026-07-25T09:00:00.000Z',
+}
+
+const createdTaskDetails: TaskDetailView = {
+  task: createdTask,
+  sessions: [],
+  leases: [],
+  inputs: [],
+  decisions: [],
+  artifacts: [{ id: 'artifact-1', taskId: 'task-new', kind: 'test-results', createdAt: '2026-07-25T09:01:00.000Z' }],
+  events: [],
 }
 
 describe('WorkspaceShell', () => {
@@ -137,6 +154,7 @@ describe('WorkspaceShell', () => {
     await user.click(screen.getByRole('button', { name: '任务 1' }))
 
     expect(screen.getByRole('heading', { name: 'sinapsis 任务' })).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: '执行中' }))
     expect(screen.getByRole('button', { name: /修复频道界面/ })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '# general' })).toBeInTheDocument()
   })
@@ -191,5 +209,42 @@ describe('WorkspaceShell', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('本机服务不可用')
     expect(composer).toHaveValue('这条消息发送失败。')
+  })
+
+  it('creates a repository-bound task and opens its evidence and review details', async () => {
+    const updated = structuredClone(snapshot)
+    updated.workspaces[0].repositories[0].tasks.push(createdTask)
+    const api = makeApi({
+      getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockResolvedValue(updated),
+      createTask: vi.fn().mockResolvedValue(createdTask),
+      getTaskDetails: vi.fn().mockResolvedValue(createdTaskDetails),
+      readArtifact: vi.fn().mockResolvedValue('vitest: 12 passed'),
+      reviewTask: vi.fn().mockResolvedValue({ ...createdTask, status: 'accepted' }),
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await screen.findByRole('button', { name: '新建 sinapsis 任务' })
+    await user.click(screen.getByRole('button', { name: '新建 sinapsis 任务' }))
+    await user.type(screen.getByLabelText('任务标题'), createdTask.title)
+    await user.type(screen.getByLabelText('详细描述'), createdTask.description)
+    await user.type(screen.getByLabelText('验收标准'), createdTask.acceptanceCriteria)
+    await user.type(screen.getByLabelText('标签'), 'frontend')
+    await user.selectOptions(screen.getByLabelText('指定 Agent'), 'agent-1')
+    await user.click(screen.getByRole('button', { name: '创建任务' }))
+
+    expect(api.createTask).toHaveBeenCalledWith('repository-1', {
+      title: createdTask.title,
+      description: createdTask.description,
+      acceptanceCriteria: createdTask.acceptanceCriteria,
+      labels: ['frontend'],
+      directAgentId: 'agent-1',
+    })
+    expect(await screen.findByRole('heading', { name: '概览' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'test-results' }))
+    expect(await screen.findByLabelText('运行证据内容')).toHaveTextContent('vitest: 12 passed')
+    await user.click(screen.getByRole('button', { name: '接受验收' }))
+    expect(api.reviewTask).toHaveBeenCalledWith('task-new', 'accept', expect.any(String))
+    expect(await screen.findByText('验收已通过，尚未合并')).toBeInTheDocument()
   })
 })

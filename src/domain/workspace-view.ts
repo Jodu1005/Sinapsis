@@ -79,6 +79,23 @@ export interface ChannelMessage {
   deletedAt: string | null
 }
 
+export interface TaskDetailView {
+  task: TaskView
+  sessions: TaskSessionView[]
+  leases: TaskLeaseView[]
+  inputs: TaskInputView[]
+  decisions: ReviewDecisionView[]
+  artifacts: TaskArtifactView[]
+  events: TaskEventView[]
+}
+
+export interface TaskSessionView { id: string; taskId: string; agentId: string; runtimeSessionId: string | null; status: string; createdAt: string; updatedAt: string }
+export interface TaskLeaseView { id: string; taskId: string; agentId: string; expiresAt: string; createdAt: string }
+export interface TaskInputView { id: string; taskId: string; body: string; createdAt: string; consumedAt: string | null }
+export interface ReviewDecisionView { id: string; taskId: string; decision: string; reason: string; createdAt: string }
+export interface TaskArtifactView { id: string; taskId: string; kind: string; createdAt: string }
+export interface TaskEventView { id: string; taskId: string; type: string; payload: Record<string, unknown>; createdAt: string }
+
 export function channelMessages(workspace: WorkspaceView, channelId: string): ChannelMessage[] {
   return workspace.recentMessages.filter((message) => message.channelId === channelId)
 }
