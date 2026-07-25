@@ -210,6 +210,33 @@ describe('local service API', () => {
     await expect(mergeResponse.json()).resolves.toEqual({ error: '第一版只记录验收，合并需要独立人工流程。' })
   })
 
+  it('dispatches an ordinary channel message to the conversation coordinator without creating a task', async () => {
+    const dispatched: Array<{ channelId: string; messageId: string; body: string }> = []
+    const app = createApp({
+      conversationCoordinator: {
+        dispatch: async (channelId, message) => {
+          dispatched.push({ channelId, messageId: message.id, body: message.body })
+        },
+      },
+    })
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/channels/${channel.id}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ body: '请介绍一下当前项目。' }),
+    })
+
+    expect(response.status).toBe(201)
+    expect(dispatched).toEqual([{ channelId: channel.id, messageId: expect.any(String), body: '请介绍一下当前项目。' }])
+    expect(repositories.getTasksForRepository(repository.id)).toEqual([])
+  })
+
   it('refreshes a persisted runtime and returns a sanitized Agent payload', async () => {
     const app = createApp({
       runtimeAvailabilityDetector: {

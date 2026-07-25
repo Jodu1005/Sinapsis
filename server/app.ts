@@ -11,6 +11,7 @@ import { createSqliteDatabase } from './adapters/sqlite/database'
 import { SqliteRepositories } from './adapters/sqlite/sqlite-repositories'
 import { AgentService } from './application/agent-service'
 import { ChannelMessageService } from './application/channel-message-service'
+import { ConversationCoordinator } from './application/conversation-coordinator'
 import { TaskExecutionCoordinator } from './application/task-execution-coordinator'
 import { TaskReviewService } from './application/task-review-service'
 import { TaskScheduler } from './application/task-scheduler'
@@ -27,6 +28,7 @@ export interface CreateAppOptions {
   gitClient?: GitClient
   runtimeAvailabilityDetector?: RuntimeAvailabilityDetector
   executionCoordinator?: TaskExecutionCoordinator
+  conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'>
   scheduler?: TaskScheduler
   reviewService?: TaskReviewService
 }
@@ -42,17 +44,19 @@ export function createApp(options: CreateAppOptions = {}): Express {
   const agentService = new AgentService(catalog, options.runtimeAvailabilityDetector ?? new CommandRuntimeAvailabilityDetector())
   const taskService = new TaskService(repositories)
   const messages = new ChannelMessageService(repositories)
+  const runtimes = {
+    opencode: new OpenCodeRuntimeAdapter(new NodeProcessRunner()),
+    pi: new PiRuntimeAdapter(new NodeProcessRunner(), path.dirname(databasePath)),
+    'claude-code': new ClaudeCodeRuntimeAdapter(new NodeProcessRunner()),
+  }
   const coordinator = options.executionCoordinator ?? new TaskExecutionCoordinator({
     repositories,
-    runtimes: {
-      opencode: new OpenCodeRuntimeAdapter(new NodeProcessRunner()),
-      pi: new PiRuntimeAdapter(new NodeProcessRunner(), path.dirname(databasePath)),
-      'claude-code': new ClaudeCodeRuntimeAdapter(new NodeProcessRunner()),
-    },
+    runtimes,
     worktrees: new GitWorktreeManager({ dataDir: path.dirname(databasePath) }),
     artifactDirectory: path.join(path.dirname(databasePath), 'artifacts'),
     messages,
   })
+  const conversationCoordinator = options.conversationCoordinator ?? new ConversationCoordinator({ repositories, runtimes, messages })
   const scheduler = options.scheduler ?? new TaskScheduler(repositories, coordinator)
   const reviewService = options.reviewService ?? new TaskReviewService(repositories, coordinator, messages)
 
@@ -61,6 +65,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
   app.locals.repositories = repositories
   app.locals.scheduler = scheduler
   app.locals.executionCoordinator = coordinator
+  app.locals.conversationCoordinator = conversationCoordinator
   app.use(express.json())
 
   app.get('/api/health', (_request, response) => {
@@ -177,6 +182,9 @@ export function createApp(options: CreateAppOptions = {}): Express {
         scheduler.claimNext(mention.id)
         await coordinator.flush(taskId)
       }
+    }
+    if (!taskId) {
+      await conversationCoordinator.dispatch(channelId, message)
     }
     response.status(201).json(message)
   }))
