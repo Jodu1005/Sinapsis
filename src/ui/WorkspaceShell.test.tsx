@@ -55,6 +55,7 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     createWorkspace: vi.fn(),
     addRepository: vi.fn(),
     createAgent: vi.fn(),
+    refreshAgentRuntime: vi.fn(),
     postMessage: vi.fn().mockResolvedValue(undefined),
     createTask: vi.fn(),
     getTaskDetails: vi.fn().mockResolvedValue(createdTaskDetails),
@@ -153,6 +154,68 @@ describe('WorkspaceShell', () => {
     expect(api.createAgent).toHaveBeenCalledWith('workspace-1', {
       identity: '验证 Agent', mention: 'verify', runtime: 'opencode', capabilityTags: ['typescript', 'test'],
     })
+  })
+
+  it('allows selecting Claude Code when creating an Agent', async () => {
+    const api = makeApi({ createAgent: vi.fn().mockResolvedValue(snapshot.workspaces[0].agents[0]) })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await screen.findByRole('button', { name: '添加 Agent' })
+    await user.click(screen.getByRole('button', { name: '添加 Agent' }))
+    const dialog = screen.getByRole('dialog', { name: '添加 Agent' })
+
+    await user.type(within(dialog).getByLabelText('Agent 名称'), 'Claude Agent')
+    await user.type(within(dialog).getByLabelText('提及名'), 'claude')
+    await user.selectOptions(within(dialog).getByLabelText('Runtime'), 'claude-code')
+    await user.type(within(dialog).getByLabelText('能力标签'), 'review')
+    await user.click(within(dialog).getByRole('button', { name: '添加 Agent' }))
+
+    expect(api.createAgent).toHaveBeenCalledWith('workspace-1', {
+      identity: 'Claude Agent', mention: 'claude', runtime: 'claude-code', capabilityTags: ['review'],
+    })
+  })
+
+  it('shows Claude Code runtime copy in the agent config dialog', async () => {
+    const claudeSnapshot = structuredClone(snapshot)
+    claudeSnapshot.workspaces[0].agents[0].runtime = 'claude-code'
+    claudeSnapshot.workspaces[0].agents[0].model = ''
+
+    render(<WorkspaceShell api={makeApi({ getBootstrap: vi.fn().mockResolvedValue(claudeSnapshot) })} />)
+    const user = userEvent.setup()
+
+    await screen.findByRole('button', { name: '查看 实现 Agent 配置' })
+    await user.click(screen.getByRole('button', { name: '查看 实现 Agent 配置' }))
+
+    expect(screen.getByText('Claude Code CLI 受管运行')).toBeInTheDocument()
+    expect(screen.getByText('使用 Claude Code 默认值')).toBeInTheDocument()
+  })
+
+  it('rechecks an agent runtime from the config dialog and refreshes bootstrap afterwards', async () => {
+    let releaseRefresh: (() => void) | undefined
+    const refreshAgentRuntime = vi.fn().mockImplementation(() => new Promise<void>((resolve) => { releaseRefresh = resolve }))
+    const api = makeApi({
+      getBootstrap: vi.fn().mockResolvedValue(snapshot),
+      refreshAgentRuntime,
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await screen.findByRole('button', { name: '查看 实现 Agent 配置' })
+    await user.click(screen.getByRole('button', { name: '查看 实现 Agent 配置' }))
+
+    const recheckButton = screen.getByRole('button', { name: '重新检测 Agent Runtime' })
+    expect(recheckButton).toHaveAttribute('data-tooltip', '重新检测 Agent Runtime')
+
+    await user.click(recheckButton)
+
+    expect(api.refreshAgentRuntime).toHaveBeenCalledWith('agent-1')
+    expect(recheckButton).toBeDisabled()
+
+    releaseRefresh?.()
+
+    expect(await screen.findByRole('button', { name: '重新检测 Agent Runtime' })).toBeEnabled()
+    expect(api.getBootstrap).toHaveBeenCalledTimes(2)
   })
 
   it('refreshes the snapshot and agent status after a task.changed event', async () => {

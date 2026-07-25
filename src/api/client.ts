@@ -5,6 +5,7 @@ export interface WorkspaceApi {
   createWorkspace(input: { name: string }): Promise<WorkspaceView>
   addRepository(workspaceId: string, input: { directory: string; name?: string }): Promise<RepositoryView>
   createAgent(workspaceId: string, input: CreateAgentRequest): Promise<AgentView>
+  refreshAgentRuntime(agentId: string): Promise<void>
   postMessage(channelId: string, input: { body: string; taskId?: string }): Promise<ChannelMessage>
   createTask(repositoryId: string, input: CreateTaskRequest): Promise<TaskView>
   getTaskDetails(taskId: string): Promise<TaskDetailView>
@@ -38,6 +39,9 @@ export class ApiClient implements WorkspaceApi {
   }
   async createAgent(workspaceId: string, input: CreateAgentRequest): Promise<AgentView> {
     return this.request(`/api/workspaces/${workspaceId}/agents`, { method: 'POST', body: JSON.stringify(input) })
+  }
+  async refreshAgentRuntime(agentId: string): Promise<void> {
+    await this.request(`/api/agents/${agentId}/runtime/refresh`, { method: 'POST' })
   }
   async postMessage(channelId: string, input: { body: string; taskId?: string }): Promise<ChannelMessage> {
     return this.request(`/api/channels/${channelId}/messages`, { method: 'POST', body: JSON.stringify(input) })

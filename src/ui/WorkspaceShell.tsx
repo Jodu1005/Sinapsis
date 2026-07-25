@@ -27,6 +27,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const [composerRepositoryId, setComposerRepositoryId] = useState<string | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<AgentView | null>(null)
   const [creatingAgent, setCreatingAgent] = useState(false)
+  const [refreshingAgentId, setRefreshingAgentId] = useState<string | null>(null)
   const [navOpen, setNavOpen] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
   const narrowNavigation = useMediaQuery('(max-width: 700px)')
@@ -40,6 +41,11 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const workspace = snapshot?.workspaces[0]
   const selection = useMemo(() => findSelection(workspace, selectedChannelId), [workspace, selectedChannelId])
   useEffect(() => { if (selection.channel && selectedChannelId !== selection.channel.id) setSelectedChannelId(selection.channel.id) }, [selection.channel, selectedChannelId])
+  useEffect(() => {
+    if (!selectedAgent) return
+    const nextSelectedAgent = workspace?.agents.find((agent) => agent.id === selectedAgent.id) ?? null
+    setSelectedAgent(nextSelectedAgent)
+  }, [workspace, selectedAgent])
   const taskRepository = useMemo(() => findRepository(workspace, selectedTaskRepositoryId), [workspace, selectedTaskRepositoryId])
   const taskScope = taskRepository ?? selection.repository
   const selectedTask = useMemo(() => findTask(workspace, selectedTaskId) ?? (!taskRepository ? selection.repository?.tasks.find((task) => task.channelId === selection.channel?.id) : null), [workspace, selectedTaskId, taskRepository, selection])
@@ -88,6 +94,16 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     await refresh()
     setCreatingAgent(false)
   }
+  const refreshAgentRuntime = async () => {
+    if (!selectedAgent || refreshingAgentId) return
+    setRefreshingAgentId(selectedAgent.id)
+    try {
+      await api.refreshAgentRuntime(selectedAgent.id)
+      await refresh()
+    } finally {
+      setRefreshingAgentId(null)
+    }
+  }
   return <div className="workspace-shell">
     <RepositorySidebar workspace={workspace} selectedChannelId={selection.channel.id} onSelectChannel={selectChannel} onSelectTasks={selectRepositoryTasks} onCreateTask={setComposerRepositoryId} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
     <main className="conversation-panel">
@@ -103,7 +119,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     </aside>
     {composerRepository && <TaskComposerPanel repository={composerRepository} agents={workspace.agents} onCreate={createTask} onClose={() => setComposerRepositoryId(null)} />}
     {creatingAgent && <AgentCreateDialog onCreate={createAgent} onClose={() => setCreatingAgent(false)} />}
-    {selectedAgent && <AgentConfigDialog agent={selectedAgent} onClose={() => setSelectedAgent(null)} />}
+    {selectedAgent && <AgentConfigDialog agent={selectedAgent} refreshingRuntime={refreshingAgentId === selectedAgent.id} onRefreshRuntime={refreshAgentRuntime} onClose={() => setSelectedAgent(null)} />}
   </div>
 }
 

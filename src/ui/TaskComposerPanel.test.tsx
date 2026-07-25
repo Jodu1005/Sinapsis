@@ -38,7 +38,7 @@ describe('TaskComposerPanel', () => {
   })
 
   it('shows the managed runtime preset and masks configured environment values', () => {
-    render(<AgentConfigDialog agent={{ ...agent, env: ['API_TOKEN'] }} onClose={vi.fn()} />)
+    render(<AgentConfigDialog agent={{ ...agent, env: ['API_TOKEN'] }} refreshingRuntime={false} onRefreshRuntime={vi.fn().mockResolvedValue(undefined)} onClose={vi.fn()} />)
 
     expect(screen.getByText('Runtime 可用性')).toBeInTheDocument()
     expect(screen.getByText('预设')).toBeInTheDocument()
@@ -87,5 +87,5 @@ function TaskComposerHarness() {
 
 function AgentConfigHarness() {
   const [open, setOpen] = useState(false)
-  return <div className="workspace-shell"><button type="button" onClick={() => setOpen(true)}>查看 Agent 配置</button>{open && <AgentConfigDialog agent={agent} onClose={() => setOpen(false)} />}</div>
+  return <div className="workspace-shell"><button type="button" onClick={() => setOpen(true)}>查看 Agent 配置</button>{open && <AgentConfigDialog agent={agent} refreshingRuntime={false} onRefreshRuntime={vi.fn().mockResolvedValue(undefined)} onClose={() => setOpen(false)} />}</div>
 }
