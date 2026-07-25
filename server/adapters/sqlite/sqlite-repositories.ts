@@ -672,7 +672,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
           WHERE status = 'queued' AND (direct_agent_id IS NULL OR direct_agent_id = ?)
           ORDER BY queued_at ASC, rowid ASC
         `).all(agentId) as unknown as TaskRow[]).map(mapTask)
-        candidate = candidates.find((task) => labelsMatch(agent.capabilityTags, task.labels))
+        candidate = candidates.find((task) => task.directAgentId === agent.id || labelsMatch(agent.capabilityTags, task.labels))
         if (!candidate) return undefined
 
         const taskUpdate = database.prepare(`

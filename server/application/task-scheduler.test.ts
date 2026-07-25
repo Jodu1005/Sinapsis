@@ -71,6 +71,16 @@ describe('TaskScheduler', () => {
     expect(scheduler.claimNext(agents.frontend.id, at(3))?.task.id).toBe(direct.id)
   })
 
+  it('lets an explicitly addressed agent claim a task even when its labels do not match', async () => {
+    const { repositories, agents, createTask } = await createFixture()
+    const direct = createTask({
+      title: 'Direct task with a specialized label', labels: ['java'], directAgentId: agents.frontend.id,
+    })
+    const scheduler = new TaskScheduler(repositories)
+
+    expect(scheduler.claimNext(agents.frontend.id, at(2))?.task.id).toBe(direct.id)
+  })
+
   it('hands a new claim to the execution coordinator hook', async () => {
     const { repositories, agents, createTask } = await createFixture()
     const task = createTask({ title: 'Start through coordinator', labels: ['frontend'] })
