@@ -144,23 +144,61 @@ describe('WorkspaceShell', () => {
     expect(await screen.findByRole('heading', { name: '# release' })).toBeInTheDocument()
   })
 
-  it('dispatches /task commands to the selected channel instead of posting a message', async () => {
-    const task = { ...createdTask, title: '修复导航', description: '修复导航', acceptanceCriteria: '任务完成后在当前频道说明结果。', channelId: 'channel-general' }
+  it('keeps the channel dialog open when its post-create refresh fails', async () => {
+    const createdChannel = { id: 'channel-release', repositoryId: 'repository-1', name: 'release', createdAt: '2026-07-25T10:00:00.000Z' }
+    const api = makeApi({
+      createChannel: vi.fn().mockResolvedValue(createdChannel),
+      getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockRejectedValueOnce(new Error('刷新失败')),
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await user.click(await screen.findByRole('button', { name: '添加频道' }))
+    await user.type(screen.getByLabelText('频道名称'), 'release')
+    await user.click(screen.getByRole('button', { name: '创建频道' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('刷新失败')
+    expect(screen.getByRole('dialog', { name: '添加频道' })).toBeInTheDocument()
+  })
+
+  it('dispatches /task commands to # build instead of posting a message', async () => {
+    const task = { ...createdTask, title: '修复导航', description: '修复导航', acceptanceCriteria: '任务完成后在当前频道说明结果。', channelId: 'channel-build' }
     const api = makeApi({ createTask: vi.fn().mockResolvedValue(task) })
     const user = userEvent.setup()
     render(<WorkspaceShell api={api} />)
 
     await screen.findByRole('textbox', { name: '发送消息' })
+    await user.click(screen.getByRole('button', { name: '# build' }))
     await user.type(screen.getByRole('textbox', { name: '发送消息' }), '/task @builder 修复导航')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    expect(api.createTask).toHaveBeenCalledWith('repository-1', expect.objectContaining({
-      channelId: 'channel-general',
+    expect(api.createTask).toHaveBeenCalledWith('repository-1', {
       title: '修复导航',
+      description: '修复导航',
+      acceptanceCriteria: '任务完成后在当前频道说明结果。',
+      labels: [],
       directAgentId: 'agent-1',
-    }))
+      channelId: 'channel-build',
+    })
     expect(api.postMessage).not.toHaveBeenCalled()
     expect(await screen.findByRole('status')).toHaveTextContent('任务已派发。')
+  })
+
+  it('keeps task dispatch visibly failed when its post-create refresh fails', async () => {
+    const api = makeApi({
+      createTask: vi.fn().mockResolvedValue(createdTask),
+      getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockRejectedValueOnce(new Error('刷新失败')),
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    const composer = await screen.findByRole('textbox', { name: '发送消息' })
+    await user.type(composer, '/task @builder 修复导航')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('刷新失败')
+    expect(composer).toHaveValue('/task @builder 修复导航')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
   it('loads details for the initially selected channel task', async () => {

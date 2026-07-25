@@ -39,10 +39,18 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const narrowNavigation = useMediaQuery('(max-width: 700px)')
   const narrowContext = useMediaQuery('(max-width: 980px)')
   const refresh = useCallback(async () => {
-    try { setSnapshot(await api.getBootstrap()); setError(null) } catch (cause) { setError(cause instanceof Error ? cause.message : '无法读取工作空间。') }
+    try {
+      setSnapshot(await api.getBootstrap())
+      setError(null)
+    } catch (cause) {
+      const refreshError = cause instanceof Error ? cause : new Error('无法读取工作空间。')
+      setError(refreshError.message)
+      throw refreshError
+    }
   }, [api])
-  const reconnecting = useWorkspaceEvents(refresh)
-  useEffect(() => { void refresh() }, [refresh])
+  const refreshInBackground = useCallback(() => { void refresh().catch(() => undefined) }, [refresh])
+  const reconnecting = useWorkspaceEvents(refreshInBackground)
+  useEffect(() => { refreshInBackground() }, [refreshInBackground])
 
   const workspace = snapshot?.workspaces.find((candidate) => candidate.id === selectedWorkspaceId) ?? snapshot?.workspaces[0]
   const selection = useMemo(() => findSelection(workspace, selectedChannelId), [workspace, selectedChannelId])
@@ -69,7 +77,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     return () => { active = false }
   }, [api, selectedTask?.id, snapshot])
 
-  if (!snapshot) return <main className="workspace-loading"><p>{error ?? '正在连接本机工作空间...'}</p>{error && <button type="button" onClick={() => void refresh()}>重试</button>}</main>
+  if (!snapshot) return <main className="workspace-loading"><p>{error ?? '正在连接本机工作空间...'}</p>{error && <button type="button" onClick={refreshInBackground}>重试</button>}</main>
   if (!workspace) return <WorkspaceSetup api={api} onComplete={refresh} />
   if (!selection.channel || !selection.repository) return <main className="workspace-loading"><p>这个工作空间还没有频道。</p></main>
 
