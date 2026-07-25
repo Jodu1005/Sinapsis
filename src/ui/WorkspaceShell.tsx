@@ -147,9 +147,9 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const createWorkspace = async (input: { name: string; directory: string }) => {
     const nextWorkspace = await api.createWorkspace({ name: input.name })
     await api.addRepository(nextWorkspace.id, { directory: input.directory })
+    await refresh()
     setSelectedWorkspaceId(nextWorkspace.id)
     setCreatingWorkspace(false)
-    await refresh()
   }
   const createChannel = async (input: { name: string }) => {
     const repository = findRepository(workspace, creatingChannelRepositoryId)

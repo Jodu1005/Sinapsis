@@ -112,6 +112,26 @@ describe('WorkspaceShell', () => {
     expect(screen.queryByText('先看一下任务队列。')).not.toBeInTheDocument()
   })
 
+  it('keeps the workspace dialog open when its bootstrap refresh fails', async () => {
+    const createdWorkspace = { id: 'workspace-2', name: 'Release', leaseTtlMs: 30_000, createdAt: '2026-07-25T10:00:00.000Z' }
+    const api = makeApi({
+      createWorkspace: vi.fn().mockResolvedValue(createdWorkspace),
+      addRepository: vi.fn().mockResolvedValue(undefined),
+      getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockRejectedValueOnce(new Error('刷新失败')),
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await user.click(await screen.findByRole('button', { name: '添加工作空间' }))
+    const dialog = screen.getByRole('dialog', { name: '添加本地工作目录' })
+    await user.type(within(dialog).getByLabelText('工作空间名称'), 'Release')
+    await user.type(within(dialog).getByLabelText('工作目录'), '/code/release')
+    await user.click(within(dialog).getByRole('button', { name: '添加工作空间' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('刷新失败')
+    expect(screen.getByRole('dialog', { name: '添加本地工作目录' })).toBeInTheDocument()
+  })
+
   it('posts ordinary messages to the selected channel', async () => {
     const api = makeApi()
     const user = userEvent.setup()
@@ -296,6 +316,22 @@ describe('WorkspaceShell', () => {
 
     expect(await screen.findByRole('button', { name: '重新检测 Agent Runtime' })).toBeEnabled()
     expect(api.getBootstrap).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the agent config dialog usable when its bootstrap refresh fails', async () => {
+    const api = makeApi({
+      refreshAgentRuntime: vi.fn().mockResolvedValue(undefined),
+      getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockRejectedValueOnce(new Error('刷新失败')),
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await user.click(await screen.findByRole('button', { name: '查看 实现 Agent 配置' }))
+    await user.click(screen.getByRole('button', { name: '重新检测 Agent Runtime' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('刷新失败')
+    expect(screen.getByRole('dialog', { name: '实现 Agent' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新检测 Agent Runtime' })).toBeEnabled()
   })
 
   it('refreshes the snapshot and agent status after a task.changed event', async () => {
