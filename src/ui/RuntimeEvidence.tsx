@@ -8,7 +8,8 @@ export function RuntimeEvidence({ artifacts, events, onReadArtifact }: { artifac
   const [summary, setSummary] = useState<Record<string, string>>({})
   const reviewArtifacts = artifacts.filter((artifact) => artifact.kind in reviewEvidenceLabels)
   const rawArtifacts = artifacts.filter((artifact) => !(artifact.kind in reviewEvidenceLabels))
-  const streamedText = events.filter((event) => event.type === 'runtime.text').map((event) => textFromEvent(event)).join('')
+  const recentRawArtifacts = rawArtifacts.slice(-12)
+  const streamedText = events.filter((event) => event.type === 'runtime.text').slice(-50).map((event) => textFromEvent(event)).join('')
   useEffect(() => {
     let active = true
     void Promise.all(reviewArtifacts.map(async (artifact) => [artifact.id, await onReadArtifact(artifact.id)] as const)).then(
@@ -22,7 +23,7 @@ export function RuntimeEvidence({ artifacts, events, onReadArtifact }: { artifac
     {streamedText && <section className="runtime-output"><h4>Agent 输出</h4><pre aria-label="Agent 实时输出">{streamedText}</pre></section>}
     {artifacts.length === 0 ? <p className="context-empty">运行尚未留下证据</p> : <>
       {reviewArtifacts.length > 0 && <dl className="review-evidence" aria-label="评审摘要">{reviewArtifacts.map((artifact) => <div key={artifact.id}><dt>{reviewEvidenceLabels[artifact.kind]}</dt><dd><pre>{summary[artifact.id] ?? '正在读取...'}</pre></dd></div>)}</dl>}
-      {rawArtifacts.length > 0 && <section className="raw-evidence"><h4>原始运行日志</h4><div className="evidence-list">{rawArtifacts.map((artifact) => <button type="button" key={artifact.id} aria-label={artifact.kind} onClick={() => void openArtifact(artifact.id)}><FileCode2 size={15} /><span>{artifact.kind}</span>{loadingId === artifact.id && <LoaderCircle size={14} className="spin" />}</button>)}</div></section>}
+      {rawArtifacts.length > 0 && <section className="raw-evidence"><h4>原始运行日志</h4><div className="evidence-list">{recentRawArtifacts.map((artifact) => <button type="button" key={artifact.id} aria-label={artifact.kind} onClick={() => void openArtifact(artifact.id)}><FileCode2 size={15} /><span>{artifact.kind}</span>{loadingId === artifact.id && <LoaderCircle size={14} className="spin" />}</button>)}</div>{rawArtifacts.length > recentRawArtifacts.length && <p className="detail-hint">显示最近 {recentRawArtifacts.length} 项，共 {rawArtifacts.length} 项。</p>}</section>}
     </>}
     {content !== null && <pre className="artifact-content" aria-label="运行证据内容">{content}</pre>}
   </section>

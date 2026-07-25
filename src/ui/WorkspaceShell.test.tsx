@@ -61,6 +61,7 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     getTaskDetails: vi.fn().mockResolvedValue(createdTaskDetails),
     queueTaskInput: vi.fn(),
     reviewTask: vi.fn(),
+    requeueTask: vi.fn(),
     readArtifact: vi.fn(),
     ...overrides,
   }

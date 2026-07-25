@@ -89,6 +89,11 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     setTaskDetails((details) => details?.task.id === taskId ? { ...details, task } : details)
     await refresh()
   }
+  const requeueTask = async (taskId: string) => {
+    const task = await api.requeueTask(taskId)
+    setTaskDetails((details) => details?.task.id === taskId ? { ...details, task } : details)
+    await refresh()
+  }
   const createAgent = async (input: CreateAgentRequest) => {
     await api.createAgent(workspace.id, input)
     await refresh()
@@ -114,7 +119,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     <aside className="context-panel" aria-label="任务与上下文" aria-hidden={narrowContext && !contextOpen || undefined} inert={narrowContext && !contextOpen} data-mobile-open={contextOpen}>
       <header className="context-header"><strong>上下文</strong><button type="button" className="icon-button context-close" aria-label="关闭上下文" data-tooltip="关闭上下文" onClick={() => setContextOpen(false)}><X size={17} /></button></header>
       <section className="context-section"><div className="context-section-heading"><h2>{taskRepository ? `${taskRepository.name} 任务` : '本频道任务'}</h2><button type="button" className="icon-button" aria-label="新建当前上下文任务" data-tooltip="新建任务" onClick={() => setComposerRepositoryId(taskScope.id)}>+</button></div><TaskList tasks={taskScope.tasks.filter((task) => taskRepository || task.channelId === selection.channel!.id)} selectedTaskId={selectedTask?.id ?? null} onSelect={setSelectedTaskId} /></section>
-      {selectedTask && <section className="context-section task-details-context">{taskDetails ? <TaskDetailPanel details={taskDetails} onQueueInput={(body) => queueTaskInput(taskDetails.task.id, body)} onReview={(action) => reviewTask(taskDetails.task.id, action)} onReadArtifact={(artifactId) => api.readArtifact(taskDetails.task.id, artifactId)} /> : <p className="context-empty">{taskDetailsError ?? '正在读取任务详情...'}</p>}</section>}
+      {selectedTask && <section className="context-section task-details-context">{taskDetails ? <TaskDetailPanel details={taskDetails} onQueueInput={(body) => queueTaskInput(taskDetails.task.id, body)} onReview={(action) => reviewTask(taskDetails.task.id, action)} onRequeue={() => requeueTask(taskDetails.task.id)} onReadArtifact={(artifactId) => api.readArtifact(taskDetails.task.id, artifactId)} /> : <p className="context-empty">{taskDetailsError ?? '正在读取任务详情...'}</p>}</section>}
       <section className="context-section"><h2>频道操作</h2><button type="button" className="context-action" onClick={() => setContextOpen(false)}><PanelRightClose size={16} /> 收起上下文</button></section>
     </aside>
     {composerRepository && <TaskComposerPanel repository={composerRepository} agents={workspace.agents} onCreate={createTask} onClose={() => setComposerRepositoryId(null)} />}

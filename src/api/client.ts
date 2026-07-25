@@ -11,6 +11,7 @@ export interface WorkspaceApi {
   getTaskDetails(taskId: string): Promise<TaskDetailView>
   queueTaskInput(taskId: string, body: string): Promise<TaskInputView>
   reviewTask(taskId: string, action: 'accept' | 'return', message: string): Promise<TaskView>
+  requeueTask(taskId: string): Promise<TaskView>
   readArtifact(taskId: string, artifactId: string): Promise<string>
 }
 
@@ -55,6 +56,9 @@ export class ApiClient implements WorkspaceApi {
   }
   async reviewTask(taskId: string, action: 'accept' | 'return', message: string): Promise<TaskView> {
     return this.request(`/api/tasks/${taskId}/review`, { method: 'POST', body: JSON.stringify({ action, message }) })
+  }
+  async requeueTask(taskId: string): Promise<TaskView> {
+    return this.request(`/api/tasks/${taskId}/requeue`, { method: 'POST' })
   }
   async readArtifact(taskId: string, artifactId: string): Promise<string> {
     const response = await fetch(`/api/tasks/${taskId}/artifacts/${artifactId}`, { headers: { 'Content-Type': 'application/json' } })

@@ -139,7 +139,25 @@ describe('task API', () => {
     await expect(cancelResponse.json()).resolves.toMatchObject({ id: task.id, status: 'cancelled' })
   })
 
-  async function createRepositoryServer(): Promise<{ server: { baseUrl: string }; repositoryId: string }> {
+  it('requeues a task that needs human handling so it can be claimed again', async () => {
+    const { server, repositoryId, repositories } = await createRepositoryServer()
+    const createResponse = await fetch(`${server.baseUrl}/api/repositories/${repositoryId}/tasks`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        title: '恢复未提交的任务', description: '继续完成已有改动。', acceptanceCriteria: '提交任务分支。',
+      }),
+    })
+    const task = await createResponse.json() as { id: string }
+    repositories.transitionTask(task.id, 'claimed', 'Agent 已领取')
+    repositories.transitionTask(task.id, 'running', 'Runtime 已启动')
+    repositories.transitionTask(task.id, 'needs_human', '任务分支没有提交')
+
+    const response = await fetch(`${server.baseUrl}/api/tasks/${task.id}/requeue`, { method: 'POST' })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ id: task.id, status: 'queued' })
+  })
+
+  async function createRepositoryServer(): Promise<{ server: { baseUrl: string }; repositoryId: string; repositories: WorkspaceRepositories }> {
     const app = createApp({
       gitClient: {
         inspectRepository: async () => ({
@@ -158,7 +176,7 @@ describe('task API', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ directory: '/projects/sinapsis' }),
     })
     const repository = await repositoryResponse.json() as { id: string }
-    return { server, repositoryId: repository.id }
+    return { server, repositoryId: repository.id, repositories: app.locals.repositories as WorkspaceRepositories }
   }
 })
 

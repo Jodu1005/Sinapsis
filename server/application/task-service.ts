@@ -77,6 +77,14 @@ export class TaskService {
     return this.repositories.transitionTask(taskId, 'cancelled', reason)
   }
 
+  requeueTask(taskId: string): Task {
+    const details = this.getTaskDetails(taskId)
+    if (details.task.status !== 'needs_human') {
+      throw new DomainError('Only tasks needing human handling can be requeued.')
+    }
+    return this.repositories.transitionTask(taskId, 'queued', '人工确认后重新进入任务队列')
+  }
+
   async readArtifact(taskId: string, artifactId: string): Promise<{ kind: string; content: string }> {
     const artifact = this.repositories.getTaskArtifact(taskId, artifactId)
     if (!artifact) throw new NotFoundError(`Artifact ${artifactId} does not exist for task ${taskId}.`)

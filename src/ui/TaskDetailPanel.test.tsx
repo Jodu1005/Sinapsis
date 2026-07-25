@@ -90,4 +90,13 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByRole('heading', { name: 'Agent 输出' })).toBeInTheDocument()
     expect(screen.getByLabelText('Agent 实时输出')).toHaveTextContent('正在检查测试配置。发现一处失败。')
   })
+
+  it('allows a human-handled task to be requeued instead of incorrectly accepting it', async () => {
+    const onRequeue = vi.fn().mockResolvedValue(undefined)
+    render(<TaskDetailPanel details={{ ...details, task: { ...task, status: 'needs_human' } }} onQueueInput={vi.fn()} onReview={vi.fn()} onRequeue={onRequeue} onReadArtifact={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: '接受验收' })).toBeDisabled()
+    await userEvent.setup().click(screen.getByRole('button', { name: '重新执行' }))
+    expect(onRequeue).toHaveBeenCalledOnce()
+  })
 })

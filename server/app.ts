@@ -189,6 +189,12 @@ export function createApp(options: CreateAppOptions = {}): Express {
     response.json(task)
   }))
 
+  app.post('/api/tasks/:taskId/requeue', asyncRoute((request, response) => {
+    const task = taskService.requeueTask(requiredParam(request.params.taskId, 'taskId'))
+    if (task.directAgentId) scheduler.claimNext(task.directAgentId)
+    response.json(repositories.getTask(task.id) ?? task)
+  }))
+
   app.post('/api/tasks/:taskId/merge', asyncRoute((_request, response) => {
     response.status(501).json({ error: '第一版只记录验收，合并需要独立人工流程。' })
   }))
