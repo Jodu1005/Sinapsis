@@ -27,12 +27,12 @@ describe('PiRuntimeAdapter', () => {
       cwd: '/tmp/task-2',
       args: ['--mode', 'rpc', '--session-dir', '/tmp/sinapsis-data/pi-sessions', '--name', 'sinapsis:task-2'],
     })
-    expect(JSON.parse(process?.stdin[0] ?? '{}')).toMatchObject({ command: 'get_state' })
+    expect(JSON.parse(process?.stdin[0] ?? '{}')).toMatchObject({ type: 'get_state' })
     expect(process?.stdin).toHaveLength(1)
 
-    process?.emitStdout('{"type":"response","command":"get_state","success":true,"result":{"sessionId":"pi-session-1","sessionFile":"/tmp/pi-session.jsonl"}}\n')
+    process?.emitStdout('{"type":"response","command":"get_state","success":true,"data":{"sessionId":"pi-session-1","sessionFile":"/tmp/pi-session.jsonl"}}\n')
 
-    expect(JSON.parse(process?.stdin[1] ?? '{}')).toMatchObject({ command: 'prompt' })
+    expect(JSON.parse(process?.stdin[1] ?? '{}')).toMatchObject({ type: 'prompt', message: expect.stringContaining('Review pull request') })
     expect(session).toMatchObject({ sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session.jsonl' })
   })
 
@@ -43,26 +43,20 @@ describe('PiRuntimeAdapter', () => {
 
     const session = await adapter.start(task, (event) => events.push(event))
     const firstProcess = runner.spawns[0]?.process
-    firstProcess?.emitStdout('{"type":"response","command":"get_state","success":true,"result":{"sessionId":"pi-session-1","sessionFile":"/tmp/pi-session.jsonl"}}\n')
+    firstProcess?.emitStdout('{"type":"response","command":"get_state","success":true,"data":{"sessionId":"pi-session-1","sessionFile":"/tmp/pi-session.jsonl"}}\n')
     firstProcess?.emitStdout('{"type":"agent_settled"}\n')
 
     await adapter.resume(session, (event) => events.push(event))
     const resumedProcess = runner.spawns[1]?.process
 
-    expect(JSON.parse(resumedProcess?.stdin[0] ?? '{}')).toMatchObject({
-      command: 'switch_session',
-      args: { sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session.jsonl' },
-    })
+    expect(JSON.parse(resumedProcess?.stdin[0] ?? '{}')).toMatchObject({ type: 'switch_session', sessionPath: '/tmp/pi-session.jsonl' })
 
     adapter.sendInput(session, 'Check the migration too.', (event) => events.push(event))
     expect(resumedProcess?.stdin).toHaveLength(1)
 
     resumedProcess?.emitStdout('{"type":"response","command":"switch_session","success":true}\n')
 
-    expect(JSON.parse(resumedProcess?.stdin[1] ?? '{}')).toMatchObject({
-      command: 'prompt',
-      args: { text: 'Check the migration too.' },
-    })
+    expect(JSON.parse(resumedProcess?.stdin[1] ?? '{}')).toMatchObject({ type: 'prompt', message: 'Check the migration too.' })
   })
 
   it('uses RPC prompt and steer commands, then emits settled from agent_settled', async () => {
@@ -72,14 +66,14 @@ describe('PiRuntimeAdapter', () => {
 
     const session = await adapter.start(task, (event) => events.push(event))
     const process = runner.spawns[0]?.process
-    process?.emitStdout('{"type":"response","command":"get_state","success":true,"result":{"sessionId":"pi-session-1","sessionFile":"/tmp/pi-session.jsonl"}}\n')
+    process?.emitStdout('{"type":"response","command":"get_state","success":true,"data":{"sessionId":"pi-session-1","sessionFile":"/tmp/pi-session.jsonl"}}\n')
 
     adapter.sendInput(session, 'Focus on security.', (event) => events.push(event))
-    expect(JSON.parse(process?.stdin[2] ?? '{}')).toMatchObject({ command: 'steer', args: { text: 'Focus on security.' } })
+    expect(JSON.parse(process?.stdin[2] ?? '{}')).toMatchObject({ type: 'steer', message: 'Focus on security.' })
 
-    process?.emitStdout('{"type":"message_update","delta":{"text_delta":"Found one issue."}}\n')
-    process?.emitStdout('{"type":"tool_execution_start","tool_name":"git","tool_call_id":"call-1"}\n')
-    process?.emitStdout('{"type":"queue_update","queue_length":2}\n')
+    process?.emitStdout('{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Found one issue."}}\n')
+    process?.emitStdout('{"type":"tool_execution_start","toolName":"git","toolCallId":"call-1"}\n')
+    process?.emitStdout('{"type":"queue_update","steering":["Follow the branch"],"followUp":["Run tests"]}\n')
     process?.emitStdout('{"type":"agent_settled"}\n')
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'text', text: 'Found one issue.' }),
@@ -89,6 +83,17 @@ describe('PiRuntimeAdapter', () => {
     ]))
     expect(session.isStreaming).toBe(false)
     expect(session).toMatchObject({ sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session.jsonl' })
+  })
+
+  it('surfaces failed Pi RPC responses instead of leaving the task marked as running', async () => {
+    const runner = new FakeProcessRunner()
+    const events: RuntimeEvent[] = []
+    const adapter = new PiRuntimeAdapter(runner)
+
+    await adapter.start(task, (event) => events.push(event))
+    runner.spawns[0]?.process.emitStdout('{"id":"1","type":"response","command":"get_state","success":false,"error":"Unknown command"}\n')
+
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'error', message: 'Unknown command' }))
   })
 
   it('cancels its managed process for a session', async () => {

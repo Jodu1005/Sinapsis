@@ -74,4 +74,20 @@ describe('TaskDetailPanel', () => {
 
     expect(screen.queryByText('已排队，当前安全步骤结束后送达。')).not.toBeInTheDocument()
   })
+
+  it('renders streamed Agent text directly in the task detail panel', () => {
+    const runningDetails = {
+      ...details,
+      task: { ...task, status: 'running' as const },
+      events: [
+        { id: 'event-1', taskId: task.id, type: 'runtime.text', payload: { text: '正在检查测试配置。' }, createdAt: '2026-07-25T08:03:00.000Z' },
+        { id: 'event-2', taskId: task.id, type: 'runtime.text', payload: { text: '发现一处失败。' }, createdAt: '2026-07-25T08:04:00.000Z' },
+      ],
+    }
+
+    render(<TaskDetailPanel details={runningDetails} onQueueInput={vi.fn()} onReview={vi.fn()} onReadArtifact={vi.fn()} />)
+
+    expect(screen.getByRole('heading', { name: 'Agent 输出' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Agent 实时输出')).toHaveTextContent('正在检查测试配置。发现一处失败。')
+  })
 })

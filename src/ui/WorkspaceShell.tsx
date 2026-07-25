@@ -61,7 +61,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
       (cause: unknown) => { if (active) setTaskDetailsError(cause instanceof Error ? cause.message : '无法读取任务详情。') },
     )
     return () => { active = false }
-  }, [api, selectedTask])
+  }, [api, selectedTask?.id, snapshot])
 
   if (!snapshot) return <main className="workspace-loading"><p>{error ?? '正在连接本机工作空间...'}</p>{error && <button type="button" onClick={() => void refresh()}>重试</button>}</main>
   if (!workspace) return <WorkspaceSetup api={api} onComplete={refresh} />

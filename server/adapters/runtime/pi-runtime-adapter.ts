@@ -35,14 +35,14 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
       session.pendingInputs.push(input)
       return
     }
-    this.request(session, session.isStreaming ? 'steer' : 'prompt', { text: input })
+    this.request(session, session.isStreaming ? 'steer' : 'prompt', { message: input })
   }
 
   async resume(session: RuntimeSession, sink: RuntimeEventSink): Promise<void> {
     this.restoringSessions.add(session)
     this.launch(session, sink)
-    if (session.sessionId || session.sessionFile) {
-      this.request(session, 'switch_session', { sessionId: session.sessionId, sessionFile: session.sessionFile })
+    if (session.sessionFile) {
+      this.request(session, 'switch_session', { sessionPath: session.sessionFile })
       return
     }
     this.request(session, 'get_state', {})
@@ -85,10 +85,10 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
     })
   }
 
-  private request(session: RuntimeSession, command: string, args: Record<string, unknown>): void {
+  private request(session: RuntimeSession, type: string, args: Record<string, unknown>): void {
     const process = this.processes.get(session)
     if (!process) throw new Error('Runtime session has no active process.')
-    process.write(`${JSON.stringify({ type: 'request', id: String(++this.requestId), command, args })}\n`)
+    process.write(`${JSON.stringify({ id: String(++this.requestId), type, ...args })}\n`)
   }
 
   private drain(session: RuntimeSession): void {
@@ -96,7 +96,7 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
     const input = session.pendingInputs.shift()
     if (input) {
       session.isStreaming = true
-      this.request(session, 'prompt', { text: input })
+      this.request(session, 'prompt', { message: input })
     }
   }
 
@@ -104,14 +104,14 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
     if (!isRecord(value)) return
     const type = stringValue(value.type)
     if (type === 'message_update') {
-      const delta = isRecord(value.delta) ? value.delta : value
-      const text = stringValue(delta.text_delta)
+      const event = isRecord(value.assistantMessageEvent) ? value.assistantMessageEvent : isRecord(value.delta) ? value.delta : value
+      const text = stringValue(event.delta) ?? stringValue(event.text_delta)
       if (text) sink({ kind: 'text', taskId: session.taskId, text })
     }
-    if (type === 'tool_execution_start') sink({ kind: 'tool_start', taskId: session.taskId, toolName: stringValue(value.tool_name) ?? 'unknown', toolCallId: stringValue(value.tool_call_id) })
-    if (type === 'tool_execution_end') sink({ kind: 'tool_end', taskId: session.taskId, toolName: stringValue(value.tool_name) ?? 'unknown', toolCallId: stringValue(value.tool_call_id), success: value.success === true })
+    if (type === 'tool_execution_start') sink({ kind: 'tool_start', taskId: session.taskId, toolName: stringValue(value.toolName) ?? stringValue(value.tool_name) ?? 'unknown', toolCallId: stringValue(value.toolCallId) ?? stringValue(value.tool_call_id) })
+    if (type === 'tool_execution_end') sink({ kind: 'tool_end', taskId: session.taskId, toolName: stringValue(value.toolName) ?? stringValue(value.tool_name) ?? 'unknown', toolCallId: stringValue(value.toolCallId) ?? stringValue(value.tool_call_id), success: value.isError !== true && value.success !== false })
     if (type === 'queue_update') {
-      const queueLength = numberValue(value.queue_length) ?? numberValue(value.queueLength)
+      const queueLength = numberValue(value.queue_length) ?? numberValue(value.queueLength) ?? queueLengthFrom(value)
       if (queueLength !== undefined) {
         session.queueLength = queueLength
         sink({ kind: 'queue', taskId: session.taskId, queueLength })
@@ -134,6 +134,9 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
       this.completeRestoration(session)
     }
     if (type === 'response' && value.command === 'switch_session' && value.success === true) this.completeRestoration(session)
+    if (type === 'response' && value.success === false) {
+      sink({ kind: 'error', taskId: session.taskId, message: stringValue(value.error) ?? `Pi rejected ${stringValue(value.command) ?? 'an RPC command'}.` })
+    }
   }
 
   private completeRestoration(session: RuntimeSession): void {
@@ -144,14 +147,14 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
     if (initialPrompt) {
       this.initialPrompts.delete(session)
       session.isStreaming = true
-      this.request(session, 'prompt', { text: initialPrompt })
+      this.request(session, 'prompt', { message: initialPrompt })
       return
     }
     this.drain(session)
   }
 
   private saveSession(session: RuntimeSession, value: Record<string, unknown>, sink: RuntimeEventSink): void {
-    const state = isRecord(value.state) ? value.state : isRecord(value.result) ? value.result : value
+    const state = isRecord(value.data) ? value.data : isRecord(value.state) ? value.state : isRecord(value.result) ? value.result : value
     const sessionId = stringValue(state.sessionId)
     const sessionFile = stringValue(state.sessionFile)
     if (!sessionId) return
@@ -194,6 +197,12 @@ function stringValue(value: unknown): string | undefined {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function queueLengthFrom(value: Record<string, unknown>): number | undefined {
+  const steering = Array.isArray(value.steering) ? value.steering.length : undefined
+  const followUp = Array.isArray(value.followUp) ? value.followUp.length : undefined
+  return steering === undefined && followUp === undefined ? undefined : (steering ?? 0) + (followUp ?? 0)
 }
 
 function redactArgs(args: string[]): string[] {

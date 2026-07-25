@@ -154,6 +154,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .evidence-list button:hover { border-color: #a6c5b3; background: #f1f7f3; }
 .evidence-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artifact-content { max-height: 220px; margin: 10px 0 0; overflow: auto; padding: 9px; border: 1px solid #d3ddd7; border-radius: 4px; color: #213228; background: #f3f6f4; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.runtime-output { margin: 12px 0; }
+.runtime-output h4 { margin: 0 0 7px; font-size: 12px; }
+.runtime-output pre { max-height: 220px; margin: 0; overflow: auto; padding: 9px; border: 1px solid #d3ddd7; border-radius: 4px; color: #213228; background: #f3f6f4; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .spin { animation: spin .85s linear infinite; }
 
 .panel-scrim { position: fixed; z-index: 30; inset: 0; display: grid; padding: 20px; overflow-y: auto; place-items: center; background: rgb(16 31 23 / 42%); }

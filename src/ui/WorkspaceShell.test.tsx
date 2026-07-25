@@ -127,8 +127,9 @@ describe('WorkspaceShell', () => {
     const initialDetails = { ...createdTaskDetails, task: initialTask }
     const initialSnapshot = structuredClone(snapshot)
     initialSnapshot.workspaces[0].repositories[0].tasks = [initialTask]
+    const refreshedSnapshot = structuredClone(initialSnapshot)
     const api = makeApi({
-      getBootstrap: vi.fn().mockResolvedValue(initialSnapshot),
+      getBootstrap: vi.fn().mockResolvedValueOnce(initialSnapshot).mockResolvedValueOnce(refreshedSnapshot),
       getTaskDetails: vi.fn().mockResolvedValue(initialDetails),
     })
 
@@ -229,6 +230,28 @@ describe('WorkspaceShell', () => {
 
     expect(await screen.findByText('忙碌')).toBeInTheDocument()
     expect(api.getBootstrap).toHaveBeenCalledTimes(2)
+  })
+
+  it('refreshes the opened task detail after a runtime artifact event', async () => {
+    const initialTask = { ...createdTask, channelId: 'channel-general', status: 'running' as const }
+    const initialSnapshot = structuredClone(snapshot)
+    initialSnapshot.workspaces[0].repositories[0].tasks = [initialTask]
+    const updatedDetails = {
+      ...createdTaskDetails,
+      task: initialTask,
+      events: [{ id: 'event-1', taskId: initialTask.id, type: 'runtime.text', payload: { text: '正在运行。' }, createdAt: '2026-07-25T09:02:00.000Z' }],
+    }
+    const refreshedSnapshot = structuredClone(initialSnapshot)
+    const api = makeApi({
+      getBootstrap: vi.fn().mockResolvedValueOnce(initialSnapshot).mockResolvedValueOnce(refreshedSnapshot),
+      getTaskDetails: vi.fn().mockResolvedValueOnce({ ...createdTaskDetails, task: initialTask }).mockResolvedValueOnce(updatedDetails),
+    })
+    render(<WorkspaceShell api={api} />)
+
+    await screen.findByRole('heading', { name: '概览' })
+    FakeEventSource.instances[0].emit('task.artifact_created')
+
+    expect(await screen.findByLabelText('Agent 实时输出')).toHaveTextContent('正在运行。')
   })
 
   it('refreshes the bootstrap snapshot after the event stream reconnects without a domain event', async () => {
