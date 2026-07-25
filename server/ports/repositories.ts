@@ -86,6 +86,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   getActiveTaskForAgent(agentId: string): Task | undefined
   reclaimReturnedTask(taskId: string, agentId: string, occurredAt: Date): TaskClaim | undefined
   getTask(taskId: string): Task | undefined
+  getAgent(agentId: string): Agent | undefined
   getTasksForRepository(repositoryId: string): Task[]
   getTaskDetails(taskId: string): TaskDetails | undefined
   getTaskArtifact(taskId: string, artifactId: string): TaskArtifact | undefined

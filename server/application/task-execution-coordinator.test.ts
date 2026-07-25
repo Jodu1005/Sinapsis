@@ -347,12 +347,24 @@ describe('TaskExecutionCoordinator', () => {
     expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('任务需要人工处理：runtime session unavailable')
   })
 
+  it('selects the Claude Code runtime adapter for a claude-code claim', async () => {
+    const fixture = await createFixture({ agentRuntime: 'claude-code' })
+    const claim = fixture.scheduler.claimNext(fixture.agent.id)!
+
+    await fixture.coordinator.startClaim(claim)
+
+    expect(fixture.runtime.starts).toHaveLength(0)
+    expect(fixture.claudeRuntime.starts).toHaveLength(1)
+    expect(fixture.claudeRuntime.starts[0]?.profile.runtime).toBe('claude-code')
+  })
+
   async function createFixture(options: {
     worktrees?: WorktreeManager
     collectReviewEvidence?: () => Promise<never>
     failReviewArtifactPersistence?: boolean
     failRawArtifactPersistence?: boolean
     taskTimeoutMs?: number
+    agentRuntime?: 'opencode' | 'pi' | 'claude-code'
   } = {}) {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-coordinator-'))
     database = createSqliteDatabase(path.join(temporaryDirectory, 'sinapsis.sqlite'))
@@ -376,15 +388,25 @@ describe('TaskExecutionCoordinator', () => {
       workspaceId: workspace.id, name: 'demo', path: source.repositoryRoot, currentBranch: 'main', defaultBranch: 'main', isClean: true,
     })
     const channel = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
+    const agentRuntime = options.agentRuntime ?? 'opencode'
     const agent = repositories.createAgent({
-      workspaceId: workspace.id, identity: 'Build', mentionName: 'build', runtime: 'opencode', capabilityTags: ['typescript'],
-      maxConcurrentTasks: 1, command: 'opencode', args: ['run'], model: '', env: {},
+      workspaceId: workspace.id,
+      identity: 'Build',
+      mentionName: 'build',
+      runtime: agentRuntime,
+      capabilityTags: ['typescript'],
+      maxConcurrentTasks: 1,
+      command: agentRuntime === 'pi' ? 'pi' : agentRuntime === 'claude-code' ? 'claude' : 'opencode',
+      args: agentRuntime === 'pi' ? ['--mode', 'rpc'] : agentRuntime === 'opencode' ? ['run'] : [],
+      model: '',
+      env: {},
     })
     repositories.setAgentStatus(agent.id, 'idle', new Date())
     const runtime = new FakeRuntimeAdapter()
+    const claudeRuntime = new FakeRuntimeAdapter()
     const coordinator = new TaskExecutionCoordinator({
       repositories,
-      runtimes: { opencode: runtime, pi: runtime },
+      runtimes: { opencode: runtime, pi: runtime, 'claude-code': claudeRuntime },
       worktrees: options.worktrees ?? new GitWorktreeManager({ dataDir: temporaryDirectory, repositoryRoots: [source.repositoryRoot] }),
       artifactDirectory: path.join(temporaryDirectory, 'artifacts'),
       collectReviewEvidence: options.collectReviewEvidence,
@@ -396,7 +418,7 @@ describe('TaskExecutionCoordinator', () => {
     })
     const first = createTask({ title: 'First task' })
     return {
-      repositories, runtime, coordinator, scheduler, agent, first, rawArtifactWrites,
+      repositories, runtime, claudeRuntime, coordinator, scheduler, agent, first, rawArtifactWrites,
       createTask,
       channelMessages: () => repositories.getBootstrap().workspaces[0].recentMessages.filter((message) => message.channelId === channel.id),
     }

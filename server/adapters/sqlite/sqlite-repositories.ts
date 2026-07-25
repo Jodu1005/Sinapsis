@@ -149,7 +149,7 @@ interface AgentRow {
   workspace_id: string
   identity: string
   mention_name: string
-  runtime: 'opencode' | 'pi'
+  runtime: 'opencode' | 'pi' | 'claude-code'
   status: Agent['status']
   capability_tags_json: string
   max_concurrent_tasks: 1
@@ -600,6 +600,10 @@ export class SqliteRepositories implements WorkspaceRepositories {
 
   getTask(taskId: string): Task | undefined {
     return readTask(this.sqlite.database, taskId)
+  }
+
+  getAgent(agentId: string): Agent | undefined {
+    return readAgent(this.sqlite.database, agentId)
   }
 
   getTasksForRepository(repositoryId: string): Task[] {

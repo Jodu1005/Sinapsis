@@ -2,6 +2,7 @@ import express, { type ErrorRequestHandler, type Express, type RequestHandler } 
 import path from 'node:path'
 import { CommandGitClient } from './adapters/git/git-client'
 import { GitWorktreeManager } from './adapters/git/git-worktree-manager'
+import { ClaudeCodeRuntimeAdapter } from './adapters/runtime/claude-code-runtime-adapter'
 import { OpenCodeRuntimeAdapter } from './adapters/runtime/opencode-runtime-adapter'
 import { PiRuntimeAdapter } from './adapters/runtime/pi-runtime-adapter'
 import { CommandRuntimeAvailabilityDetector, runtimeKinds, type RuntimeAvailabilityDetector } from './adapters/runtime/runtime-profile'
@@ -46,6 +47,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     runtimes: {
       opencode: new OpenCodeRuntimeAdapter(new NodeProcessRunner()),
       pi: new PiRuntimeAdapter(new NodeProcessRunner(), path.dirname(databasePath)),
+      'claude-code': new ClaudeCodeRuntimeAdapter(new NodeProcessRunner()),
     },
     worktrees: new GitWorktreeManager({ dataDir: path.dirname(databasePath) }),
     artifactDirectory: path.join(path.dirname(databasePath), 'artifacts'),
@@ -101,7 +103,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     const body = objectBody(request.body)
     const runtime = requiredString(body, 'runtime')
     if (!runtimeKinds.includes(runtime as (typeof runtimeKinds)[number])) {
-      throw new ValidationError('Runtime must be opencode or pi.')
+      throw new ValidationError(`Runtime must be one of: ${runtimeKinds.join(', ')}.`)
     }
     const agent = await agentService.createAgent({
       workspaceId: requiredParam(request.params.workspaceId, 'workspaceId'),
@@ -115,6 +117,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
       ...agent,
       profile: { ...agent.profile, env: Object.keys(agent.profile.env) },
     })
+  }))
+
+  app.post('/api/agents/:agentId/refresh-runtime', asyncRoute(async (request, response) => {
+    response.json(sanitizeAgent(await agentService.refreshAvailability(requiredParam(request.params.agentId, 'agentId'))))
   }))
 
   app.post('/api/repositories/:repositoryId/tasks', asyncRoute((request, response) => {
@@ -240,6 +246,10 @@ class RepositoryWorkspaceCatalog implements WorkspaceCatalog {
     return this.repositories.hasAgentMention(workspaceId, mention)
   }
 
+  getAgent(agentId: string) {
+    return this.repositories.getAgent(agentId)
+  }
+
   createWorkspace(input: { name: string; leaseTtlMs?: number }) {
     return this.repositories.createWorkspace(input)
   }
@@ -260,7 +270,7 @@ class RepositoryWorkspaceCatalog implements WorkspaceCatalog {
     return this.repositories.createAgent(input)
   }
 
-  setAgentStatus(agentId: string, status: 'idle', occurredAt: Date) {
+  setAgentStatus(agentId: string, status: 'offline' | 'idle' | 'busy' | 'error', occurredAt: Date) {
     return this.repositories.setAgentStatus(agentId, status, occurredAt)
   }
 }
@@ -358,9 +368,13 @@ function sanitizeBootstrap(snapshot: ReturnType<WorkspaceRepositories['getBootst
     ...snapshot,
     workspaces: snapshot.workspaces.map((workspace) => ({
       ...workspace,
-      agents: workspace.agents.map((agent) => ({ ...agent, env: Object.keys(agent.env) })),
+      agents: workspace.agents.map(sanitizeAgent),
     })),
   }
+}
+
+function sanitizeAgent(agent: ReturnType<WorkspaceRepositories['getBootstrap']>['workspaces'][number]['agents'][number]) {
+  return { ...agent, env: Object.keys(agent.env) }
 }
 
 const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {

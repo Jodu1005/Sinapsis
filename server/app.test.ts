@@ -178,4 +178,41 @@ describe('local service API', () => {
     expect(mergeResponse.status).toBe(501)
     await expect(mergeResponse.json()).resolves.toEqual({ error: '第一版只记录验收，合并需要独立人工流程。' })
   })
+
+  it('refreshes a persisted runtime and returns a sanitized Agent payload', async () => {
+    const app = createApp({
+      runtimeAvailabilityDetector: {
+        detect: async () => ({ executable: 'available', taskExecution: 'unverified' }),
+      },
+    })
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const agent = repositories.createAgent({
+      workspaceId: workspace.id,
+      identity: 'Claude builder',
+      mentionName: 'claude-builder',
+      runtime: 'claude-code',
+      capabilityTags: ['typescript'],
+      maxConcurrentTasks: 1,
+      command: 'claude',
+      args: ['--verbose'],
+      model: '',
+      env: { CLAUDE_TOKEN: 'do-not-return-this' },
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/agents/${agent.id}/refresh-runtime`, {
+      method: 'POST',
+    })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      id: agent.id,
+      runtime: 'claude-code',
+      status: 'idle',
+      env: ['CLAUDE_TOKEN'],
+    })
+    expect(repositories.getBootstrap().workspaces[0].agents[0].status).toBe('idle')
+  })
 })

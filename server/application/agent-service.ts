@@ -8,10 +8,12 @@ import {
 import { RuntimeProfileService } from './runtime-profile-service'
 import { NotFoundError, ValidationError } from './workspace-service'
 import { DomainError } from '../domain/task'
+import type { Agent, AgentStatus } from '../domain/agent'
 
 export interface AgentWorkspaceReader {
   hasWorkspace(workspaceId: string): boolean
   hasAgentMention(workspaceId: string, mention: string): boolean
+  getAgent(agentId: string): Agent | undefined
   createAgent(input: {
     workspaceId: string
     identity: string
@@ -24,7 +26,7 @@ export interface AgentWorkspaceReader {
     model: string
     env: Record<string, string>
   }): { id: string; createdAt: string }
-  setAgentStatus?(agentId: string, status: 'idle', occurredAt: Date): unknown
+  setAgentStatus?(agentId: string, status: AgentStatus, occurredAt: Date): unknown
 }
 
 export interface AgentConfiguration {
@@ -104,6 +106,36 @@ export class AgentService {
       availability,
       createdAt: storedAgent.createdAt,
     }
+  }
+
+  async refreshAvailability(agentId: string): Promise<Agent> {
+    const agent = this.workspaces.getAgent(agentId)
+    if (!agent) throw new NotFoundError(`Agent ${agentId} does not exist.`)
+
+    const availability = await this.availabilityDetector.detect(profileFromAgent(agent))
+    if (agent.status === 'busy') return agent
+
+    const nextStatus = availability.executable === 'available' && availability.taskExecution === 'unverified'
+      ? 'idle'
+      : 'offline'
+    if (nextStatus === agent.status) return agent
+
+    const updated = this.workspaces.setAgentStatus?.(agent.id, nextStatus, new Date()) as Agent | undefined
+    return updated ?? {
+      ...agent,
+      status: nextStatus,
+    }
+  }
+}
+
+function profileFromAgent(agent: Agent): RuntimeProfile {
+  return {
+    runtime: agent.runtime,
+    command: agent.command,
+    args: agent.args,
+    model: agent.model,
+    env: agent.env,
+    policy: 'task-worktree',
   }
 }
 

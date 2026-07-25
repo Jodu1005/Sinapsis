@@ -165,6 +165,7 @@ describe('local workspace flow', () => {
     repositories.createAgent(agentInput(workspace.id, 'second-opencode', 'opencode', missingCommand))
     repositories.createAgent(agentInput(workspace.id, 'first-pi', 'pi', availableCommand))
     repositories.createAgent(agentInput(workspace.id, 'second-pi', 'pi', availableCommand))
+    repositories.createAgent(agentInput(workspace.id, 'first-claude', 'claude-code', availableCommand))
 
     const script = path.resolve(process.cwd(), 'scripts/runtime-health-check.mjs')
     const { stdout } = await execFileAsync(process.execPath, [script], {
@@ -183,11 +184,12 @@ describe('local workspace flow', () => {
       [`opencode\u0000${availableCommand}`, { status: 'available', agents: ['first-opencode'] }],
       [`opencode\u0000${missingCommand}`, { status: 'missing', agents: ['second-opencode'] }],
       [`pi\u0000${availableCommand}`, { status: 'available', agents: ['first-pi', 'second-pi'] }],
+      [`claude-code\u0000${availableCommand}`, { status: 'available', agents: ['first-claude'] }],
     ]))
   })
 })
 
-function agentInput(workspaceId: string, mentionName: string, runtime: 'opencode' | 'pi', command: string) {
+function agentInput(workspaceId: string, mentionName: string, runtime: 'opencode' | 'pi' | 'claude-code', command: string) {
   return {
     workspaceId,
     identity: mentionName,
