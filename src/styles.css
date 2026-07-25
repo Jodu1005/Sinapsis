@@ -33,21 +33,26 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .repository-sidebar { display: flex; flex-direction: column; overflow: auto; padding: 14px 10px; color: #dce7e0; background: var(--sidebar); border-right: 1px solid #14201a; }
 .sidebar-topline, .channel-header, .context-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .channel-header, .message-composer { min-width: 0; }
+.workspace-context { display: grid; min-width: 0; gap: 3px; }
+.workspace-label { padding: 0 7px; color: #9eb0a6; font-size: 10px; font-weight: 700; }
 .workspace-lockup { display: flex; align-items: center; min-width: 0; gap: 9px; padding: 1px 7px; font-size: 15px; }
 .workspace-lockup strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-mark { display: grid; width: 25px; height: 25px; place-items: center; color: #17211d; background: #9bd5ba; border-radius: 6px; font-size: 13px; font-weight: 800; }
 .sidebar-section-label { padding: 22px 8px 7px; color: #9eb0a6; font-size: 11px; font-weight: 700; letter-spacing: 0; text-transform: uppercase; }
 .repository-list { display: grid; gap: 13px; }
-.repository-group { display: grid; gap: 3px; }
+.repository-group { display: grid; gap: 4px; }
 .repository-name { display: flex; align-items: center; min-width: 0; gap: 7px; padding: 4px 8px; color: #f0f5f1; font-weight: 700; }
 .repository-name > span:not(.branch-name) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .branch-name { margin-left: auto; color: #9eb0a6; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; font-weight: 400; }
 .repository-task-create { flex: 0 0 auto; width: 26px; height: 26px; color: #b7c7be; }
+.repository-children { display: grid; gap: 3px; margin-left: 14px; padding-left: 7px; border-left: 1px solid #405046; }
+.repository-child-label { padding: 4px 7px 1px; color: #8fa198; font-size: 10px; font-weight: 700; }
 .channel-list { display: grid; gap: 1px; }
-.channel-button, .task-entry { display: flex; align-items: center; width: 100%; min-height: 30px; gap: 7px; padding: 4px 9px 4px 29px; border: 0; border-radius: 4px; color: #b7c7be; background: transparent; text-align: left; transition: color .16s ease, background-color .16s ease; }
+.channel-button, .task-entry { display: flex; align-items: center; width: 100%; min-height: 30px; gap: 7px; padding: 4px 9px; border: 0; border-radius: 4px; color: #b7c7be; background: transparent; text-align: left; transition: color .16s ease, background-color .16s ease; }
 .channel-button:hover, .task-entry:hover { color: #fff; background: #31443a; }
 .channel-button[aria-current="page"] { color: #15241c; background: #9bd5ba; font-weight: 700; }
-.task-entry { color: #a7b8ae; font-size: 12px; }
+.task-entry { color: #c8d8cf; font-size: 12px; font-weight: 700; }
+.task-count { margin-left: auto; color: #9eb0a6; font-size: 11px; font-weight: 400; }
 .agent-status-list { margin-top: auto; padding-top: 12px; border-top: 1px solid #405046; }
 .agent-status-list .sidebar-section-heading { display: flex; align-items: center; justify-content: space-between; padding-top: 0; }
 .agent-status-list .sidebar-section-heading .icon-button { width: 26px; height: 26px; color: #b7c7be; }

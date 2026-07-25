@@ -271,8 +271,8 @@ describe('WorkspaceShell', () => {
     render(<WorkspaceShell api={makeApi()} />)
     const user = userEvent.setup()
 
-    await screen.findByRole('button', { name: '任务 1' })
-    await user.click(screen.getByRole('button', { name: '任务 1' }))
+    await screen.findByRole('button', { name: '打开 sinapsis 任务' })
+    await user.click(screen.getByRole('button', { name: '打开 sinapsis 任务' }))
 
     expect(screen.getByRole('heading', { name: 'sinapsis 任务' })).toBeInTheDocument()
     await user.click(screen.getByRole('tab', { name: '执行中' }))
@@ -286,7 +286,7 @@ describe('WorkspaceShell', () => {
 
     await screen.findByRole('textbox', { name: '发送消息' })
     await user.click(screen.getByRole('button', { name: '打开导航' }))
-    expect(screen.getByRole('navigation', { name: '代码仓与频道' })).toHaveAttribute('data-mobile-open', 'true')
+    expect(screen.getByRole('navigation', { name: '工作空间与代码仓' })).toHaveAttribute('data-mobile-open', 'true')
     await user.click(screen.getByRole('button', { name: '关闭导航' }))
 
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
@@ -306,7 +306,7 @@ describe('WorkspaceShell', () => {
       const user = userEvent.setup()
 
       await screen.findByRole('textbox', { name: '发送消息' })
-      const navigation = document.querySelector<HTMLElement>('nav[aria-label="代码仓与频道"]')
+      const navigation = document.querySelector<HTMLElement>('nav[aria-label="工作空间与代码仓"]')
       expect(navigation).not.toBeNull()
       expect(navigation).toHaveAttribute('aria-hidden', 'true')
       expect(navigation).toHaveAttribute('inert')

@@ -16,21 +16,24 @@ interface RepositorySidebarProps {
 }
 
 export function RepositorySidebar({ workspace, selectedChannelId, onSelectChannel, onSelectTasks, onCreateTask, onSelectAgent, onCreateAgent, mobileOpen, mobileHidden, onClose }: RepositorySidebarProps) {
-  return <nav className="repository-sidebar" aria-label="代码仓与频道" aria-hidden={mobileHidden || undefined} inert={mobileHidden} data-mobile-open={mobileOpen}>
+  return <nav className="repository-sidebar" aria-label="工作空间与代码仓" aria-hidden={mobileHidden || undefined} inert={mobileHidden} data-mobile-open={mobileOpen}>
     <div className="sidebar-topline">
-      <div className="workspace-lockup"><span className="workspace-mark">S</span><strong>{workspace.name}</strong></div>
+      <div className="workspace-context"><span className="workspace-label">工作空间</span><div className="workspace-lockup"><span className="workspace-mark">S</span><strong>{workspace.name}</strong></div></div>
       <button className="icon-button sidebar-close" type="button" aria-label="关闭导航" data-tooltip="关闭导航" onClick={onClose}><X size={17} /></button>
     </div>
     <div className="sidebar-section-label">代码仓</div>
     <div className="repository-list">
       {workspace.repositories.map((repository) => <section className="repository-group" key={repository.id}>
         <div className="repository-name"><FolderGit2 size={16} /><span>{repository.name}</span><span className="branch-name">{repository.currentBranch}</span><button type="button" className="icon-button repository-task-create" aria-label={`新建 ${repository.name} 任务`} data-tooltip="新建任务" onClick={() => onCreateTask(repository.id)}><Plus size={15} /></button></div>
-        <div className="channel-list">
+        <div className="repository-children">
+          <button type="button" className="task-entry" aria-label={`打开 ${repository.name} 任务`} onClick={() => onSelectTasks(repository.id)}><ListTodo size={15} /> <span>任务</span><span className="task-count">{repository.tasks.length}</span></button>
+          <div className="repository-child-label">频道</div>
+          <div className="channel-list">
           {repository.channels.map((channel) => <button key={channel.id} type="button" className="channel-button" aria-label={`# ${channel.name}`} aria-current={selectedChannelId === channel.id ? 'page' : undefined} onClick={() => onSelectChannel(channel.id)}>
             <Hash size={15} /> <span>{channel.name}</span>
           </button>)}
+          </div>
         </div>
-        <button type="button" className="task-entry" onClick={() => onSelectTasks(repository.id)}><ListTodo size={15} /> <span>任务 {repository.tasks.length}</span></button>
       </section>)}
     </div>
     <AgentStatusList agents={workspace.agents} onSelect={onSelectAgent} onCreate={onCreateAgent} />
