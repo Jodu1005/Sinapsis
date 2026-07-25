@@ -32,7 +32,10 @@ describe('PiRuntimeAdapter', () => {
 
     process?.emitStdout('{"type":"response","command":"get_state","success":true,"data":{"sessionId":"pi-session-1","sessionFile":"/tmp/pi-session.jsonl"}}\n')
 
-    expect(JSON.parse(process?.stdin[1] ?? '{}')).toMatchObject({ type: 'prompt', message: expect.stringContaining('Review pull request') })
+    expect(JSON.parse(process?.stdin[1] ?? '{}')).toMatchObject({
+      type: 'prompt',
+      message: expect.stringContaining('If you make changes, stage and commit the completed work on the task branch before you finish.'),
+    })
     expect(session).toMatchObject({ sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session.jsonl' })
   })
 

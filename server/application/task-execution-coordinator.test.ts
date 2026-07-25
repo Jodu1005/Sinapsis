@@ -52,6 +52,29 @@ describe('TaskExecutionCoordinator', () => {
     await expect(readFile(artifact.path, 'utf8')).resolves.toContain('npm test --verbose')
   })
 
+  it('batches token deltas and raw chunks into compact runtime records', async () => {
+    const fixture = await createFixture()
+    const claim = fixture.scheduler.claimNext(fixture.agent.id)!
+    await fixture.coordinator.startClaim(claim)
+
+    fixture.runtime.emit(claim.task.id, { kind: 'text', text: 'Implemented ' })
+    fixture.runtime.emit(claim.task.id, { kind: 'text', text: 'the parser.' })
+    fixture.runtime.emit(claim.task.id, { kind: 'artifact', artifactType: 'runtime-jsonl', content: '{"type":"message_update"}\n' })
+    fixture.runtime.emit(claim.task.id, { kind: 'artifact', artifactType: 'runtime-jsonl', content: '{"type":"agent_settled"}\n' })
+    await fixture.coordinator.flush(claim.task.id)
+
+    const details = fixture.repositories.getTaskDetails(claim.task.id)!
+    const textEvents = details.events.filter((event) => event.type === 'runtime.text')
+    const runtimeTextArtifacts = details.artifacts.filter((artifact) => artifact.kind === 'runtime-text')
+    const jsonlArtifacts = details.artifacts.filter((artifact) => artifact.kind === 'runtime-jsonl')
+
+    expect(textEvents).toEqual([expect.objectContaining({ payload: { text: 'Implemented the parser.' } })])
+    expect(runtimeTextArtifacts).toHaveLength(1)
+    expect(jsonlArtifacts).toHaveLength(1)
+    await expect(readFile(runtimeTextArtifacts[0]!.path, 'utf8')).resolves.toBe('Implemented the parser.')
+    await expect(readFile(jsonlArtifacts[0]!.path, 'utf8')).resolves.toBe('{"type":"message_update"}\n{"type":"agent_settled"}\n')
+  })
+
   it('terminates only its managed runtime and stops advertising the lease as live', async () => {
     const fixture = await createFixture()
     const claim = fixture.scheduler.claimNext(fixture.agent.id)!

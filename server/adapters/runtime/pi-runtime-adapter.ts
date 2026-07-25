@@ -180,7 +180,7 @@ function createSession(task: RuntimeTaskRequest): RuntimeSession {
 
 function initialPrompt(task: RuntimeTaskRequest): string {
   return [
-    'Work only in the assigned worktree. Do not push, merge, or modify files outside it.',
+    'Work only in the assigned worktree. Do not push, merge, or modify files outside it. If you make changes, stage and commit the completed work on the task branch before you finish.',
     `Task: ${task.title}`,
     task.description,
     `Acceptance criteria: ${task.acceptanceCriteria}`,

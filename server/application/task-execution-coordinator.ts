@@ -33,6 +33,9 @@ interface ManagedExecution {
   targetBranch: string
   controlledStderr: string[]
   timeout: NodeJS.Timeout | undefined
+  outputFlushTimeout: NodeJS.Timeout | undefined
+  pendingArtifacts: Map<string, string[]>
+  pendingText: string[]
   active: boolean
 }
 
@@ -83,6 +86,9 @@ export class TaskExecutionCoordinator {
         targetBranch: repository.defaultBranch,
         controlledStderr: [],
         timeout: undefined,
+        outputFlushTimeout: undefined,
+        pendingArtifacts: new Map(),
+        pendingText: [],
         active: true,
       }
       this.executions.set(task.id, execution)
@@ -136,9 +142,14 @@ export class TaskExecutionCoordinator {
   async flush(taskId?: string): Promise<void> {
     if (taskId) {
       await this.pending.get(taskId)
+      await this.enqueue(taskId, async () => {
+        const execution = this.executions.get(taskId)
+        if (execution) await this.flushRuntimeOutput(execution)
+      })
       return
     }
-    await Promise.all(this.pending.values())
+    const taskIds = new Set([...this.pending.keys(), ...this.executions.keys()])
+    await Promise.all([...taskIds].map((pendingTaskId) => this.flush(pendingTaskId)))
   }
 
   hasExecution(taskId: string, agentId: string): boolean {
@@ -150,6 +161,7 @@ export class TaskExecutionCoordinator {
     const execution = this.executions.get(taskId)
     if (!execution || execution.agentId !== agentId) return
     try {
+      await this.flushRuntimeOutput(execution)
       await execution.adapter.cancel(execution.session)
     } finally {
       this.clearExecution(taskId, execution)
@@ -176,7 +188,7 @@ export class TaskExecutionCoordinator {
     }))
   }
 
-  private enqueue(taskId: string, work: () => Promise<void>): void {
+  private enqueue(taskId: string, work: () => Promise<void>): Promise<void> {
     const previous = this.pending.get(taskId) ?? Promise.resolve()
     const next = previous.then(work, work)
     let tracked: Promise<void>
@@ -184,6 +196,7 @@ export class TaskExecutionCoordinator {
       if (this.pending.get(taskId) === tracked) this.pending.delete(taskId)
     })
     this.pending.set(taskId, tracked)
+    return tracked
   }
 
   private async handleRuntimeEvent(event: RuntimeEvent): Promise<void> {
@@ -191,12 +204,12 @@ export class TaskExecutionCoordinator {
     if (!execution) return
     switch (event.kind) {
       case 'artifact':
-        if (!await this.persistRuntimeArtifact(execution, event.artifactType, event.content)) return
         if (event.artifactType === 'runtime-stderr') execution.controlledStderr.push(event.content)
+        this.bufferArtifact(execution, event.artifactType, event.content)
         return
       case 'text':
-        if (!await this.persistRuntimeArtifact(execution, 'runtime-text', event.text)) return
-        this.repositories.inTransaction((unitOfWork) => unitOfWork.recordTaskEvent(event.taskId, 'runtime.text', { text: event.text }))
+        execution.pendingText.push(event.text)
+        this.scheduleOutputFlush(execution)
         return
       case 'tool_start':
       case 'tool_end':
@@ -211,10 +224,12 @@ export class TaskExecutionCoordinator {
         this.messages.postMilestone(this.task(event.taskId).channelId, event.taskId, `需要决定：${event.prompt}`)
         return
       case 'error':
+        if (!await this.flushRuntimeOutput(execution)) return
         if (!await this.persistRuntimeArtifact(execution, 'runtime-error', event.message)) return
         this.fail(event.taskId, execution.agentId, event.message)
         return
       case 'settled':
+        if (!await this.flushRuntimeOutput(execution)) return
         await this.settle(execution)
         return
     }
@@ -277,6 +292,42 @@ export class TaskExecutionCoordinator {
     }
   }
 
+  private bufferArtifact(execution: ManagedExecution, kind: string, content: string): void {
+    const chunks = execution.pendingArtifacts.get(kind) ?? []
+    chunks.push(content)
+    execution.pendingArtifacts.set(kind, chunks)
+    this.scheduleOutputFlush(execution)
+  }
+
+  private scheduleOutputFlush(execution: ManagedExecution): void {
+    if (execution.outputFlushTimeout) return
+    execution.outputFlushTimeout = setTimeout(() => {
+      execution.outputFlushTimeout = undefined
+      void this.enqueue(execution.taskId, async () => { await this.flushRuntimeOutput(execution) })
+    }, 200)
+  }
+
+  private async flushRuntimeOutput(execution: ManagedExecution): Promise<boolean> {
+    if (execution.outputFlushTimeout) {
+      clearTimeout(execution.outputFlushTimeout)
+      execution.outputFlushTimeout = undefined
+    }
+    if (this.executions.get(execution.taskId) !== execution || !execution.active) return false
+
+    const artifacts = [...execution.pendingArtifacts.entries()]
+    const text = execution.pendingText.join('')
+    execution.pendingArtifacts.clear()
+    execution.pendingText = []
+
+    for (const [kind, chunks] of artifacts) {
+      if (!await this.persistRuntimeArtifact(execution, kind, chunks.join(''))) return false
+    }
+    if (!text) return true
+    if (!await this.persistRuntimeArtifact(execution, 'runtime-text', text)) return false
+    this.repositories.inTransaction((unitOfWork) => unitOfWork.recordTaskEvent(execution.taskId, 'runtime.text', { text }))
+    return true
+  }
+
   private deliverUnconsumedInputs(taskId: string): void {
     for (const input of this.repositories.getTaskDetails(taskId)?.inputs.filter((candidate) => !candidate.consumedAt) ?? []) {
       this.deliverQueuedInput(taskId, input.id)
@@ -307,6 +358,10 @@ export class TaskExecutionCoordinator {
     const execution = this.executions.get(taskId)
     if (!execution || expected && execution !== expected) return
     this.disarmTimeout(execution)
+    if (execution.outputFlushTimeout) clearTimeout(execution.outputFlushTimeout)
+    execution.outputFlushTimeout = undefined
+    execution.pendingArtifacts.clear()
+    execution.pendingText = []
     execution.active = false
     this.executions.delete(taskId)
   }
