@@ -13,12 +13,14 @@ import { TaskComposerPanel } from './TaskComposerPanel'
 import { TaskDetailPanel } from './TaskDetailPanel'
 import { TaskList } from './TaskList'
 import { WorkspaceSetup } from './WorkspaceSetup'
+import { WorkspaceCreateDialog } from './WorkspaceCreateDialog'
 
 export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const [defaultApi] = useState(() => new ApiClient())
   const api = providedApi ?? defaultApi
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null)
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [selectedTaskRepositoryId, setSelectedTaskRepositoryId] = useState<string | null>(null)
@@ -27,6 +29,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const [composerRepositoryId, setComposerRepositoryId] = useState<string | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<AgentView | null>(null)
   const [creatingAgent, setCreatingAgent] = useState(false)
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false)
   const [refreshingAgentId, setRefreshingAgentId] = useState<string | null>(null)
   const [navOpen, setNavOpen] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
@@ -38,7 +41,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const reconnecting = useWorkspaceEvents(refresh)
   useEffect(() => { void refresh() }, [refresh])
 
-  const workspace = snapshot?.workspaces[0]
+  const workspace = snapshot?.workspaces.find((candidate) => candidate.id === selectedWorkspaceId) ?? snapshot?.workspaces[0]
   const selection = useMemo(() => findSelection(workspace, selectedChannelId), [workspace, selectedChannelId])
   useEffect(() => { if (selection.channel && selectedChannelId !== selection.channel.id) setSelectedChannelId(selection.channel.id) }, [selection.channel, selectedChannelId])
   useEffect(() => {
@@ -69,7 +72,16 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
 
   const sendMessage = async (body: string) => { await api.postMessage(selection.channel!.id, { body }); await refresh() }
   const selectChannel = (channelId: string) => { setSelectedChannelId(channelId); setSelectedTaskId(null); setSelectedTaskRepositoryId(null); setComposerRepositoryId(null); setNavOpen(false) }
-  const selectRepositoryTasks = (repositoryId: string) => { setSelectedTaskId(null); setSelectedTaskRepositoryId(repositoryId); setContextOpen(true); setNavOpen(false) }
+  const selectWorkspace = (workspaceId: string) => {
+    const nextWorkspace = snapshot.workspaces.find((candidate) => candidate.id === workspaceId)
+    setSelectedWorkspaceId(workspaceId)
+    setSelectedChannelId(nextWorkspace?.repositories.flatMap((repository) => repository.channels)[0]?.id ?? null)
+    setSelectedTaskId(null)
+    setSelectedTaskRepositoryId(null)
+    setComposerRepositoryId(null)
+    setNavOpen(false)
+  }
+  const selectTask = (repositoryId: string, taskId: string) => { setSelectedTaskRepositoryId(repositoryId); setSelectedTaskId(taskId); setContextOpen(true); setNavOpen(false) }
   const createTask = async (input: CreateTaskRequest) => {
     if (!composerRepository) throw new Error('没有可用的代码仓上下文。')
     const task = await api.createTask(composerRepository.id, input)
@@ -99,6 +111,13 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     await refresh()
     setCreatingAgent(false)
   }
+  const createWorkspace = async (input: { name: string; directory: string }) => {
+    const nextWorkspace = await api.createWorkspace({ name: input.name })
+    await api.addRepository(nextWorkspace.id, { directory: input.directory })
+    setSelectedWorkspaceId(nextWorkspace.id)
+    setCreatingWorkspace(false)
+    await refresh()
+  }
   const refreshAgentRuntime = async () => {
     if (!selectedAgent || refreshingAgentId) return
     setRefreshingAgentId(selectedAgent.id)
@@ -110,7 +129,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     }
   }
   return <div className="workspace-shell">
-    <RepositorySidebar workspace={workspace} selectedChannelId={selection.channel.id} onSelectChannel={selectChannel} onSelectTasks={selectRepositoryTasks} onCreateTask={setComposerRepositoryId} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
+    <RepositorySidebar workspace={workspace} workspaces={snapshot.workspaces} selectedChannelId={selection.channel.id} selectedTaskId={selectedTask?.id ?? null} onSelectWorkspace={selectWorkspace} onSelectChannel={selectChannel} onSelectTask={selectTask} onCreateTask={setComposerRepositoryId} onCreateWorkspace={() => setCreatingWorkspace(true)} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
     <main className="conversation-panel">
       <header className="channel-header"><NavigationToggle onClick={() => setNavOpen(true)} /><div className="channel-heading"><h1># {selection.channel.name}</h1><p>{selection.repository.name} · {selection.repository.currentBranch}</p></div><div className="header-actions"><span className="connection-state" data-reconnecting={reconnecting}>{reconnecting ? '正在重新连接' : '已连接'}</span><button type="button" className="icon-button" aria-label="打开上下文" data-tooltip="打开上下文" onClick={() => setContextOpen(true)}><PanelRightOpen size={18} /></button></div></header>
       <ChannelTimeline messages={channelMessages(workspace, selection.channel.id)} />
@@ -123,6 +142,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
       <section className="context-section"><h2>频道操作</h2><button type="button" className="context-action" onClick={() => setContextOpen(false)}><PanelRightClose size={16} /> 收起上下文</button></section>
     </aside>
     {composerRepository && <TaskComposerPanel repository={composerRepository} agents={workspace.agents} onCreate={createTask} onClose={() => setComposerRepositoryId(null)} />}
+    {creatingWorkspace && <WorkspaceCreateDialog onCreate={createWorkspace} onClose={() => setCreatingWorkspace(false)} />}
     {creatingAgent && <AgentCreateDialog onCreate={createAgent} onClose={() => setCreatingAgent(false)} />}
     {selectedAgent && <AgentConfigDialog agent={selectedAgent} refreshingRuntime={refreshingAgentId === selectedAgent.id} onRefreshRuntime={refreshAgentRuntime} onClose={() => setSelectedAgent(null)} />}
   </div>

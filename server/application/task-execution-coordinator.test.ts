@@ -46,7 +46,9 @@ describe('TaskExecutionCoordinator', () => {
     expect(fixture.runtime.starts).toHaveLength(1)
     expect(details.artifacts).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'runtime-stderr' })]))
     expect(details.events).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'runtime.text' })]))
-    expect(fixture.channelMessages()).toEqual(expect.arrayContaining([expect.objectContaining({ body: expect.stringContaining('开始执行') })]))
+    expect(fixture.channelMessages()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ senderType: 'agent', authorName: 'Build', body: '开始处理「First task」。' }),
+    ]))
     expect(fixture.channelMessages().map((message) => message.body).join('\n')).not.toContain('npm test --verbose')
     const artifact = details.artifacts.find((candidate) => candidate.kind === 'runtime-stderr')!
     await expect(readFile(artifact.path, 'utf8')).resolves.toContain('npm test --verbose')
@@ -142,7 +144,9 @@ describe('TaskExecutionCoordinator', () => {
     await fixture.coordinator.flush(second.id)
 
     expect(fixture.repositories.getTask(second.id)?.status).toBe('in_review')
-    expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('等待人工验收')
+    expect(fixture.channelMessages()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ senderType: 'agent', authorName: 'Build', body: '已完成「Commit the implementation」，已提交改动，等待你验收。' }),
+    ]))
     const artifacts = fixture.repositories.getTaskDetails(second.id)!.artifacts
     expect(artifacts.map((artifact) => artifact.kind)).toEqual(expect.arrayContaining([
       'review-commit', 'review-changed-files', 'review-controlled-stderr', 'review-diff-summary',
@@ -192,7 +196,9 @@ describe('TaskExecutionCoordinator', () => {
       expect(details.events).toEqual(expect.arrayContaining([
         expect.objectContaining({ type: 'task.runtime_artifact_persistence_failed', payload: expect.objectContaining({ reason: expect.stringContaining('raw artifact persistence unavailable') }) }),
       ]))
-      expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('任务需要人工处理：运行产物保存失败：raw artifact persistence unavailable')
+      expect(fixture.channelMessages()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ senderType: 'agent', authorName: 'Build', body: expect.stringContaining('运行产物保存失败：raw artifact persistence unavailable') }),
+      ]))
     },
   )
 
@@ -283,7 +289,7 @@ describe('TaskExecutionCoordinator', () => {
     await fixture.coordinator.flush(claim.task.id)
 
     expect(fixture.repositories.getTask(claim.task.id)?.status).toBe('waiting_input')
-    expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('需要决定：选择测试策略')
+    expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('我需要你的决定：选择测试策略')
 
     fixture.coordinator.queueInputForActiveAgent(fixture.agent.id, '优先覆盖回归测试')
 
@@ -367,7 +373,7 @@ describe('TaskExecutionCoordinator', () => {
     expect(details.events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'task.status_changed', payload: expect.objectContaining({ to: 'needs_human' }) }),
     ]))
-    expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('任务需要人工处理：runtime session unavailable')
+    expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('执行需要人工处理：runtime session unavailable')
   })
 
   it('selects the Claude Code runtime adapter for a claude-code claim', async () => {

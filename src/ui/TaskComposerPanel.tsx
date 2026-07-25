@@ -23,7 +23,7 @@ export function TaskComposerPanel({ repository, agents, onCreate, onClose }: { r
   }
   return <div className="panel-scrim" role="presentation"><section ref={dialogRef} className="task-composer-panel" role="dialog" aria-modal="true" aria-labelledby="task-composer-title"><header><div><p>新任务</p><h2 id="task-composer-title">把工作交给队列</h2></div><button className="icon-button" type="button" aria-label="关闭新任务面板" data-tooltip="关闭" onClick={onClose}><X size={18} /></button></header>
     <form onSubmit={submit}>
-      <label htmlFor="task-repository">当前代码仓</label><input id="task-repository" value={repository.name} disabled />
+      <label htmlFor="task-repository">当前工作目录</label><input id="task-repository" value={repository.path} disabled />
       <label htmlFor="task-title">任务标题</label><input ref={titleRef} id="task-title" value={title} onChange={(event) => setTitle(event.target.value)} required />
       <label htmlFor="task-description">详细描述</label><textarea id="task-description" value={description} onChange={(event) => setDescription(event.target.value)} rows={4} required />
       <label htmlFor="task-acceptance">验收标准</label><textarea id="task-acceptance" value={acceptanceCriteria} onChange={(event) => setAcceptanceCriteria(event.target.value)} rows={3} required />

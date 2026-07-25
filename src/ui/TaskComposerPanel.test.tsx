@@ -16,12 +16,12 @@ const agent: AgentView = {
 }
 
 describe('TaskComposerPanel', () => {
-  it('inherits the repository context and sends editable labels with a direct @agent assignment', async () => {
+  it('shows the working directory and sends editable labels with a direct @agent assignment', async () => {
     const onCreate = vi.fn().mockResolvedValue({ id: 'task-1' } as TaskView)
     const user = userEvent.setup()
     render(<TaskComposerPanel repository={repository} agents={[agent]} onCreate={onCreate} onClose={vi.fn()} />)
 
-    expect(screen.getByDisplayValue('sinapsis')).toBeDisabled()
+    expect(screen.getByLabelText('当前工作目录')).toHaveValue('/code/sinapsis')
     await user.type(screen.getByLabelText('任务标题'), '补齐移动端抽屉')
     await user.type(screen.getByLabelText('详细描述'), '修复窄屏下的导航遮挡。')
     await user.type(screen.getByLabelText('验收标准'), '390px 可操作且没有遮挡。')

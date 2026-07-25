@@ -42,7 +42,8 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText('受控进程 stderr（非测试结论）')).toBeInTheDocument()
     expect(screen.getByText('warning: optional dependency missing\\n')).toBeInTheDocument()
     expect(screen.getByText('2 files changed, 34 insertions(+)')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '原始运行日志' })).toBeInTheDocument()
+    const runtimeLog = screen.getByText('运行日志').closest('details')
+    expect(runtimeLog).not.toHaveAttribute('open')
     await userEvent.setup().click(screen.getByRole('button', { name: '接受验收' }))
     expect(onReview).toHaveBeenCalledWith('accept')
     expect(await screen.findByText('验收已通过，尚未合并')).toBeInTheDocument()
@@ -87,7 +88,8 @@ describe('TaskDetailPanel', () => {
 
     render(<TaskDetailPanel details={runningDetails} onQueueInput={vi.fn()} onReview={vi.fn()} onReadArtifact={vi.fn()} />)
 
-    expect(screen.getByRole('heading', { name: 'Agent 输出' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '最近 Agent 输出' })).toBeInTheDocument()
+    expect(screen.getByText('运行日志').closest('details')).not.toHaveAttribute('open')
     expect(screen.getByLabelText('Agent 实时输出')).toHaveTextContent('正在检查测试配置。发现一处失败。')
   })
 

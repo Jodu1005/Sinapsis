@@ -96,14 +96,14 @@ describe('WorkspaceShell', () => {
 
     expect(await screen.findByRole('heading', { name: '创建工作空间' })).toBeInTheDocument()
     expect(screen.getByLabelText('工作空间名称')).toBeInTheDocument()
-    expect(screen.getByLabelText('代码仓路径')).toBeInTheDocument()
+    expect(screen.getByLabelText('工作目录')).toBeInTheDocument()
   })
 
-  it('groups channels by repository and loads the selected channel messages', async () => {
+  it('shows workspace channels and loads the selected channel messages', async () => {
     render(<WorkspaceShell api={makeApi()} />)
 
     expect(await screen.findByRole('button', { name: '# general' })).toBeInTheDocument()
-    expect(screen.getByText('sinapsis')).toBeInTheDocument()
+    expect(screen.getAllByText('Sinapsis').length).toBeGreaterThan(0)
     expect(screen.getByText('先看一下任务队列。')).toBeInTheDocument()
 
     await userEvent.setup().click(screen.getByRole('button', { name: '# build' }))
@@ -268,16 +268,14 @@ describe('WorkspaceShell', () => {
     expect(api.getBootstrap).toHaveBeenCalledTimes(2)
   })
 
-  it('opens the selected repository task list without selecting an arbitrary channel', async () => {
+  it('opens a task directly from its workspace without changing the channel', async () => {
     render(<WorkspaceShell api={makeApi()} />)
     const user = userEvent.setup()
 
-    await screen.findByRole('button', { name: '打开 sinapsis 任务' })
-    await user.click(screen.getByRole('button', { name: '打开 sinapsis 任务' }))
+    await screen.findByRole('button', { name: '修复频道界面' })
+    await user.click(screen.getByRole('button', { name: '修复频道界面' }))
 
-    expect(screen.getByRole('heading', { name: 'sinapsis 任务' })).toBeInTheDocument()
-    await user.click(screen.getByRole('tab', { name: '执行中' }))
-    expect(screen.getByRole('button', { name: /修复频道界面/ })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '概览' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '# general' })).toBeInTheDocument()
   })
 
@@ -287,7 +285,7 @@ describe('WorkspaceShell', () => {
 
     await screen.findByRole('textbox', { name: '发送消息' })
     await user.click(screen.getByRole('button', { name: '打开导航' }))
-    expect(screen.getByRole('navigation', { name: '工作空间与代码仓' })).toHaveAttribute('data-mobile-open', 'true')
+    expect(screen.getByRole('navigation', { name: '工作空间' })).toHaveAttribute('data-mobile-open', 'true')
     await user.click(screen.getByRole('button', { name: '关闭导航' }))
 
     expect(screen.getByRole('textbox', { name: '发送消息' })).toBeEnabled()
@@ -307,7 +305,7 @@ describe('WorkspaceShell', () => {
       const user = userEvent.setup()
 
       await screen.findByRole('textbox', { name: '发送消息' })
-      const navigation = document.querySelector<HTMLElement>('nav[aria-label="工作空间与代码仓"]')
+      const navigation = document.querySelector<HTMLElement>('nav[aria-label="工作空间"]')
       expect(navigation).not.toBeNull()
       expect(navigation).toHaveAttribute('aria-hidden', 'true')
       expect(navigation).toHaveAttribute('inert')
@@ -346,8 +344,8 @@ describe('WorkspaceShell', () => {
     const user = userEvent.setup()
     render(<WorkspaceShell api={api} />)
 
-    await screen.findByRole('button', { name: '新建 sinapsis 任务' })
-    await user.click(screen.getByRole('button', { name: '新建 sinapsis 任务' }))
+    await screen.findByRole('button', { name: '新建 Sinapsis 任务' })
+    await user.click(screen.getByRole('button', { name: '新建 Sinapsis 任务' }))
     await user.type(screen.getByLabelText('任务标题'), createdTask.title)
     await user.type(screen.getByLabelText('详细描述'), createdTask.description)
     await user.type(screen.getByLabelText('验收标准'), createdTask.acceptanceCriteria)

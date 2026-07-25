@@ -30,6 +30,7 @@ interface ManagedExecution {
   agentId: string
   adapter: RuntimeAdapter
   session: RuntimeSession
+  agentName: string
   targetBranch: string
   controlledStderr: string[]
   timeout: NodeJS.Timeout | undefined
@@ -68,7 +69,7 @@ export class TaskExecutionCoordinator {
         unitOfWork.allocateTaskWorktree(task.id, allocation.branchName, allocation.worktreePath)
         unitOfWork.createTaskSession(task.id, agent.id)
         unitOfWork.transitionTask(task.id, 'running', 'Runtime 已在任务工作树中启动')
-        unitOfWork.createMessage({ channelId: task.channelId, taskId: task.id, senderType: 'system', authorName: 'Sinapsis', body: `@${agent.mentionName} 开始执行任务。` })
+        unitOfWork.createMessage({ channelId: task.channelId, taskId: task.id, senderType: 'agent', authorName: agent.identity, body: `开始处理「${task.title}」。` })
       })
 
       const adapter = this.runtimes[agent.runtime]
@@ -83,6 +84,7 @@ export class TaskExecutionCoordinator {
         agentId: agent.id,
         adapter,
         session,
+        agentName: agent.identity,
         targetBranch: repository.defaultBranch,
         controlledStderr: [],
         timeout: undefined,
@@ -221,7 +223,7 @@ export class TaskExecutionCoordinator {
         return
       case 'needs_input':
         this.repositories.transitionTask(event.taskId, 'waiting_input', 'Runtime 请求人工决定')
-        this.messages.postMilestone(this.task(event.taskId).channelId, event.taskId, `需要决定：${event.prompt}`)
+        this.messages.postAgent(this.task(event.taskId).channelId, event.taskId, execution.agentName, `我需要你的决定：${event.prompt}`)
         return
       case 'error':
         if (!await this.flushRuntimeOutput(execution)) return
@@ -255,7 +257,7 @@ export class TaskExecutionCoordinator {
       return
     }
     this.repositories.finishTaskExecution(task.id, execution.agentId, 'in_review', 'Runtime 完成并检测到任务分支提交')
-    this.messages.postMilestone(task.channelId, task.id, '任务已完成，等待人工验收。')
+    this.messages.postAgent(task.channelId, task.id, execution.agentName, `已完成「${task.title}」，已提交改动，等待你验收。`)
     execution.active = false
     this.disarmTimeout(execution)
   }
@@ -273,9 +275,9 @@ export class TaskExecutionCoordinator {
       unitOfWork.createMessage({
         channelId: task.channelId,
         taskId,
-        senderType: 'system',
-        authorName: 'Sinapsis',
-        body: `任务需要人工处理：${reason}`,
+        senderType: 'agent',
+        authorName: this.agentName(agentId),
+        body: `执行需要人工处理：${reason}`,
       })
     })
     this.clearExecution(taskId)
@@ -398,6 +400,14 @@ export class TaskExecutionCoordinator {
     const task = this.repositories.getTask(taskId)
     if (!task) throw new Error(`Task ${taskId} does not exist.`)
     return task
+  }
+
+  private agentName(agentId: string): string {
+    for (const workspace of this.repositories.getBootstrap().workspaces) {
+      const agent = workspace.agents.find((candidate) => candidate.id === agentId)
+      if (agent) return agent.identity
+    }
+    return 'Agent'
   }
 
   private requireClaimContext(claim: TaskClaim): { task: Task; agent: Agent; repository: { id: string; path: string; defaultBranch: string } } {
