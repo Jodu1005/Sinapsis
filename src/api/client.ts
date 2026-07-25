@@ -24,7 +24,7 @@ export interface CreateTaskRequest {
 export interface CreateAgentRequest {
   identity: string
   mention: string
-  runtime: 'opencode' | 'pi'
+  runtime: 'opencode' | 'pi' | 'claude-code'
   capabilityTags: string[]
 }
 

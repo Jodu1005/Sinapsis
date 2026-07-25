@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { ValidationError } from '../../application/workspace-service'
 
-export const runtimeKinds = ['opencode', 'pi'] as const
+export const runtimeKinds = ['opencode', 'pi', 'claude-code'] as const
 export type RuntimeKind = (typeof runtimeKinds)[number]
 
 export interface RuntimeProfile {
@@ -27,6 +27,7 @@ export interface RuntimeAvailabilityDetector {
 export const runtimePresets = {
   opencode: { command: 'opencode', args: ['run'], model: '', env: {}, policy: 'task-worktree' },
   pi: { command: 'pi', args: ['--mode', 'rpc'], model: '', env: {}, policy: 'task-worktree' },
+  'claude-code': { command: 'claude', args: [], model: '', env: {}, policy: 'task-worktree' },
 } as const
 
 export function resolveRuntimeProfile(runtime: RuntimeKind, overrides: RuntimeProfileOverrides = {}): RuntimeProfile {

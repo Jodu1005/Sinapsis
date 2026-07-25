@@ -66,6 +66,17 @@ describe('AgentService', () => {
     })
   })
 
+  it('resolves the claude code runtime preset for local task worktrees', () => {
+    expect(resolveRuntimeProfile('claude-code')).toEqual({
+      runtime: 'claude-code',
+      command: 'claude',
+      args: [],
+      model: '',
+      env: {},
+      policy: 'task-worktree',
+    })
+  })
+
   it('probes the resolved runtime profile before storing the Agent configuration', async () => {
     const detector = availableDetector()
     const service = new AgentService(new RecordingAgentRepository(['workspace-1']), detector)

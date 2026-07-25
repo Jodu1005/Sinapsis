@@ -7,6 +7,7 @@ const dataDir = process.env.SINAPSIS_DATA_DIR?.trim() || path.join(homedir(), '.
 const defaults = [
   { runtime: 'opencode', command: 'opencode' },
   { runtime: 'pi', command: 'pi' },
+  { runtime: 'claude-code', command: 'claude' },
 ]
 const configured = readConfiguredCommands(path.join(dataDir, 'sinapsis.sqlite'))
 const runtimes = selectRuntimeCommands(configured)

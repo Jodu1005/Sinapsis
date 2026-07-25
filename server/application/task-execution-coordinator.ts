@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import type { RuntimeKind } from '../adapters/runtime/runtime-profile'
 import type { Agent } from '../domain/agent'
 import { DomainError, type Task } from '../domain/task'
 import type { TaskClaim, WorkspaceRepositories } from '../ports/repositories'
@@ -14,7 +15,7 @@ const execFileAsync = promisify(execFile)
 
 export interface TaskExecutionCoordinatorOptions {
   repositories: WorkspaceRepositories
-  runtimes: Record<'opencode' | 'pi', RuntimeAdapter>
+  runtimes: Partial<Record<RuntimeKind, RuntimeAdapter>>
   worktrees: WorktreeManager
   artifactDirectory: string
   messages?: ChannelMessageService
@@ -37,7 +38,7 @@ interface ManagedExecution {
 
 export class TaskExecutionCoordinator {
   private readonly repositories: WorkspaceRepositories
-  private readonly runtimes: Record<'opencode' | 'pi', RuntimeAdapter>
+  private readonly runtimes: Partial<Record<RuntimeKind, RuntimeAdapter>>
   private readonly worktrees: WorktreeManager
   private readonly artifactDirectory: string
   private readonly messages: ChannelMessageService
@@ -68,6 +69,7 @@ export class TaskExecutionCoordinator {
       })
 
       const adapter = this.runtimes[agent.runtime]
+      if (!adapter) throw new DomainError(`Runtime ${agent.runtime} is not available on this service.`)
       const session = await adapter.start({
         taskId: task.id, title: task.title, description: task.description, acceptanceCriteria: task.acceptanceCriteria,
         worktreePath: allocation.worktreePath,

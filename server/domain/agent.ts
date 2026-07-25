@@ -17,7 +17,7 @@ export interface Agent {
   workspaceId: string
   identity: string
   mentionName: string
-  runtime: 'opencode' | 'pi'
+  runtime: 'opencode' | 'pi' | 'claude-code'
   status: AgentStatus
   capabilityTags: string[]
   maxConcurrentTasks: 1
