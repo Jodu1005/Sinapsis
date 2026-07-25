@@ -4,6 +4,7 @@ import type { CreateAgentRequest, CreateTaskRequest, WorkspaceApi } from '../api
 import { ApiClient } from '../api/client'
 import { useWorkspaceEvents } from '../api/use-workspace-events'
 import { channelMessages, type AgentView, type RepositoryView, type TaskDetailView, type TaskView, type WorkspaceSnapshot, type WorkspaceView } from '../domain/workspace-view'
+import { parseMessageIntent } from '../domain/message-intent'
 import { AgentConfigDialog } from './AgentConfigDialog'
 import { AgentCreateDialog } from './AgentCreateDialog'
 import { ChannelTimeline } from './ChannelTimeline'
@@ -14,6 +15,7 @@ import { TaskDetailPanel } from './TaskDetailPanel'
 import { TaskList } from './TaskList'
 import { WorkspaceSetup } from './WorkspaceSetup'
 import { WorkspaceCreateDialog } from './WorkspaceCreateDialog'
+import { ChannelCreateDialog } from './ChannelCreateDialog'
 
 export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const [defaultApi] = useState(() => new ApiClient())
@@ -30,6 +32,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const [selectedAgent, setSelectedAgent] = useState<AgentView | null>(null)
   const [creatingAgent, setCreatingAgent] = useState(false)
   const [creatingWorkspace, setCreatingWorkspace] = useState(false)
+  const [creatingChannelRepositoryId, setCreatingChannelRepositoryId] = useState<string | null>(null)
   const [refreshingAgentId, setRefreshingAgentId] = useState<string | null>(null)
   const [navOpen, setNavOpen] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
@@ -70,7 +73,29 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   if (!workspace) return <WorkspaceSetup api={api} onComplete={refresh} />
   if (!selection.channel || !selection.repository) return <main className="workspace-loading"><p>这个工作空间还没有频道。</p></main>
 
-  const sendMessage = async (body: string) => { await api.postMessage(selection.channel!.id, { body }); await refresh() }
+  const sendMessage = async (body: string) => {
+    const intent = parseMessageIntent(body, workspace.agents)
+    if (intent.kind === 'error') throw new Error(intent.message)
+    if (intent.kind === 'message') {
+      await api.postMessage(selection.channel!.id, { body: intent.body })
+      await refresh()
+      return undefined
+    }
+
+    const task = await api.createTask(selection.repository!.id, {
+      title: intent.body,
+      description: intent.body,
+      acceptanceCriteria: '任务完成后在当前频道说明结果。',
+      labels: [],
+      directAgentId: intent.directAgentId,
+      channelId: selection.channel!.id,
+    })
+    await refresh()
+    setSelectedTaskRepositoryId(selection.repository!.id)
+    setSelectedTaskId(task.id)
+    setContextOpen(true)
+    return { notice: '任务已派发。' }
+  }
   const selectChannel = (channelId: string) => { setSelectedChannelId(channelId); setSelectedTaskId(null); setSelectedTaskRepositoryId(null); setComposerRepositoryId(null); setNavOpen(false) }
   const selectWorkspace = (workspaceId: string) => {
     const nextWorkspace = snapshot.workspaces.find((candidate) => candidate.id === workspaceId)
@@ -118,6 +143,16 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     setCreatingWorkspace(false)
     await refresh()
   }
+  const createChannel = async (input: { name: string }) => {
+    const repository = findRepository(workspace, creatingChannelRepositoryId)
+    if (!repository) throw new Error('没有可用的工作目录。')
+    const channel = await api.createChannel(repository.id, input)
+    await refresh()
+    setSelectedChannelId(channel.id)
+    setSelectedTaskId(null)
+    setSelectedTaskRepositoryId(null)
+    setCreatingChannelRepositoryId(null)
+  }
   const refreshAgentRuntime = async () => {
     if (!selectedAgent || refreshingAgentId) return
     setRefreshingAgentId(selectedAgent.id)
@@ -129,7 +164,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     }
   }
   return <div className="workspace-shell">
-    <RepositorySidebar workspace={workspace} workspaces={snapshot.workspaces} selectedChannelId={selection.channel.id} selectedTaskId={selectedTask?.id ?? null} onSelectWorkspace={selectWorkspace} onSelectChannel={selectChannel} onSelectTask={selectTask} onCreateTask={setComposerRepositoryId} onCreateWorkspace={() => setCreatingWorkspace(true)} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
+    <RepositorySidebar workspace={workspace} workspaces={snapshot.workspaces} selectedChannelId={selection.channel.id} selectedTaskId={selectedTask?.id ?? null} onSelectWorkspace={selectWorkspace} onSelectChannel={selectChannel} onSelectTask={selectTask} onCreateTask={setComposerRepositoryId} onCreateChannel={setCreatingChannelRepositoryId} onCreateWorkspace={() => setCreatingWorkspace(true)} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
     <main className="conversation-panel">
       <header className="channel-header"><NavigationToggle onClick={() => setNavOpen(true)} /><div className="channel-heading"><h1># {selection.channel.name}</h1><p>{selection.repository.name} · {selection.repository.currentBranch}</p></div><div className="header-actions"><span className="connection-state" data-reconnecting={reconnecting}>{reconnecting ? '正在重新连接' : '已连接'}</span><button type="button" className="icon-button" aria-label="打开上下文" data-tooltip="打开上下文" onClick={() => setContextOpen(true)}><PanelRightOpen size={18} /></button></div></header>
       <ChannelTimeline messages={channelMessages(workspace, selection.channel.id)} />
@@ -143,6 +178,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     </aside>
     {composerRepository && <TaskComposerPanel repository={composerRepository} agents={workspace.agents} onCreate={createTask} onClose={() => setComposerRepositoryId(null)} />}
     {creatingWorkspace && <WorkspaceCreateDialog onCreate={createWorkspace} onClose={() => setCreatingWorkspace(false)} />}
+    {creatingChannelRepositoryId && <ChannelCreateDialog onCreate={createChannel} onClose={() => setCreatingChannelRepositoryId(null)} />}
     {creatingAgent && <AgentCreateDialog onCreate={createAgent} onClose={() => setCreatingAgent(false)} />}
     {selectedAgent && <AgentConfigDialog agent={selectedAgent} refreshingRuntime={refreshingAgentId === selectedAgent.id} onRefreshRuntime={refreshAgentRuntime} onClose={() => setSelectedAgent(null)} />}
   </div>

@@ -57,6 +57,7 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     createAgent: vi.fn(),
     refreshAgentRuntime: vi.fn(),
     postMessage: vi.fn().mockResolvedValue(undefined),
+    createChannel: vi.fn(),
     createTask: vi.fn(),
     getTaskDetails: vi.fn().mockResolvedValue(createdTaskDetails),
     queueTaskInput: vi.fn(),
@@ -121,6 +122,45 @@ describe('WorkspaceShell', () => {
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
     expect(api.postMessage).toHaveBeenCalledWith('channel-general', { body: '大家同步一下。' })
+  })
+
+  it('creates a channel from the sidebar and selects it', async () => {
+    const createdChannel = { id: 'channel-release', repositoryId: 'repository-1', name: 'release', createdAt: '2026-07-25T10:00:00.000Z' }
+    const updated = structuredClone(snapshot)
+    updated.workspaces[0].repositories[0].channels.push(createdChannel)
+    const api = makeApi({
+      createChannel: vi.fn().mockResolvedValue(createdChannel),
+      getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockResolvedValueOnce(updated),
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await screen.findByRole('button', { name: '添加频道' })
+    await user.click(screen.getByRole('button', { name: '添加频道' }))
+    await user.type(screen.getByLabelText('频道名称'), 'release')
+    await user.click(screen.getByRole('button', { name: '创建频道' }))
+
+    expect(api.createChannel).toHaveBeenCalledWith('repository-1', { name: 'release' })
+    expect(await screen.findByRole('heading', { name: '# release' })).toBeInTheDocument()
+  })
+
+  it('dispatches /task commands to the selected channel instead of posting a message', async () => {
+    const task = { ...createdTask, title: '修复导航', description: '修复导航', acceptanceCriteria: '任务完成后在当前频道说明结果。', channelId: 'channel-general' }
+    const api = makeApi({ createTask: vi.fn().mockResolvedValue(task) })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await screen.findByRole('textbox', { name: '发送消息' })
+    await user.type(screen.getByRole('textbox', { name: '发送消息' }), '/task @builder 修复导航')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(api.createTask).toHaveBeenCalledWith('repository-1', expect.objectContaining({
+      channelId: 'channel-general',
+      title: '修复导航',
+      directAgentId: 'agent-1',
+    }))
+    expect(api.postMessage).not.toHaveBeenCalled()
+    expect(await screen.findByRole('status')).toHaveTextContent('任务已派发。')
   })
 
   it('loads details for the initially selected channel task', async () => {
