@@ -187,6 +187,11 @@ function modelArgs(model: string): string[] {
 }
 
 function initialPrompt(task: RuntimeTaskRequest): string {
+  if (task.mode === 'conversation') return conversationPrompt(task)
+  return taskPrompt(task)
+}
+
+function taskPrompt(task: RuntimeTaskRequest): string {
   return [
     'You are working on a single assigned task inside the provided worktree.',
     'Do not push, merge, or modify files outside this worktree. You may run tests and create a commit on the task branch.',
@@ -194,6 +199,16 @@ function initialPrompt(task: RuntimeTaskRequest): string {
     task.description,
     `Acceptance criteria: ${task.acceptanceCriteria}`,
   ].join('\n\n')
+}
+
+function conversationPrompt(task: RuntimeTaskRequest): string {
+  return [
+    'You are participating in a read-only channel conversation.',
+    'Do not edit or create files. Do not commit. Do not push. Do not merge. Do not run commands that modify the working directory or repository state.',
+    `Recent channel context:\n${task.description}`,
+    task.initialMessage ? `Initial human message:\n${task.initialMessage}` : undefined,
+    'Reply clearly and concisely to the human message.',
+  ].filter((section): section is string => Boolean(section)).join('\n\n')
 }
 
 function contentBlocks(value: Record<string, unknown>): Record<string, unknown>[] {

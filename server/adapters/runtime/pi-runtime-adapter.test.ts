@@ -6,6 +6,7 @@ import type { RuntimeEvent, RuntimeTaskRequest } from '../../ports/runtime'
 
 const task: RuntimeTaskRequest = {
   taskId: 'task-2',
+  mode: 'task',
   title: 'Review pull request',
   description: 'Inspect the changes.',
   acceptanceCriteria: 'Leave a concise review.',
@@ -14,6 +15,29 @@ const task: RuntimeTaskRequest = {
 }
 
 describe('PiRuntimeAdapter', () => {
+  it('starts a conversation with a read-only prompt containing channel context and the human message', async () => {
+    const runner = new FakeProcessRunner()
+    const adapter = new PiRuntimeAdapter(runner, '/tmp/sinapsis-data')
+
+    await adapter.start({
+      ...task,
+      mode: 'conversation',
+      description: 'Recent channel context: the migration needs review.',
+      initialMessage: 'Which risk should we address first?',
+    }, () => {})
+    const process = runner.spawns[0]?.process
+    process?.emitStdout('{"type":"response","command":"get_state","success":true,"data":{"sessionId":"pi-session-1"}}\n')
+
+    const prompt = JSON.parse(process?.stdin[1] ?? '{}').message ?? ''
+    expect(prompt).toContain('read-only')
+    expect(prompt).toMatch(/do not edit/i)
+    expect(prompt).toMatch(/do not commit/i)
+    expect(prompt).toMatch(/do not push/i)
+    expect(prompt).toMatch(/do not merge/i)
+    expect(prompt).toContain('Recent channel context: the migration needs review.')
+    expect(prompt).toContain('Which risk should we address first?')
+  })
+
   it('captures its session state before sending the initial prompt', async () => {
     const runner = new FakeProcessRunner()
     const events: RuntimeEvent[] = []

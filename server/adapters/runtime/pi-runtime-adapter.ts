@@ -179,12 +179,27 @@ function createSession(task: RuntimeTaskRequest): RuntimeSession {
 }
 
 function initialPrompt(task: RuntimeTaskRequest): string {
+  if (task.mode === 'conversation') return conversationPrompt(task)
+  return taskPrompt(task)
+}
+
+function taskPrompt(task: RuntimeTaskRequest): string {
   return [
     'Work only in the assigned worktree. Do not push, merge, or modify files outside it. If you make changes, stage and commit the completed work on the task branch before you finish.',
     `Task: ${task.title}`,
     task.description,
     `Acceptance criteria: ${task.acceptanceCriteria}`,
   ].join('\n\n')
+}
+
+function conversationPrompt(task: RuntimeTaskRequest): string {
+  return [
+    'You are participating in a read-only channel conversation.',
+    'Do not edit or create files. Do not commit. Do not push. Do not merge. Do not run commands that modify the working directory or repository state.',
+    `Recent channel context:\n${task.description}`,
+    task.initialMessage ? `Initial human message:\n${task.initialMessage}` : undefined,
+    'Reply clearly and concisely to the human message.',
+  ].filter((section): section is string => Boolean(section)).join('\n\n')
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

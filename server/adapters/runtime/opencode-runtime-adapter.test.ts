@@ -6,6 +6,7 @@ import type { RuntimeEvent, RuntimeTaskRequest } from '../../ports/runtime'
 
 const task: RuntimeTaskRequest = {
   taskId: 'task-1',
+  mode: 'task',
   title: 'Implement the adapter',
   description: 'Use a worktree.',
   acceptanceCriteria: 'Tests pass.',
@@ -14,6 +15,27 @@ const task: RuntimeTaskRequest = {
 }
 
 describe('OpenCodeRuntimeAdapter', () => {
+  it('starts a conversation with a read-only prompt containing channel context and the human message', async () => {
+    const runner = new FakeProcessRunner()
+    const adapter = new OpenCodeRuntimeAdapter(runner)
+
+    await adapter.start({
+      ...task,
+      mode: 'conversation',
+      description: 'Recent channel context: the login issue is reproducible.',
+      initialMessage: 'What should we investigate first?',
+    }, () => {})
+
+    const prompt = runner.spawns[0]?.options.args.at(-1) ?? ''
+    expect(prompt).toContain('read-only')
+    expect(prompt).toMatch(/do not edit/i)
+    expect(prompt).toMatch(/do not commit/i)
+    expect(prompt).toMatch(/do not push/i)
+    expect(prompt).toMatch(/do not merge/i)
+    expect(prompt).toContain('Recent channel context: the login issue is reproducible.')
+    expect(prompt).toContain('What should we investigate first?')
+  })
+
   it('starts a new task with an argument array and resumes later input with its saved session', async () => {
     const runner = new FakeProcessRunner()
     const events: RuntimeEvent[] = []

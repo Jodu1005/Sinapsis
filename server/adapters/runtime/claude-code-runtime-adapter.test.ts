@@ -6,6 +6,7 @@ import type { RuntimeEvent, RuntimeTaskRequest } from '../../ports/runtime'
 
 const task: RuntimeTaskRequest = {
   taskId: 'task-claude',
+  mode: 'task',
   title: 'Implement Claude adapter',
   description: 'Use Claude Code inside the assigned worktree.',
   acceptanceCriteria: 'Stream output and settle safely.',
@@ -14,6 +15,27 @@ const task: RuntimeTaskRequest = {
 }
 
 describe('ClaudeCodeRuntimeAdapter', () => {
+  it('starts a conversation with a read-only prompt containing channel context and the human message', async () => {
+    const runner = new FakeProcessRunner()
+    const adapter = new ClaudeCodeRuntimeAdapter(runner)
+
+    await adapter.start({
+      ...task,
+      mode: 'conversation',
+      description: 'Recent channel context: mobile layout is overflowing.',
+      initialMessage: 'Can you explain the likely cause?',
+    }, () => {})
+
+    const prompt = runner.spawns[0]?.options.args.at(-1) ?? ''
+    expect(prompt).toContain('read-only')
+    expect(prompt).toMatch(/do not edit/i)
+    expect(prompt).toMatch(/do not commit/i)
+    expect(prompt).toMatch(/do not push/i)
+    expect(prompt).toMatch(/do not merge/i)
+    expect(prompt).toContain('Recent channel context: mobile layout is overflowing.')
+    expect(prompt).toContain('Can you explain the likely cause?')
+  })
+
   it('starts a new task with a generated UUID session and resumes later input with --resume', async () => {
     const runner = new FakeProcessRunner()
     const events: RuntimeEvent[] = []

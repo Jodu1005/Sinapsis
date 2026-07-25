@@ -17,9 +17,11 @@ export type RuntimeEventSink = (event: RuntimeEvent) => void
 
 export interface RuntimeTaskRequest {
   taskId: string
+  mode: 'task' | 'conversation'
   title: string
   description: string
   acceptanceCriteria: string
+  initialMessage?: string
   worktreePath: string
   profile: RuntimeProfile
 }
