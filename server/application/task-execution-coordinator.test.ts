@@ -44,6 +44,7 @@ describe('TaskExecutionCoordinator', () => {
     const details = fixture.repositories.getTaskDetails(claim!.task.id)!
     expect(details.task).toMatchObject({ status: 'running', worktreePath: expect.any(String), branchName: expect.stringMatching(/^sinapsis\/task-/) })
     expect(fixture.runtime.starts).toHaveLength(1)
+    expect(fixture.runtime.starts[0]?.mode).toBe('task')
     expect(details.artifacts).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'runtime-stderr' })]))
     expect(details.events).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'runtime.text' })]))
     expect(fixture.channelMessages()).toEqual(expect.arrayContaining([

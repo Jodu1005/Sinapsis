@@ -75,7 +75,7 @@ export class TaskExecutionCoordinator {
       const adapter = this.runtimes[agent.runtime]
       if (!adapter) throw new DomainError(`Runtime ${agent.runtime} is not available on this service.`)
       const session = await adapter.start({
-        taskId: task.id, title: task.title, description: task.description, acceptanceCriteria: task.acceptanceCriteria,
+        taskId: task.id, mode: 'task', title: task.title, description: task.description, acceptanceCriteria: task.acceptanceCriteria,
         worktreePath: allocation.worktreePath,
         profile: { runtime: agent.runtime, command: agent.command, args: agent.args, model: agent.model, env: agent.env, policy: 'task-worktree' },
       }, (event) => this.enqueue(event.taskId, () => this.handleRuntimeEvent(event)))
