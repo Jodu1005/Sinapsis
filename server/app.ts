@@ -125,9 +125,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   app.post('/api/repositories/:repositoryId/tasks', asyncRoute((request, response) => {
     const body = objectBody(request.body)
-    assertOnlyKeys(body, ['title', 'description', 'acceptanceCriteria', 'labels', 'directAgentId', 'timeoutMs', 'leaseTtlMs', 'maxRetries'])
+    assertOnlyKeys(body, ['title', 'description', 'acceptanceCriteria', 'labels', 'directAgentId', 'channelId', 'timeoutMs', 'leaseTtlMs', 'maxRetries'])
     const task = taskService.createTask({
       repositoryId: requiredParam(request.params.repositoryId, 'repositoryId'),
+      channelId: optionalString(body, 'channelId'),
       title: requiredString(body, 'title'),
       description: requiredString(body, 'description'),
       acceptanceCriteria: requiredString(body, 'acceptanceCriteria'),

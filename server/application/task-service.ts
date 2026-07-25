@@ -6,6 +6,7 @@ import type { BootstrapWorkspace, WorkspaceRepositories, WorkspaceUnitOfWork } f
 
 export interface CreateLabeledTaskInput {
   repositoryId: string
+  channelId?: string
   directAgentId?: string | null
   title: string
   description: string
@@ -26,9 +27,11 @@ export class TaskService {
       throw new NotFoundError(`Repository ${input.repositoryId} does not exist.`)
     }
 
-    const generalChannel = repository.channels.find((channel) => channel.name === 'general')
-    if (!generalChannel) {
-      throw new NotFoundError(`Repository ${input.repositoryId} does not have a general channel.`)
+    const channel = input.channelId
+      ? repository.channels.find((candidate) => candidate.id === input.channelId)
+      : repository.channels.find((candidate) => candidate.name === 'general')
+    if (!channel) {
+      throw new NotFoundError(`Channel ${input.channelId ?? 'general'} does not belong to repository ${repository.id}.`)
     }
 
     if (input.directAgentId && !workspace.agents.some((agent) => agent.id === input.directAgentId)) {
@@ -39,7 +42,7 @@ export class TaskService {
     const labels = input.labels ?? inferredLabels
     const taskInput: CreateTaskInput = {
       repositoryId: repository.id,
-      channelId: generalChannel.id,
+      channelId: channel.id,
       directAgentId: input.directAgentId,
       title: input.title,
       description: input.description,

@@ -199,6 +199,44 @@ describe('TaskService human input queue', () => {
   })
 })
 
+describe('TaskService channel ownership', () => {
+  let closeDatabase: (() => void) | undefined
+
+  afterEach(() => {
+    closeDatabase?.()
+    closeDatabase = undefined
+  })
+
+  it('creates a task in an explicitly selected repository channel and rejects a foreign channel', () => {
+    const app = createApp()
+    closeDatabase = app.locals.closeDatabase as () => void
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const general = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
+    const build = repositories.createChannel({ repositoryId: repository.id, name: 'build' })
+    const foreignRepository = repositories.createRepository({ workspaceId: workspace.id, name: 'docs', path: '/projects/docs' })
+    const foreign = repositories.createChannel({ repositoryId: foreignRepository.id, name: 'general' })
+    const service = new TaskService(repositories)
+
+    expect(service.createTask({
+      repositoryId: repository.id,
+      channelId: build.id,
+      title: 'Build',
+      description: 'Build',
+      acceptanceCriteria: 'Pass',
+    }).channelId).toBe(build.id)
+    expect(general.id).not.toBe(build.id)
+    expect(() => service.createTask({
+      repositoryId: repository.id,
+      channelId: foreign.id,
+      title: 'Build',
+      description: 'Build',
+      acceptanceCriteria: 'Pass',
+    })).toThrow('does not belong')
+  })
+})
+
 class TaskInputRepositories {
   readonly createdInputs: Array<{ taskId: string; body: string }> = []
 

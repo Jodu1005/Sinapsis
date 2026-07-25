@@ -112,6 +112,37 @@ describe('local service API', () => {
     })
   })
 
+  it('creates a task in the explicitly requested repository channel', async () => {
+    const app = createApp({
+      gitClient: {
+        inspectRepository: async () => ({
+          rootPath: '/projects/sinapsis', currentBranch: 'main', defaultBranch: 'main', isClean: true,
+        }),
+      },
+    })
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    repositories.createChannel({ repositoryId: repository.id, name: 'general' })
+    const build = repositories.createChannel({ repositoryId: repository.id, name: 'build' })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/repositories/${repository.id}/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        channelId: build.id,
+        title: 'Build',
+        description: 'Build',
+        acceptanceCriteria: 'Pass',
+      }),
+    })
+
+    expect(response.status).toBe(201)
+    await expect(response.json()).resolves.toMatchObject({ repositoryId: repository.id, channelId: build.id })
+  })
+
   it('returns a conflict when concurrent agent creation races at the SQLite mention constraint', async () => {
     let detections = 0
     let releaseDetections: (() => void) | undefined
