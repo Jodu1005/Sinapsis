@@ -28,7 +28,7 @@ describe('TaskComposerPanel', () => {
     await user.clear(screen.getByLabelText('标签'))
     await user.type(screen.getByLabelText('标签'), 'frontend, responsive')
     await user.selectOptions(screen.getByLabelText('指定 Agent'), 'agent-1')
-    expect(screen.getByText('@builder 将直接领取此任务')).toBeInTheDocument()
+    expect(screen.getByText('@实现 Agent 将直接领取此任务')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '创建任务' }))
 
     expect(onCreate).toHaveBeenCalledWith({

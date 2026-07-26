@@ -20,10 +20,11 @@ import { ChannelCreateDialog } from './ChannelCreateDialog'
 export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const [defaultApi] = useState(() => new ApiClient())
   const api = providedApi ?? defaultApi
+  const [storedSelection] = useState(readStoredSelection)
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null)
-  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null)
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(storedSelection?.workspaceId ?? null)
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(storedSelection?.channelId ?? null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [selectedTaskRepositoryId, setSelectedTaskRepositoryId] = useState<string | null>(null)
   const [taskDetails, setTaskDetails] = useState<TaskDetailView | null>(null)
@@ -54,7 +55,12 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
 
   const workspace = snapshot?.workspaces.find((candidate) => candidate.id === selectedWorkspaceId) ?? snapshot?.workspaces[0]
   const selection = useMemo(() => findSelection(workspace, selectedChannelId), [workspace, selectedChannelId])
+  useEffect(() => { if (workspace && selectedWorkspaceId !== workspace.id) setSelectedWorkspaceId(workspace.id) }, [workspace, selectedWorkspaceId])
   useEffect(() => { if (selection.channel && selectedChannelId !== selection.channel.id) setSelectedChannelId(selection.channel.id) }, [selection.channel, selectedChannelId])
+  useEffect(() => {
+    if (!workspace || !selection.channel) return
+    storeSelection({ workspaceId: workspace.id, channelId: selection.channel.id })
+  }, [workspace, selection.channel])
   useEffect(() => {
     if (!selectedAgent) return
     const nextSelectedAgent = workspace?.agents.find((agent) => agent.id === selectedAgent.id) ?? null
@@ -176,7 +182,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     <main className="conversation-panel">
       <header className="channel-header"><NavigationToggle onClick={() => setNavOpen(true)} /><div className="channel-heading"><h1># {selection.channel.name}</h1><p>{selection.repository.name} · {selection.repository.currentBranch}</p></div><div className="header-actions"><span className="connection-state" data-reconnecting={reconnecting}>{reconnecting ? '正在重新连接' : '已连接'}</span><button type="button" className="icon-button" aria-label="打开上下文" data-tooltip="打开上下文" onClick={() => setContextOpen(true)}><PanelRightOpen size={18} /></button></div></header>
       <ChannelTimeline messages={channelMessages(workspace, selection.channel.id)} />
-      <MessageComposer channelName={selection.channel.name} onSend={sendMessage} />
+      <MessageComposer channelName={selection.channel.name} agents={workspace.agents} onSend={sendMessage} />
     </main>
     <aside className="context-panel" aria-label="任务与上下文" aria-hidden={narrowContext && !contextOpen || undefined} inert={narrowContext && !contextOpen} data-mobile-open={contextOpen}>
       <header className="context-header"><strong>上下文</strong><button type="button" className="icon-button context-close" aria-label="关闭上下文" data-tooltip="关闭上下文" onClick={() => setContextOpen(false)}><X size={17} /></button></header>
@@ -219,4 +225,23 @@ function useMediaQuery(query: string): boolean {
     return () => media.removeEventListener('change', update)
   }, [query])
   return matches
+}
+
+const selectionStorageKey = 'sinapsis:workspace-selection'
+
+function readStoredSelection(): { workspaceId: string; channelId: string } | undefined {
+  if (typeof window === 'undefined') return undefined
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(selectionStorageKey) ?? 'null')
+    if (!value || typeof value !== 'object' || !('workspaceId' in value) || !('channelId' in value)) return undefined
+    const { workspaceId, channelId } = value as { workspaceId?: unknown; channelId?: unknown }
+    return typeof workspaceId === 'string' && typeof channelId === 'string' ? { workspaceId, channelId } : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function storeSelection(selection: { workspaceId: string; channelId: string }): void {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(selectionStorageKey, JSON.stringify(selection))
 }

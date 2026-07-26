@@ -1,4 +1,4 @@
-import type { AgentView } from './workspace-view'
+import { distinctAgentsByIdentity, type AgentView } from './workspace-view'
 
 export type MessageIntent =
   | { kind: 'message'; body: string }
@@ -23,7 +23,7 @@ export function parseMessageIntent(body: string, agents: AgentView[]): MessageIn
   }
 
   const mention = mentionMatch[2]
-  const agent = agents.find((candidate) => candidate.mentionName === mention.slice(1))
+  const agent = distinctAgentsByIdentity(agents).find((candidate) => matchesAgentMention(candidate, mention.slice(1)))
   if (!agent) {
     return { kind: 'error', message: `找不到 Agent ${mention}。` }
   }
@@ -35,4 +35,9 @@ export function parseMessageIntent(body: string, agents: AgentView[]): MessageIn
   }
 
   return { kind: 'task', body: taskBody, directAgentId: agent.id }
+}
+
+function matchesAgentMention(agent: AgentView, mention: string): boolean {
+  const normalizedMention = mention.toLocaleLowerCase()
+  return agent.identity?.toLocaleLowerCase() === normalizedMention || agent.mentionName.toLocaleLowerCase() === normalizedMention
 }

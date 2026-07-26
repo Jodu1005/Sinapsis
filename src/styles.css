@@ -113,10 +113,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .empty-timeline { display: grid; place-content: center; min-height: 100%; color: var(--muted); text-align: center; }
 .empty-timeline p { margin: 0 0 3px; color: var(--ink); font-weight: 700; }
 .empty-timeline span { font-size: 12px; }
-.message-composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; margin: 0 max(18px, 4vw) 20px; padding: 7px 7px 7px 12px; border: 1px solid #cbd5cf; border-radius: 6px; background: #fff; }
+.message-composer { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; margin: 0 max(18px, 4vw) 20px; padding: 7px 7px 7px 12px; border: 1px solid #cbd5cf; border-radius: 6px; background: #fff; }
 .message-composer:focus-within { border-color: #47a07e; box-shadow: 0 0 0 2px rgb(71 160 126 / 17%); }
 .message-composer textarea { width: 100%; min-height: 29px; max-height: 120px; resize: vertical; border: 0; color: var(--ink); background: transparent; outline: 0; }
 .message-composer textarea::placeholder { color: #849088; }
+.mention-suggestions { position: absolute; z-index: 3; bottom: calc(100% + 7px); left: 0; width: min(320px, 100%); overflow: hidden; border: 1px solid #bfcfc5; border-radius: 6px; background: #fff; box-shadow: 0 8px 22px rgb(35 53 42 / 16%); }
+.mention-suggestions button { display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 12px; padding: 9px 11px; border: 0; border-bottom: 1px solid #e2e9e4; color: var(--ink); background: #fff; text-align: left; }
+.mention-suggestions button:last-child { border-bottom: 0; }
+.mention-suggestions button:hover, .mention-suggestions button:focus-visible { background: #eff7f2; }
+.mention-suggestions small { color: #65736b; }
 .composer-error { grid-column: 1 / -1; margin: 0 5px 2px; }
 .composer-notice { grid-column: 1 / -1; margin: 0 5px 2px; color: #087b62; font-size: 12px; font-weight: 700; }
 .send-button { display: inline-grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 4px; color: #fff; background: var(--green); transition: background-color .16s ease; }

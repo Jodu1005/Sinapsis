@@ -54,6 +54,18 @@ describe('ConversationCoordinator', () => {
     expect(fixture.runtime.starts[0]?.profile.command).toBe('build-runtime')
   })
 
+  it('routes an Agent display name before its legacy mention handle', async () => {
+    const fixture = await createFixture()
+    const build = fixture.createAgent('clawd', 'build')
+    const review = fixture.createAgent('newton', 'dev')
+    fixture.setIdle(build, '2026-07-25T08:01:00.000Z')
+    fixture.setIdle(review, '2026-07-25T08:00:00.000Z')
+
+    await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('@clawd 请看一下这个报错。'))
+
+    expect(fixture.runtime.starts[0]?.profile.command).toBe('build-runtime')
+  })
+
   it('recognizes an Agent mention directly after Chinese text', async () => {
     const fixture = await createFixture()
     const build = fixture.createAgent('Build', 'build')

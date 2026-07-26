@@ -155,7 +155,7 @@ export class ConversationCoordinator {
   }
 
   private selectAgent(workspace: BootstrapWorkspace, channelId: string, body: string): Agent | undefined {
-    const mentioned = workspace.agents.find((agent) => exactMention(body, agent.mentionName))
+    const mentioned = mentionedAgent(workspace.agents, body)
     if (mentioned) {
       const existing = this.executions.get(conversationKey(channelId, mentioned.id))
       return mentioned.status === 'idle' || existing?.active ? mentioned : undefined
@@ -191,4 +191,11 @@ function conversationKey(channelId: string, agentId: string): string {
 function exactMention(body: string, mention: string): boolean {
   const escaped = mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   return new RegExp(`(^|[^A-Za-z0-9_])@${escaped}(?=$|[^A-Za-z0-9_])`, 'i').test(body)
+}
+
+function mentionedAgent(agents: Agent[], body: string): Agent | undefined {
+  return [...agents]
+    .filter((agent) => exactMention(body, agent.identity))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))[0]
+    ?? agents.find((agent) => exactMention(body, agent.mentionName))
 }

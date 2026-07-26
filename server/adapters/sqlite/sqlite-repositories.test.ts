@@ -170,6 +170,28 @@ describe('SQLite workspace repositories', () => {
     }
   })
 
+  it('releases a busy Agent without a task lease during service recovery', async () => {
+    const { repositories } = await createRepositories()
+    createChannel(repositories)
+    const workspaceId = repositories.getBootstrap().workspaces[0]!.id
+    const agent = repositories.createAgent({
+      workspaceId,
+      identity: 'newton',
+      mentionName: 'dev',
+      runtime: 'pi',
+      capabilityTags: [],
+      maxConcurrentTasks: 1,
+      command: 'pi',
+      args: [],
+      model: '',
+      env: {},
+    })
+    repositories.setAgentStatus(agent.id, 'busy', new Date('2026-07-26T04:00:00.000Z'))
+
+    expect(repositories.recoverOrphanedAgents(new Date('2026-07-26T05:00:00.000Z'))).toBe(1)
+    expect(repositories.getAgent(agent.id)).toMatchObject({ status: 'idle', updatedAt: '2026-07-26T05:00:00.000Z' })
+  })
+
   it('migrates legacy duplicate channel names without deleting channels and then enforces repository-local uniqueness', async () => {
     const { repositories, databasePath } = await createRepositories()
     const channel = createChannel(repositories)

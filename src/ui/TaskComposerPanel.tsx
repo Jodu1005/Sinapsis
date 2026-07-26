@@ -1,7 +1,7 @@
 import { X } from 'lucide-react'
 import { FormEvent, useMemo, useRef, useState } from 'react'
 import type { CreateTaskRequest } from '../api/client'
-import type { AgentView, RepositoryView, TaskView } from '../domain/workspace-view'
+import { distinctAgentsByIdentity, type AgentView, type RepositoryView, type TaskView } from '../domain/workspace-view'
 import { useModalDialog } from './useModalDialog'
 
 export function TaskComposerPanel({ repository, agents, onCreate, onClose }: { repository: RepositoryView; agents: AgentView[]; onCreate(input: CreateTaskRequest): Promise<TaskView>; onClose(): void }) {
@@ -28,8 +28,8 @@ export function TaskComposerPanel({ repository, agents, onCreate, onClose }: { r
       <label htmlFor="task-description">详细描述</label><textarea id="task-description" value={description} onChange={(event) => setDescription(event.target.value)} rows={4} required />
       <label htmlFor="task-acceptance">验收标准</label><textarea id="task-acceptance" value={acceptanceCriteria} onChange={(event) => setAcceptanceCriteria(event.target.value)} rows={3} required />
       <label htmlFor="task-labels">标签</label><input id="task-labels" aria-label="标签" value={labels} onChange={(event) => setLabels(event.target.value)} placeholder="frontend, test" />
-      <label htmlFor="task-agent">指定 Agent</label><select id="task-agent" aria-label="指定 Agent" value={directAgentId} onChange={(event) => setDirectAgentId(event.target.value)}><option value="">让空闲的匹配 Agent 领取</option>{agents.map((agent) => <option value={agent.id} key={agent.id}>@{agent.mentionName} · {agent.identity}</option>)}</select>
-      {directAgent && <p className="assignment-note">@{directAgent.mentionName} 将直接领取此任务</p>}
+      <label htmlFor="task-agent">指定 Agent</label><select id="task-agent" aria-label="指定 Agent" value={directAgentId} onChange={(event) => setDirectAgentId(event.target.value)}><option value="">让空闲的匹配 Agent 领取</option>{distinctAgentsByIdentity(agents).map((agent) => <option value={agent.id} key={agent.id}>@{agent.identity} · {agent.runtime}</option>)}</select>
+      {directAgent && <p className="assignment-note">@{directAgent.identity} 将直接领取此任务</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
       <footer><button type="button" className="secondary-action" onClick={onClose}>取消</button><button type="submit" className="primary-action" disabled={saving || !title.trim() || !description.trim() || !acceptanceCriteria.trim()}>{saving ? '正在创建...' : '创建任务'}</button></footer>
     </form>

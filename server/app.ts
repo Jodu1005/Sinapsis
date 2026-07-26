@@ -234,7 +234,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
 function findMentionedAgent(repositories: WorkspaceRepositories, channelId: string, body: string) {
   for (const workspace of repositories.getBootstrap().workspaces) {
     if (!workspace.repositories.some((repository) => repository.channels.some((channel) => channel.id === channelId))) continue
-    return workspace.agents.find((agent) => exactMention(body, agent.mentionName))
+    return [...workspace.agents]
+      .filter((agent) => exactMention(body, agent.identity))
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))[0]
+      ?? workspace.agents.find((agent) => exactMention(body, agent.mentionName))
   }
   return undefined
 }

@@ -89,6 +89,7 @@ describe('WorkspaceShell', () => {
   beforeEach(() => {
     FakeEventSource.instances = []
     vi.stubGlobal('EventSource', FakeEventSource)
+    window.localStorage.clear()
   })
 
   it('shows workspace creation when no workspace exists', async () => {
@@ -109,6 +110,14 @@ describe('WorkspaceShell', () => {
 
     await userEvent.setup().click(screen.getByRole('button', { name: '# build' }))
     expect(screen.getByText('正在处理频道界面。')).toBeInTheDocument()
+    expect(screen.queryByText('先看一下任务队列。')).not.toBeInTheDocument()
+  })
+
+  it('restores the last selected workspace channel after a page refresh', async () => {
+    window.localStorage.setItem('sinapsis:workspace-selection', JSON.stringify({ workspaceId: 'workspace-1', channelId: 'channel-build' }))
+    render(<WorkspaceShell api={makeApi()} />)
+
+    expect(await screen.findByText('正在处理频道界面。')).toBeInTheDocument()
     expect(screen.queryByText('先看一下任务队列。')).not.toBeInTheDocument()
   })
 
@@ -247,12 +256,11 @@ describe('WorkspaceShell', () => {
     await user.click(screen.getByRole('button', { name: '添加 Agent' }))
     const dialog = screen.getByRole('dialog', { name: '添加 Agent' })
     await user.type(within(dialog).getByLabelText('Agent 名称'), '验证 Agent')
-    await user.type(within(dialog).getByLabelText('提及名'), 'verify')
     await user.type(within(dialog).getByLabelText('能力标签'), 'typescript, test')
     await user.click(within(dialog).getByRole('button', { name: '添加 Agent' }))
 
     expect(api.createAgent).toHaveBeenCalledWith('workspace-1', {
-      identity: '验证 Agent', mention: 'verify', runtime: 'opencode', capabilityTags: ['typescript', 'test'],
+      identity: '验证 Agent', mention: '验证-agent', runtime: 'opencode', capabilityTags: ['typescript', 'test'],
     })
   })
 
@@ -266,13 +274,12 @@ describe('WorkspaceShell', () => {
     const dialog = screen.getByRole('dialog', { name: '添加 Agent' })
 
     await user.type(within(dialog).getByLabelText('Agent 名称'), 'Claude Agent')
-    await user.type(within(dialog).getByLabelText('提及名'), 'claude')
     await user.selectOptions(within(dialog).getByLabelText('Runtime'), 'claude-code')
     await user.type(within(dialog).getByLabelText('能力标签'), 'review')
     await user.click(within(dialog).getByRole('button', { name: '添加 Agent' }))
 
     expect(api.createAgent).toHaveBeenCalledWith('workspace-1', {
-      identity: 'Claude Agent', mention: 'claude', runtime: 'claude-code', capabilityTags: ['review'],
+      identity: 'Claude Agent', mention: 'claude-agent', runtime: 'claude-code', capabilityTags: ['review'],
     })
   })
 

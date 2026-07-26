@@ -102,10 +102,10 @@ describe('AgentService', () => {
     expect(repository.createdAgents[0]).toMatchObject({ mentionName: 'build' })
     await expect(service.createAgent({
       workspaceId: 'workspace-1', identity: 'Second engineer', mention: '@@build', runtime: 'opencode', capabilityTags: [],
-    })).rejects.toThrow('Agent mention must contain only lowercase letters, numbers, hyphens, or underscores.')
+    })).rejects.toThrow('Agent mention must contain only letters, numbers, hyphens, or underscores.')
     await expect(service.createAgent({
       workspaceId: 'workspace-1', identity: 'Third engineer', mention: 'build/name', runtime: 'opencode', capabilityTags: [],
-    })).rejects.toThrow('Agent mention must contain only lowercase letters, numbers, hyphens, or underscores.')
+    })).rejects.toThrow('Agent mention must contain only letters, numbers, hyphens, or underscores.')
   })
 
   it('refreshes an offline Agent back to idle when its persisted runtime is available', async () => {

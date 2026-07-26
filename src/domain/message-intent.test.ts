@@ -3,8 +3,8 @@ import type { AgentView } from './workspace-view'
 import { parseMessageIntent } from './message-intent'
 
 const agents = [
-  { id: 'agent-pi', mentionName: 'newton' },
-  { id: 'agent-opencode', mentionName: 'ada' },
+  { id: 'agent-pi', identity: 'newton', mentionName: 'dev' },
+  { id: 'agent-opencode', identity: 'ada', mentionName: 'frontend' },
 ] as AgentView[]
 
 describe('parseMessageIntent', () => {
@@ -26,6 +26,10 @@ describe('parseMessageIntent', () => {
       body: '修复按钮',
       directAgentId: 'agent-pi',
     })
+  })
+
+  it('keeps legacy handles compatible while preferring Agent names', () => {
+    expect(parseMessageIntent('/task @dev 修复按钮', agents)).toMatchObject({ directAgentId: 'agent-pi' })
   })
 
   it('reports an unknown task-agent mention', () => {

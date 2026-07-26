@@ -93,6 +93,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   getMessage(messageId: string): Message | undefined
   hasAgentMention(workspaceId: string, mentionName: string): boolean
   getIdleAgentIds(): string[]
+  recoverOrphanedAgents(occurredAt: Date): number
   setAgentStatus(agentId: string, status: AgentStatus, occurredAt: Date): Agent
   claimNextTask(agentId: string, occurredAt: Date): TaskClaim | undefined
   renewTaskLease(taskId: string, agentId: string, occurredAt: Date): TaskLease | undefined

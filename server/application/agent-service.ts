@@ -143,8 +143,8 @@ function requiredMention(value: string): string {
   const rawMention = requiredText(value, 'Agent mention')
   const mention = rawMention.startsWith('@') ? rawMention.slice(1) : rawMention
   if (!mention) throw new ValidationError('Agent mention is required.')
-  if (!/^[a-z0-9][a-z0-9_-]*$/i.test(mention)) {
-    throw new ValidationError('Agent mention must contain only lowercase letters, numbers, hyphens, or underscores.')
+  if (!/^[\p{L}\p{N}][\p{L}\p{N}_-]*$/u.test(mention)) {
+    throw new ValidationError('Agent mention must contain only letters, numbers, hyphens, or underscores.')
   }
   return mention.toLowerCase()
 }

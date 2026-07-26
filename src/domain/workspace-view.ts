@@ -100,6 +100,18 @@ export function channelMessages(workspace: WorkspaceView, channelId: string): Ch
   return workspace.recentMessages.filter((message) => message.channelId === channelId)
 }
 
+export function distinctAgentsByIdentity(agents: AgentView[]): AgentView[] {
+  const names = new Set<string>()
+  return [...agents]
+    .sort((left, right) => (right.updatedAt ?? '').localeCompare(left.updatedAt ?? '') || left.id.localeCompare(right.id))
+    .filter((agent) => {
+      const key = agent.identity.toLocaleLowerCase()
+      if (names.has(key)) return false
+      names.add(key)
+      return true
+    })
+}
+
 export function taskStatusLabel(status: TaskStatus): string {
   return {
     queued: '排队中', claimed: '已领取', running: '执行中', waiting_input: '等待输入', in_review: '等待验收',

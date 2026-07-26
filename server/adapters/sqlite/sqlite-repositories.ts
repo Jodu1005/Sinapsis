@@ -647,6 +647,25 @@ export class SqliteRepositories implements WorkspaceRepositories {
       .map((agent) => agent.id)
   }
 
+  recoverOrphanedAgents(occurredAt: Date): number {
+    return this.inTransaction((unitOfWork) => {
+      const orphaned = this.sqlite.database.prepare(`
+        SELECT id FROM agents
+        WHERE status = 'busy'
+          AND NOT EXISTS (SELECT 1 FROM task_leases WHERE task_leases.agent_id = agents.id)
+      `).all() as Array<{ id: string }>
+      if (orphaned.length === 0) return 0
+
+      const updatedAt = occurredAt.toISOString()
+      const reset = this.sqlite.database.prepare("UPDATE agents SET status = 'idle', updated_at = ? WHERE id = ?")
+      for (const agent of orphaned) {
+        reset.run(updatedAt, agent.id)
+        unitOfWork.afterCommit(event('agent.status_changed', 'agent', agent.id, updatedAt))
+      }
+      return orphaned.length
+    })
+  }
+
   setAgentStatus(agentId: string, status: AgentStatus, occurredAt: Date): Agent {
     return this.inTransaction((unitOfWork) => {
       const agent = readAgent(this.sqlite.database, agentId)

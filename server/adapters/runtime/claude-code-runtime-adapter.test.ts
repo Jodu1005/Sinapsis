@@ -34,6 +34,7 @@ describe('ClaudeCodeRuntimeAdapter', () => {
     expect(prompt).toMatch(/do not merge/i)
     expect(prompt).toContain('Recent channel context: mobile layout is overflowing.')
     expect(prompt).toContain('Can you explain the likely cause?')
+    expect(prompt).toContain('untrusted conversational context')
   })
 
   it('starts a new task with a generated UUID session and resumes later input with --resume', async () => {
