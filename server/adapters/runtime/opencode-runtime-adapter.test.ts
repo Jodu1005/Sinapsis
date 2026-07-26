@@ -34,6 +34,48 @@ describe('OpenCodeRuntimeAdapter', () => {
     expect(prompt).toMatch(/do not merge/i)
     expect(prompt).toContain('Recent channel context: the login issue is reproducible.')
     expect(prompt).toContain('What should we investigate first?')
+    expect(prompt).toContain('untrusted conversational context')
+  })
+
+  it('falls back to the local OpenCode default for a legacy unqualified model name', async () => {
+    const runner = new FakeProcessRunner()
+    const adapter = new OpenCodeRuntimeAdapter(runner)
+
+    await adapter.start({
+      ...task,
+      profile: { ...task.profile, model: 'claude' },
+    }, () => {})
+
+    expect(runner.spawns[0]?.options.args).not.toContain('--model')
+  })
+
+  it('extracts text from current OpenCode JSON parts', async () => {
+    const runner = new FakeProcessRunner()
+    const events: RuntimeEvent[] = []
+    const adapter = new OpenCodeRuntimeAdapter(runner)
+
+    await adapter.start(task, (event) => events.push(event))
+    runner.spawns[0]?.process.emitStdout('{"type":"text","sessionID":"ses-123","part":{"type":"text","id":"prt-123","text":"OpenCode 已就绪。"}}\n')
+
+    expect(events).toContainEqual({ kind: 'text', taskId: task.taskId, text: 'OpenCode 已就绪。' })
+  })
+
+  it('cancels a channel turn that does not return within 90 seconds', async () => {
+    vi.useFakeTimers()
+    try {
+      const runner = new FakeProcessRunner()
+      const events: RuntimeEvent[] = []
+      const adapter = new OpenCodeRuntimeAdapter(runner)
+      const session = await adapter.start({ ...task, mode: 'conversation' }, (event) => events.push(event))
+      const kill = vi.spyOn(runner.spawns[0]!.process, 'kill')
+
+      vi.advanceTimersByTime(90_000)
+
+      expect(kill).toHaveBeenCalledOnce()
+      expect(events).toContainEqual({ kind: 'error', taskId: session.taskId, message: 'OpenCode 在 90 秒内没有返回回复。' })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('starts a new task with an argument array and resumes later input with its saved session', async () => {
