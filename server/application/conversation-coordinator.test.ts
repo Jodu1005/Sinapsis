@@ -96,6 +96,21 @@ describe('ConversationCoordinator', () => {
     ])
   })
 
+  it('bounds long channel history before passing it to a runtime', async () => {
+    const fixture = await createFixture()
+    const build = fixture.createAgent('Build', 'build')
+    fixture.setIdle(build, '2026-07-25T08:00:00.000Z')
+    for (let index = 0; index < 12; index += 1) fixture.postHuman(`历史消息-${index} ${'x'.repeat(900)}`)
+    const current = fixture.postHuman('请基于频道上下文回答。')
+
+    await fixture.coordinator.dispatch(fixture.channel.id, current)
+
+    const context = fixture.runtime.starts[0]!.description
+    expect(context).toContain('历史消息-11')
+    expect(context).not.toContain('历史消息-0')
+    expect(context.length).toBeLessThan(5_000)
+  })
+
   it('persists one compact Agent reply on settle and excludes raw runtime artifacts from the channel', async () => {
     const fixture = await createFixture()
     const build = fixture.createAgent('Build', 'build')

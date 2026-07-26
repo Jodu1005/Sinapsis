@@ -178,10 +178,15 @@ export class ConversationCoordinator {
   private recentChannelContext(workspace: BootstrapWorkspace, channelId: string, currentMessageId: string): string {
     const history = workspace.recentMessages
       .filter((message) => message.channelId === channelId && message.id !== currentMessageId)
-      .slice(-20)
-      .map((message) => `${message.authorName}: ${message.body}`)
+      .slice(-8)
+      .map((message) => `${message.authorName}: ${compactContextBody(message.body)}`)
     return history.join('\n') || '（频道尚无此前消息。）'
   }
+}
+
+function compactContextBody(body: string): string {
+  const normalized = body.replace(/\s+/g, ' ').trim()
+  return normalized.length > 600 ? `${normalized.slice(0, 600)}...` : normalized
 }
 
 function conversationKey(channelId: string, agentId: string): string {
