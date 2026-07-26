@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 const refreshEvents = [
   'workspace.changed', 'repository.changed', 'channel.changed',
   'message.created', 'message.updated', 'message.deleted',
-  'task.created', 'task.status_changed', 'task.review_recorded', 'agent.status_changed',
+  'task.created', 'task.status_changed', 'task.review_recorded', 'agent.status_changed', 'agent.configuration_changed',
   'task.artifact_created', 'runtime.text', 'runtime.tool_start', 'runtime.tool_end', 'runtime.queue', 'task.session_updated',
 ]
 const runtimeEvents = new Set(['task.artifact_created', 'runtime.text', 'runtime.tool_start', 'runtime.tool_end', 'runtime.queue', 'task.session_updated'])

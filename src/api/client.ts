@@ -5,6 +5,7 @@ export interface WorkspaceApi {
   createWorkspace(input: { name: string }): Promise<WorkspaceView>
   addRepository(workspaceId: string, input: { directory: string; name?: string }): Promise<RepositoryView>
   createAgent(workspaceId: string, input: CreateAgentRequest): Promise<AgentView>
+  updateAgentResponsibilities(agentId: string, responsibilities: string[]): Promise<AgentView>
   refreshAgentRuntime(agentId: string): Promise<void>
   postMessage(channelId: string, input: { body: string; taskId?: string; threadRootMessageId?: string }): Promise<ChannelMessage>
   createChannel(repositoryId: string, input: { name: string }): Promise<ChannelView>
@@ -30,6 +31,7 @@ export interface CreateAgentRequest {
   mention: string
   runtime: 'opencode' | 'pi' | 'claude-code'
   capabilityTags: string[]
+  responsibilities?: string[]
 }
 
 export class ApiClient implements WorkspaceApi {
@@ -42,6 +44,9 @@ export class ApiClient implements WorkspaceApi {
   }
   async createAgent(workspaceId: string, input: CreateAgentRequest): Promise<AgentView> {
     return this.request(`/api/workspaces/${workspaceId}/agents`, { method: 'POST', body: JSON.stringify(input) })
+  }
+  async updateAgentResponsibilities(agentId: string, responsibilities: string[]): Promise<AgentView> {
+    return this.request(`/api/agents/${agentId}/responsibilities`, { method: 'PUT', body: JSON.stringify({ responsibilities }) })
   }
   async refreshAgentRuntime(agentId: string): Promise<void> {
     await this.request(`/api/agents/${agentId}/runtime/refresh`, { method: 'POST' })

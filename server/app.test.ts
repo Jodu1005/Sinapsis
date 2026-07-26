@@ -273,4 +273,24 @@ describe('local service API', () => {
     })
     expect(repositories.getBootstrap().workspaces[0].agents[0].status).toBe('idle')
   })
+
+  it('persists editable Agent responsibilities without exposing runtime secrets', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const agent = repositories.createAgent({
+      workspaceId: workspace.id, identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: ['typescript'],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: { API_TOKEN: 'secret' },
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/agents/${agent.id}/responsibilities`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ responsibilities: ['前端界面与交互', '组件测试'] }),
+    })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ id: agent.id, responsibilities: ['前端界面与交互', '组件测试'], env: ['API_TOKEN'] })
+    expect(repositories.getAgent(agent.id)?.responsibilities).toEqual(['前端界面与交互', '组件测试'])
+  })
 })

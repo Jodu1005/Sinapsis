@@ -56,6 +56,7 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     addRepository: vi.fn(),
     createAgent: vi.fn(),
     refreshAgentRuntime: vi.fn(),
+    updateAgentResponsibilities: vi.fn().mockResolvedValue(snapshot.workspaces[0]!.agents[0]!),
     postMessage: vi.fn().mockResolvedValue(undefined),
     createChannel: vi.fn(),
     createTask: vi.fn(),
@@ -313,7 +314,7 @@ describe('WorkspaceShell', () => {
     await user.click(within(dialog).getByRole('button', { name: '添加 Agent' }))
 
     expect(api.createAgent).toHaveBeenCalledWith('workspace-1', {
-      identity: '验证 Agent', mention: '验证-agent', runtime: 'opencode', capabilityTags: ['typescript', 'test'],
+      identity: '验证 Agent', mention: '验证-agent', runtime: 'opencode', capabilityTags: ['typescript', 'test'], responsibilities: [],
     })
   })
 
@@ -332,7 +333,7 @@ describe('WorkspaceShell', () => {
     await user.click(within(dialog).getByRole('button', { name: '添加 Agent' }))
 
     expect(api.createAgent).toHaveBeenCalledWith('workspace-1', {
-      identity: 'Claude Agent', mention: 'claude-agent', runtime: 'claude-code', capabilityTags: ['review'],
+      identity: 'Claude Agent', mention: 'claude-agent', runtime: 'claude-code', capabilityTags: ['review'], responsibilities: [],
     })
   })
 

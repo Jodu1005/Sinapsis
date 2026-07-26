@@ -155,6 +155,7 @@ interface AgentRow {
   runtime: 'opencode' | 'pi' | 'claude-code'
   status: Agent['status']
   capability_tags_json: string
+  responsibilities_json: string
   max_concurrent_tasks: 1
   command: string
   args_json: string
@@ -241,6 +242,7 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
       runtime: input.runtime,
       status: 'offline',
       capabilityTags: input.capabilityTags,
+      responsibilities: input.responsibilities ?? [],
       maxConcurrentTasks: input.maxConcurrentTasks,
       command: requireText(input.command, 'Runtime command'),
       args: input.args,
@@ -251,18 +253,29 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     }
     this.database.prepare(`
       INSERT INTO agents (
-        id, workspace_id, identity, mention_name, runtime, status, capability_tags_json,
+        id, workspace_id, identity, mention_name, runtime, status, capability_tags_json, responsibilities_json,
         max_concurrent_tasks, command, args_json, model, env_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       agent.id, agent.workspaceId, agent.identity, agent.mentionName, agent.runtime, agent.status,
-      JSON.stringify(agent.capabilityTags), agent.maxConcurrentTasks, agent.command, JSON.stringify(agent.args),
+      JSON.stringify(agent.capabilityTags), JSON.stringify(agent.responsibilities), agent.maxConcurrentTasks, agent.command, JSON.stringify(agent.args),
       agent.model, JSON.stringify(agent.env), agent.createdAt, agent.updatedAt,
     )
     const channels = this.database.prepare('SELECT id FROM channels WHERE archived_at IS NULL').all() as Array<{ id: string }>
     const subscribe = this.database.prepare('INSERT OR IGNORE INTO channel_agent_subscriptions (channel_id, agent_id, created_at) VALUES (?, ?, ?)')
     for (const channel of channels) subscribe.run(channel.id, agent.id, createdAt)
     return agent
+  }
+
+  updateAgentResponsibilities(agentId: string, responsibilities: string[]): Agent {
+    const agent = readAgent(this.database, agentId)
+    if (!agent) throw new Error(`Agent ${agentId} does not exist.`)
+    const updatedAt = now()
+    this.database.prepare('UPDATE agents SET responsibilities_json = ?, updated_at = ? WHERE id = ?').run(
+      JSON.stringify(responsibilities), updatedAt, agentId,
+    )
+    this.afterCommit(event('agent.configuration_changed', 'agent', agentId, updatedAt))
+    return { ...agent, responsibilities, updatedAt }
   }
 
   createTask(input: CreateTaskInput): Task {
@@ -524,6 +537,10 @@ export class SqliteRepositories implements WorkspaceRepositories {
 
   createAgent(input: CreateAgentInput): Agent {
     return this.inTransaction((unitOfWork) => unitOfWork.createAgent(input))
+  }
+
+  updateAgentResponsibilities(agentId: string, responsibilities: string[]): Agent {
+    return this.inTransaction((unitOfWork) => unitOfWork.updateAgentResponsibilities(agentId, responsibilities))
   }
 
   createTask(input: CreateTaskInput): Task {
@@ -909,7 +926,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
           JOIN channels ON channels.id = messages.channel_id
           JOIN repositories ON repositories.id = channels.repository_id
           WHERE repositories.workspace_id = ? AND messages.deleted_at IS NULL
-          ORDER BY messages.created_at DESC LIMIT 50
+          ORDER BY messages.created_at DESC, messages.rowid DESC LIMIT 50
         `).all(workspace.id) as unknown as MessageRow[])
           .map(mapMessage)
           .reverse()
@@ -1071,6 +1088,7 @@ function mapAgent(row: AgentRow): Agent {
     runtime: row.runtime,
     status: row.status,
     capabilityTags: JSON.parse(row.capability_tags_json) as string[],
+    responsibilities: JSON.parse(row.responsibilities_json ?? '[]') as string[],
     maxConcurrentTasks: row.max_concurrent_tasks,
     command: row.command,
     args: JSON.parse(row.args_json) as string[],

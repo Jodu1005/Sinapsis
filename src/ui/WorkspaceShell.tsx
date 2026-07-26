@@ -77,6 +77,10 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     const allAgents = snapshot ? snapshotAgents(snapshot) : []
     return !selection.channel?.subscriberAgentIds ? allAgents : allAgents.filter((agent) => selection.channel!.subscriberAgentIds!.includes(agent.id))
   }, [snapshot, selection.channel])
+  const typingAgents = useMemo(() => {
+    const typingIds = selection.channel ? snapshot?.typingAgentIdsByChannel?.[selection.channel.id] ?? [] : []
+    return agents.filter((agent) => typingIds.includes(agent.id))
+  }, [agents, selection.channel, snapshot])
   const threadRoot = useMemo(() => selectedThreadRootId ? messages.find((message) => message.id === selectedThreadRootId && !message.threadRootMessageId) : undefined, [messages, selectedThreadRootId])
   const threadReplies = useMemo(() => threadRoot ? messages.filter((message) => message.threadRootMessageId === threadRoot.id) : [], [messages, threadRoot])
 
@@ -201,11 +205,17 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
       setRefreshingAgentId(null)
     }
   }
+  const updateAgentResponsibilities = async (responsibilities: string[]) => {
+    if (!selectedAgent) return
+    const updated = await api.updateAgentResponsibilities(selectedAgent.id, responsibilities)
+    setSelectedAgent(updated)
+    await refresh()
+  }
   return <div className="workspace-shell">
     <RepositorySidebar workspace={workspace} workspaces={snapshot.workspaces} selectedChannelId={selection.channel.id} selectedTaskId={selectedTask?.id ?? null} onSelectWorkspace={selectWorkspace} onSelectChannel={selectChannel} onSelectTask={selectTask} onCreateTask={setComposerRepositoryId} onCreateChannel={setCreatingChannelRepositoryId} onCreateWorkspace={() => setCreatingWorkspace(true)} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
     <main className="conversation-panel">
       <header className="channel-header"><NavigationToggle onClick={() => setNavOpen(true)} /><div className="channel-heading"><h1># {selection.channel.name}</h1><p>全局频道</p></div><div className="header-actions"><span className="connection-state" data-reconnecting={reconnecting}>{reconnecting ? '正在重新连接' : '已连接'}</span><button type="button" className="icon-button" aria-label="打开上下文" data-tooltip="打开上下文" onClick={() => setContextOpen(true)}><PanelRightOpen size={18} /></button></div></header>
-      <ChannelTimeline messages={messages} onOpenThread={(message) => { setSelectedThreadRootId(message.id); setContextOpen(true) }} />
+      <ChannelTimeline messages={messages} typingAgents={typingAgents} onOpenThread={(message) => { setSelectedThreadRootId(message.id); setContextOpen(true) }} />
       <MessageComposer channelName={selection.channel.name} agents={agents} onSend={sendMessage} />
     </main>
     <aside className="context-panel" aria-label="任务与上下文" aria-hidden={narrowContext && !contextOpen || undefined} inert={narrowContext && !contextOpen} data-mobile-open={contextOpen}>
@@ -219,7 +229,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     {creatingWorkspace && <WorkspaceCreateDialog onCreate={createWorkspace} onClose={() => setCreatingWorkspace(false)} />}
     {creatingChannelRepositoryId && <ChannelCreateDialog onCreate={createChannel} onClose={() => setCreatingChannelRepositoryId(null)} />}
     {creatingAgent && <AgentCreateDialog onCreate={createAgent} onClose={() => setCreatingAgent(false)} />}
-    {selectedAgent && <AgentConfigDialog agent={selectedAgent} refreshingRuntime={refreshingAgentId === selectedAgent.id} onRefreshRuntime={refreshAgentRuntime} onClose={() => setSelectedAgent(null)} />}
+    {selectedAgent && <AgentConfigDialog agent={selectedAgent} refreshingRuntime={refreshingAgentId === selectedAgent.id} onRefreshRuntime={refreshAgentRuntime} onUpdateResponsibilities={updateAgentResponsibilities} onClose={() => setSelectedAgent(null)} />}
   </div>
 }
 

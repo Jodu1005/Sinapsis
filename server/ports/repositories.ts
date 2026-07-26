@@ -48,6 +48,7 @@ export interface WorkspaceUnitOfWork {
   createRepository(input: CreateRepositoryInput): Repository
   createChannel(input: CreateChannelInput): Channel
   createAgent(input: CreateAgentInput): Agent
+  updateAgentResponsibilities(agentId: string, responsibilities: string[]): Agent
   createTask(input: CreateTaskInput): Task
   createTaskInput(taskId: string, body: string): TaskInput
   createMessage(input: CreateMessageInput): Message
@@ -70,6 +71,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   createRepository(input: CreateRepositoryInput): Repository
   createChannel(input: CreateChannelInput): Channel
   createAgent(input: CreateAgentInput): Agent
+  updateAgentResponsibilities(agentId: string, responsibilities: string[]): Agent
   createTask(input: CreateTaskInput): Task
   createTaskInput(taskId: string, body: string): TaskInput
   createMessage(input: CreateMessageInput): Message

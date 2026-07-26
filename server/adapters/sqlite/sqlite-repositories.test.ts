@@ -189,7 +189,7 @@ describe('SQLite workspace repositories', () => {
       const response = await fetch(`${server.baseUrl}/api/bootstrap`)
 
       expect(response.status).toBe(200)
-      await expect(response.json()).resolves.toEqual({ workspaces: [] })
+      await expect(response.json()).resolves.toEqual({ workspaces: [], typingAgentIdsByChannel: {} })
     } finally {
       await server.close()
       app.locals.closeDatabase()

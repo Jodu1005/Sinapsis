@@ -28,7 +28,7 @@ export interface CreateAppOptions {
   gitClient?: GitClient
   runtimeAvailabilityDetector?: RuntimeAvailabilityDetector
   executionCoordinator?: TaskExecutionCoordinator
-  conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'>
+  conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'> & Partial<Pick<ConversationCoordinator, 'getTypingAgentIds'>>
   scheduler?: TaskScheduler
   reviewService?: TaskReviewService
 }
@@ -73,7 +73,11 @@ export function createApp(options: CreateAppOptions = {}): Express {
   })
 
   app.get('/api/bootstrap', (_request, response) => {
-    response.json(sanitizeBootstrap(repositories.getBootstrap()))
+    const snapshot = repositories.getBootstrap()
+    const typingAgentIdsByChannel = Object.fromEntries(snapshot.workspaces
+      .flatMap((workspace) => workspace.repositories.flatMap((repository) => repository.channels))
+      .map((channel) => [channel.id, conversationCoordinator.getTypingAgentIds?.(channel.id) ?? []]))
+    response.json(sanitizeBootstrap(snapshot, typingAgentIdsByChannel))
   })
 
   app.post('/api/workspaces', asyncRoute((request, response) => {
@@ -116,6 +120,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
       mention: requiredString(body, 'mention'),
       runtime: runtime as (typeof runtimeKinds)[number],
       capabilityTags: requiredStringArray(body, 'capabilityTags'),
+      responsibilities: body.responsibilities === undefined ? [] : requiredStringArray(body, 'responsibilities'),
       runtimeOverrides: runtimeOverrides(body),
     })
     response.status(201).json({
@@ -126,6 +131,16 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   app.post('/api/agents/:agentId/refresh-runtime', asyncRoute(async (request, response) => {
     response.json(sanitizeAgent(await agentService.refreshAvailability(requiredParam(request.params.agentId, 'agentId'))))
+  }))
+
+  app.put('/api/agents/:agentId/responsibilities', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['responsibilities'])
+    const agent = repositories.updateAgentResponsibilities(
+      requiredParam(request.params.agentId, 'agentId'),
+      requiredStringArray(body, 'responsibilities'),
+    )
+    response.json(sanitizeAgent(agent))
   }))
 
   app.post('/api/repositories/:repositoryId/tasks', asyncRoute((request, response) => {
@@ -392,9 +407,10 @@ function requiredParam(value: unknown, name: string): string {
   return value
 }
 
-function sanitizeBootstrap(snapshot: ReturnType<WorkspaceRepositories['getBootstrap']>) {
+function sanitizeBootstrap(snapshot: ReturnType<WorkspaceRepositories['getBootstrap']>, typingAgentIdsByChannel: Record<string, string[]>) {
   return {
     ...snapshot,
+    typingAgentIdsByChannel,
     workspaces: snapshot.workspaces.map((workspace) => ({
       ...workspace,
       agents: workspace.agents.map(sanitizeAgent),

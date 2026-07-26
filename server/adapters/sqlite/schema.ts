@@ -219,6 +219,14 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(10, new Date().toISOString())
     }
 
+    const eleventhMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 11').get()
+    if (!eleventhMigration) {
+      if (!hasColumn(database, 'agents', 'responsibilities_json')) {
+        database.exec("ALTER TABLE agents ADD COLUMN responsibilities_json TEXT NOT NULL DEFAULT '[]'")
+      }
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(11, new Date().toISOString())
+    }
+
     database.exec('COMMIT')
   } catch (error) {
     database.exec('ROLLBACK')

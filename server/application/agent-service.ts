@@ -20,6 +20,7 @@ export interface AgentWorkspaceReader {
     mentionName: string
     runtime: RuntimeKind
     capabilityTags: string[]
+    responsibilities?: string[]
     maxConcurrentTasks: 1
     command: string
     args: string[]
@@ -36,6 +37,7 @@ export interface AgentConfiguration {
   mention: string
   runtime: RuntimeKind
   capabilityTags: string[]
+  responsibilities: string[]
   maxConcurrentTasks: 1
   profile: RuntimeProfile
   availability: RuntimeAvailability
@@ -48,6 +50,7 @@ export interface CreateAgentInput {
   mention: string
   runtime: RuntimeKind
   capabilityTags: string[]
+  responsibilities?: string[]
   runtimeOverrides?: RuntimeProfileOverrides
 }
 
@@ -79,6 +82,7 @@ export class AgentService {
         mentionName: mention,
         runtime: input.runtime,
         capabilityTags: input.capabilityTags.map((tag) => requiredText(tag, 'Capability tag')),
+        responsibilities: (input.responsibilities ?? []).map((responsibility) => requiredText(responsibility, 'Agent responsibility')),
         maxConcurrentTasks: 1,
         command: profile.command,
         args: profile.args,
@@ -101,6 +105,7 @@ export class AgentService {
       mention,
       runtime: input.runtime,
       capabilityTags: input.capabilityTags.map((tag) => requiredText(tag, 'Capability tag')),
+      responsibilities: (input.responsibilities ?? []).map((responsibility) => requiredText(responsibility, 'Agent responsibility')),
       maxConcurrentTasks: 1,
       profile,
       availability,

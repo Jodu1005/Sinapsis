@@ -52,7 +52,7 @@ export class ConversationCoordinator {
     const agents = snapshot.workspaces.flatMap((workspace) => workspace.agents)
       .filter((agent) => !context.channel.subscriberAgentIds || context.channel.subscriberAgentIds.includes(agent.id))
     const agent = this.selectAgent(agents, channelId, threadRootMessageId, message.body)
-    if (!agent) throw new DomainError('No idle Agent is available for this channel.')
+    if (!agent) return
 
     const agentContext = this.requireAgentContext(snapshot.workspaces, agent.id)
     const key = conversationKey(channelId, agent.id, threadRootMessageId)
@@ -87,7 +87,7 @@ export class ConversationCoordinator {
         taskId: execution.runtimeTaskId,
         mode: 'conversation',
         title: `频道 #${context.channel.name} 对话`,
-        description: this.recentConversationContext(context.workspace, channelId, message.id, threadRootMessageId),
+        description: `${this.recentConversationContext(context.workspace, channelId, message.id, threadRootMessageId)}\n\n当前 Agent 职责：${agent.responsibilities?.join('；') || '未设置（仅处理被直接提及的消息）'}。`,
         acceptanceCriteria: '在频道中给出简洁、清晰的回复。',
         initialMessage: message.body,
         worktreePath: agentContext.repository.path,
@@ -103,6 +103,12 @@ export class ConversationCoordinator {
     } catch (error) {
       this.fail(execution, error instanceof Error ? error.message : 'Runtime 启动失败')
     }
+  }
+
+  getTypingAgentIds(channelId: string): string[] {
+    return [...this.executions.values()]
+      .filter((execution) => execution.channelId === channelId && execution.active)
+      .map((execution) => execution.agent.id)
   }
 
   private sendToExistingSession(execution: ConversationExecution, body: string): void {
@@ -170,7 +176,10 @@ export class ConversationCoordinator {
     }
     return agents
       .filter((agent) => agent.status === 'idle')
-      .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id))[0]
+      .map((agent) => ({ agent, score: responsibilityScore(agent, body) }))
+      .filter((candidate) => candidate.score > 0)
+      .sort((left, right) => right.score - left.score || left.agent.updatedAt.localeCompare(right.agent.updatedAt) || left.agent.id.localeCompare(right.agent.id))[0]
+      ?.agent
   }
 
   private requireChannelContext(workspaces: BootstrapWorkspace[], channelId: string): ChannelContext {
@@ -221,4 +230,30 @@ function mentionedAgent(agents: Agent[], body: string): Agent | undefined {
     .filter((agent) => exactMention(body, agent.identity))
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))[0]
     ?? agents.find((agent) => exactMention(body, agent.mentionName))
+}
+
+function responsibilityScore(agent: Agent, body: string): number {
+  const message = body.toLocaleLowerCase()
+  const descriptors = [...(agent.responsibilities ?? []), ...agent.capabilityTags].map((value) => value.trim()).filter(Boolean)
+  return descriptors.reduce((score, descriptor) => {
+    const normalized = descriptor.toLocaleLowerCase()
+    if (normalized === '通用回复' || normalized === 'general') return score + 1
+    if (message.includes(normalized)) return score + 12
+    const cjkMatches = intersectionSize(cjkBigrams(normalized), cjkBigrams(message))
+    const wordMatches = intersectionSize(words(normalized), words(message))
+    return score + (cjkMatches * 3) + wordMatches
+  }, 0)
+}
+
+function cjkBigrams(value: string): Set<string> {
+  const characters = [...value].filter((character) => /\p{Script=Han}/u.test(character))
+  return new Set(characters.slice(1).map((character, index) => `${characters[index]}${character}`))
+}
+
+function words(value: string): Set<string> {
+  return new Set(value.match(/[a-z0-9][a-z0-9_-]{1,}/gi) ?? [])
+}
+
+function intersectionSize(left: Set<string>, right: Set<string>): number {
+  return [...left].filter((value) => right.has(value)).length
 }

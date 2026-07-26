@@ -22,23 +22,33 @@ describe('ConversationCoordinator', () => {
     database = undefined
   })
 
-  it('selects the earliest idle Agent in the channel workspace and starts a read-only conversation at the repository root', async () => {
+  it('selects the Agent whose responsibility matches an unmentioned channel message', async () => {
     const fixture = await createFixture()
-    const build = fixture.createAgent('Build', 'build')
-    const review = fixture.createAgent('Review', 'review')
+    const build = fixture.createAgent('Build', 'build', ['构建与发布'])
+    const review = fixture.createAgent('Review', 'review', ['前端界面与交互'])
     fixture.setIdle(build, '2026-07-25T08:01:00.000Z')
     fixture.setIdle(review, '2026-07-25T08:00:00.000Z')
 
-    await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('请帮我分析这个问题。'))
+    await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('请调整这个界面的交互。'))
 
     expect(fixture.runtime.starts).toHaveLength(1)
     expect(fixture.runtime.starts[0]).toMatchObject({
       mode: 'conversation',
       title: '频道 #general 对话',
-      initialMessage: '请帮我分析这个问题。',
+      initialMessage: '请调整这个界面的交互。',
       worktreePath: fixture.repository.path,
       profile: expect.objectContaining({ runtime: 'opencode', command: 'review-runtime' }),
     })
+  })
+
+  it('does not assign an unmentioned message when no idle Agent responsibility matches it', async () => {
+    const fixture = await createFixture()
+    const build = fixture.createAgent('Build', 'build', ['构建与发布'])
+    fixture.setIdle(build, '2026-07-25T08:00:00.000Z')
+
+    await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('周末去哪里旅行比较好？'))
+
+    expect(fixture.runtime.starts).toHaveLength(0)
   })
 
   it('gives an exact @mention precedence over another earlier idle Agent', async () => {
@@ -107,6 +117,18 @@ describe('ConversationCoordinator', () => {
     expect(fixture.runtime.inputs).toEqual([
       expect.objectContaining({ input: '第二条消息。' }),
     ])
+  })
+
+  it('exposes a typing Agent only while it is preparing a channel reply', async () => {
+    const fixture = await createFixture()
+    const build = fixture.createAgent('Build', 'build')
+    fixture.setIdle(build, '2026-07-25T08:00:00.000Z')
+
+    await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('请检查这个问题。'))
+    expect(fixture.coordinator.getTypingAgentIds(fixture.channel.id)).toEqual([build.id])
+
+    fixture.runtime.emit(fixture.runtime.starts[0]!.taskId, { kind: 'settled' })
+    expect(fixture.coordinator.getTypingAgentIds(fixture.channel.id)).toEqual([])
   })
 
   it('keeps an Agent conversation and reply inside the triggering Thread', async () => {
@@ -215,12 +237,13 @@ describe('ConversationCoordinator', () => {
       messages,
     })
 
-    const createAgent = (identity: string, mentionName: string): Agent => repositories.createAgent({
+    const createAgent = (identity: string, mentionName: string, responsibilities: string[] = ['通用回复']): Agent => repositories.createAgent({
       workspaceId: workspace.id,
       identity,
       mentionName,
       runtime: 'opencode',
       capabilityTags: [],
+      responsibilities,
       maxConcurrentTasks: 1,
       command: `${mentionName}-runtime`,
       args: [],
@@ -243,6 +266,7 @@ describe('ConversationCoordinator', () => {
         mentionName,
         runtime: 'opencode',
         capabilityTags: [],
+        responsibilities: ['发布'],
         maxConcurrentTasks: 1,
         command: `${mentionName}-runtime`,
         args: [],

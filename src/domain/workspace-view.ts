@@ -1,7 +1,7 @@
 export type AgentStatus = 'offline' | 'idle' | 'busy' | 'error'
 export type TaskStatus = 'queued' | 'claimed' | 'running' | 'waiting_input' | 'in_review' | 'accepted' | 'returned' | 'needs_human' | 'merged' | 'cancelled'
 
-export interface WorkspaceSnapshot { workspaces: WorkspaceView[] }
+export interface WorkspaceSnapshot { workspaces: WorkspaceView[]; typingAgentIdsByChannel?: Record<string, string[]> }
 
 export interface WorkspaceView {
   id: string
@@ -36,6 +36,7 @@ export interface AgentView {
   runtime: 'opencode' | 'pi' | 'claude-code'
   status: AgentStatus
   capabilityTags: string[]
+  responsibilities?: string[]
   maxConcurrentTasks: 1
   command: string
   args: string[]

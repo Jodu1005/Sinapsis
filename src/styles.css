@@ -108,6 +108,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .message-copy p { margin: 2px 0 0; color: #334139; overflow-wrap: anywhere; }
 .message-thread-button { display: inline-flex; align-items: center; gap: 4px; margin: 6px 0 0; padding: 2px 0; border: 0; color: #087b62; background: transparent; font-size: 11px; font-weight: 700; }
 .message-thread-button:hover { color: #05664f; text-decoration: underline; }
+.typing-indicator { display: flex; align-items: center; gap: 7px; margin: 8px 0 0 42px; color: #087b62; font-size: 12px; font-weight: 700; }
 .message-human { grid-template-columns: minmax(0, 1fr) 32px; }
 .message-human .message-avatar { grid-column: 2; color: #e0f4ea; background: #087b62; }
 .message-human .message-copy { grid-column: 1; grid-row: 1; text-align: right; }
@@ -231,12 +232,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .agent-config-dialog dl { display: grid; gap: 11px; margin: 0; padding: 18px; }
 .agent-create-form { display: grid; gap: 7px; padding: 16px 18px 18px; }
 .agent-create-form label { margin-top: 4px; color: #405048; font-size: 12px; font-weight: 700; }
-.agent-create-form input, .agent-create-form select { width: 100%; border: 1px solid #c9d3cd; border-radius: 4px; padding: 7px 9px; color: var(--ink); background: #fff; }
+.agent-create-form input, .agent-create-form select, .agent-create-form textarea, .agent-responsibility-form textarea { width: 100%; border: 1px solid #c9d3cd; border-radius: 4px; padding: 7px 9px; color: var(--ink); background: #fff; }
+.agent-create-form textarea, .agent-responsibility-form textarea { min-height: 72px; resize: vertical; font: inherit; }
 .agent-create-form footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .agent-create-form .primary-action { min-width: 92px; margin: 0; }
 .agent-config-dialog dl div { display: grid; gap: 2px; }
 .agent-config-dialog dt { color: #718078; font-size: 11px; }
 .agent-config-dialog dd { margin: 0; color: #29362f; overflow-wrap: anywhere; }
+.agent-responsibility-form { display: grid; gap: 7px; padding: 0 18px 18px; }
+.agent-responsibility-form label { color: #405048; font-size: 12px; font-weight: 700; }
+.agent-responsibility-form p { margin: 0; color: var(--muted); font-size: 12px; }
+.agent-responsibility-form .primary-action { justify-self: end; margin: 2px 0 0; }
 .agent-config-dialog code { padding: 2px 4px; border-radius: 3px; background: #edf1ee; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .agent-config-dialog .assignment-note { margin: -4px 18px 18px; }
 

@@ -20,6 +20,7 @@ export interface Agent {
   runtime: 'opencode' | 'pi' | 'claude-code'
   status: AgentStatus
   capabilityTags: string[]
+  responsibilities?: string[]
   maxConcurrentTasks: 1
   command: string
   args: string[]
@@ -35,6 +36,7 @@ export interface CreateAgentInput {
   mentionName: string
   runtime: Agent['runtime']
   capabilityTags: string[]
+  responsibilities?: string[]
   maxConcurrentTasks: 1
   command: string
   args: string[]
