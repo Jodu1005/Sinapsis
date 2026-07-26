@@ -38,4 +38,17 @@ describe('MessageComposer', () => {
     await user.keyboard('{Enter}')
     await waitFor(() => expect(onSend).toHaveBeenCalledWith('第一行\n第二行'))
   })
+
+  it('selects an Agent with arrow keys and Enter before sending a message', async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn().mockResolvedValue(undefined)
+    render(<MessageComposer channelName="general" agents={agents} onSend={onSend} />)
+
+    const composer = screen.getByRole('textbox', { name: '发送消息' })
+    await user.type(composer, '请看一下@ne')
+    await user.keyboard('{ArrowDown}{Enter}')
+
+    expect(composer).toHaveValue('请看一下@newton ')
+    expect(onSend).not.toHaveBeenCalled()
+  })
 })
