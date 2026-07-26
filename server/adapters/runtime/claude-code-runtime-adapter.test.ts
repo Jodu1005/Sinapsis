@@ -102,6 +102,29 @@ describe('ClaudeCodeRuntimeAdapter', () => {
     ]))
   })
 
+  it('publishes only the final result for a channel conversation', async () => {
+    const runner = new FakeProcessRunner()
+    const events: RuntimeEvent[] = []
+    const adapter = new ClaudeCodeRuntimeAdapter(runner)
+
+    await adapter.start({
+      ...task,
+      mode: 'conversation',
+      initialMessage: '土耳其的首都是哪里？',
+    }, (event) => events.push(event))
+    const process = runner.spawns[0]?.process
+
+    process?.emitStdout('{"type":"assistant","message":{"content":[{"type":"text","text":"让我先查一下。"},{"type":"tool_use","id":"toolu_1","name":"Read"}]}}\n')
+    process?.emitStdout('{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","name":"Read","content":"长篇工具输出"}]}}\n')
+    process?.emitStdout('{"type":"result","subtype":"success","result":"土耳其的首都是安卡拉。"}\n')
+
+    expect(events.filter((event) => event.kind === 'text')).toEqual([
+      { kind: 'text', taskId: task.taskId, text: '土耳其的首都是安卡拉。' },
+    ])
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'tool_start', toolName: 'Read' }))
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'tool_end', toolName: 'Read' }))
+  })
+
   it('emits settled exactly once after a successful final run', async () => {
     const runner = new FakeProcessRunner()
     const events: RuntimeEvent[] = []
