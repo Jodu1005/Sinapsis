@@ -45,15 +45,16 @@ describe('ClaudeCodeRuntimeAdapter', () => {
     const firstSpawn = runner.spawns[0]
 
     expect(firstSpawn?.options).toMatchObject({ command: 'claude-bin', cwd: '/tmp/task-claude' })
-    expect(firstSpawn?.options.args.slice(0, 6)).toEqual([
+    expect(firstSpawn?.options.args.slice(0, 7)).toEqual([
       '-p',
       '--output-format',
       'stream-json',
+      '--verbose',
       '--permission-mode',
       'acceptEdits',
       '--session-id',
     ])
-    expect(firstSpawn?.options.args[6]).toMatch(UUID_PATTERN)
+    expect(firstSpawn?.options.args[7]).toMatch(UUID_PATTERN)
     expect(firstSpawn?.options.args.join(' ')).toContain('Implement Claude adapter')
     expect(firstSpawn?.options.args.join(' ')).toContain(task.description)
     expect(session.sessionId).toMatch(UUID_PATTERN)
@@ -70,6 +71,7 @@ describe('ClaudeCodeRuntimeAdapter', () => {
         '-p',
         '--output-format',
         'stream-json',
+        '--verbose',
         '--permission-mode',
         'acceptEdits',
         '--resume',
