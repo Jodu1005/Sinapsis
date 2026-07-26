@@ -25,6 +25,8 @@ export function RepositorySidebar({ workspace, workspaces, selectedChannelId, se
   const channels = workspace.repositories.flatMap((repository) => repository.channels)
   const taskRepository = workspace.repositories[0]
   return <nav className="repository-sidebar" aria-label="工作空间" aria-hidden={mobileHidden || undefined} inert={mobileHidden} data-mobile-open={mobileOpen}>
+    <div className="sidebar-channel-heading"><span>频道</span>{taskRepository && <button type="button" className="icon-button channel-create" aria-label="添加频道" data-tooltip="添加频道" onClick={() => onCreateChannel(taskRepository.id)}><Plus size={15} /></button>}</div>
+    <div className="channel-list">{channels.map((channel) => <button key={channel.id} type="button" className="channel-button" aria-label={`# ${channel.name}`} aria-current={selectedChannelId === channel.id ? 'page' : undefined} onClick={() => onSelectChannel(channel.id)}><Hash size={15} /><span>{channel.name}</span></button>)}</div>
     <div className="sidebar-topline">
       <span className="workspace-label">工作空间</span>
       <div><button className="icon-button workspace-create" type="button" aria-label="添加工作空间" data-tooltip="添加工作空间" onClick={onCreateWorkspace}><Plus size={17} /></button><button className="icon-button sidebar-close" type="button" aria-label="关闭导航" data-tooltip="关闭导航" onClick={onClose}><X size={17} /></button></div>
@@ -35,8 +37,6 @@ export function RepositorySidebar({ workspace, workspaces, selectedChannelId, se
       <div className="workspace-task-heading"><FolderKanban size={16} /><span>{workspace.name}</span>{taskRepository && <button type="button" className="icon-button repository-task-create" aria-label={`新建 ${workspace.name} 任务`} data-tooltip="新建任务" onClick={() => onCreateTask(taskRepository.id)}><Plus size={15} /></button>}</div>
       {workspaceTasks.length === 0 ? <p className="sidebar-empty">还没有任务</p> : workspaceTasks.map(({ repository, task }) => <button type="button" className="task-entry" key={task.id} aria-pressed={selectedTaskId === task.id} onClick={() => onSelectTask(repository.id, task.id)}><ListTodo size={15} /><span>{task.title}</span></button>)}
     </div>
-    <div className="sidebar-channel-heading"><span>频道</span>{taskRepository && <button type="button" className="icon-button channel-create" aria-label="添加频道" data-tooltip="添加频道" onClick={() => onCreateChannel(taskRepository.id)}><Plus size={15} /></button>}</div>
-    <div className="channel-list">{channels.map((channel) => <button key={channel.id} type="button" className="channel-button" aria-label={`# ${channel.name}`} aria-current={selectedChannelId === channel.id ? 'page' : undefined} onClick={() => onSelectChannel(channel.id)}><Hash size={15} /><span>{channel.name}</span></button>)}</div>
     <AgentStatusList agents={workspace.agents} onSelect={onSelectAgent} onCreate={onCreateAgent} />
   </nav>
 }

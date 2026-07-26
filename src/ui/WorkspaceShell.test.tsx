@@ -113,6 +113,16 @@ describe('WorkspaceShell', () => {
     expect(screen.queryByText('先看一下任务队列。')).not.toBeInTheDocument()
   })
 
+  it('orders channels before workspace selection and tasks in the sidebar', async () => {
+    render(<WorkspaceShell api={makeApi()} />)
+
+    await screen.findByRole('button', { name: '# general' })
+    const navigation = document.querySelector<HTMLElement>('nav.repository-sidebar')!
+    const children = Array.from(navigation.children)
+    expect(children.findIndex((child) => child.classList.contains('sidebar-channel-heading'))).toBeLessThan(children.findIndex((child) => child.classList.contains('sidebar-topline')))
+    expect(children.findIndex((child) => child.classList.contains('sidebar-topline'))).toBeLessThan(children.findIndex((child) => child.classList.contains('workspace-task-list')))
+  })
+
   it('restores the last selected workspace channel after a page refresh', async () => {
     window.localStorage.setItem('sinapsis:workspace-selection', JSON.stringify({ workspaceId: 'workspace-1', channelId: 'channel-build' }))
     render(<WorkspaceShell api={makeApi()} />)
