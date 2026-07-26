@@ -113,6 +113,30 @@ describe('WorkspaceShell', () => {
     expect(screen.queryByText('先看一下任务队列。')).not.toBeInTheDocument()
   })
 
+  it('shows channels from every workspace and switches context when one is selected', async () => {
+    const multiWorkspaceSnapshot = structuredClone(snapshot)
+    const releaseWorkspace = structuredClone(snapshot.workspaces[0])
+    releaseWorkspace.id = 'workspace-2'
+    releaseWorkspace.name = 'Release'
+    releaseWorkspace.agents = [{ ...releaseWorkspace.agents[0], id: 'agent-2', workspaceId: 'workspace-2', identity: '发布 Agent' }]
+    releaseWorkspace.repositories[0].id = 'repository-2'
+    releaseWorkspace.repositories[0].workspaceId = 'workspace-2'
+    releaseWorkspace.repositories[0].name = 'release'
+    releaseWorkspace.repositories[0].channels = [{ ...releaseWorkspace.repositories[0].channels[0], id: 'channel-release', repositoryId: 'repository-2', name: 'release' }]
+    releaseWorkspace.repositories[0].tasks = []
+    releaseWorkspace.recentMessages = [{ ...releaseWorkspace.recentMessages[0], id: 'message-release', channelId: 'channel-release', body: '这是 Release 工作空间的频道。' }]
+    multiWorkspaceSnapshot.workspaces.push(releaseWorkspace)
+    const user = userEvent.setup()
+
+    render(<WorkspaceShell api={makeApi({ getBootstrap: vi.fn().mockResolvedValue(multiWorkspaceSnapshot) })} />)
+
+    await user.click(await screen.findByRole('button', { name: '# release' }))
+
+    expect(screen.getByText('这是 Release 工作空间的频道。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Release' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: '查看 发布 Agent 配置' })).toBeInTheDocument()
+  })
+
   it('orders channels before workspace selection and tasks in the sidebar', async () => {
     render(<WorkspaceShell api={makeApi()} />)
 

@@ -110,7 +110,15 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     setContextOpen(true)
     return { notice: '任务已派发。' }
   }
-  const selectChannel = (channelId: string) => { setSelectedChannelId(channelId); setSelectedTaskId(null); setSelectedTaskRepositoryId(null); setComposerRepositoryId(null); setNavOpen(false) }
+  const selectChannel = (channelId: string) => {
+    const owningWorkspace = snapshot.workspaces.find((candidate) => candidate.repositories.some((repository) => repository.channels.some((channel) => channel.id === channelId)))
+    if (owningWorkspace) setSelectedWorkspaceId(owningWorkspace.id)
+    setSelectedChannelId(channelId)
+    setSelectedTaskId(null)
+    setSelectedTaskRepositoryId(null)
+    setComposerRepositoryId(null)
+    setNavOpen(false)
+  }
   const selectWorkspace = (workspaceId: string) => {
     const nextWorkspace = snapshot.workspaces.find((candidate) => candidate.id === workspaceId)
     setSelectedWorkspaceId(workspaceId)
