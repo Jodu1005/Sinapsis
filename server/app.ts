@@ -241,7 +241,7 @@ function findMentionedAgent(repositories: WorkspaceRepositories, channelId: stri
 
 function exactMention(body: string, mention: string): boolean {
   const escaped = mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`(^|\\s)@${escaped}(?=$|\\s|[,.!?，。！？])`, 'i').test(body)
+  return new RegExp(`(^|[^A-Za-z0-9_])@${escaped}(?=$|[^A-Za-z0-9_])`, 'i').test(body)
 }
 
 class RepositoryWorkspaceCatalog implements WorkspaceCatalog {

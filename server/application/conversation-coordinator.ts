@@ -190,5 +190,5 @@ function conversationKey(channelId: string, agentId: string): string {
 
 function exactMention(body: string, mention: string): boolean {
   const escaped = mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`(^|\\s)@${escaped}(?=$|\\s|[,.!?，。！？])`, 'i').test(body)
+  return new RegExp(`(^|[^A-Za-z0-9_])@${escaped}(?=$|[^A-Za-z0-9_])`, 'i').test(body)
 }

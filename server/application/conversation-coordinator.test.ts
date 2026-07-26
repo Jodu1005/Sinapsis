@@ -54,6 +54,18 @@ describe('ConversationCoordinator', () => {
     expect(fixture.runtime.starts[0]?.profile.command).toBe('build-runtime')
   })
 
+  it('recognizes an Agent mention directly after Chinese text', async () => {
+    const fixture = await createFixture()
+    const build = fixture.createAgent('Build', 'build')
+    const review = fixture.createAgent('Review', 'review')
+    fixture.setIdle(build, '2026-07-25T08:01:00.000Z')
+    fixture.setIdle(review, '2026-07-25T08:00:00.000Z')
+
+    await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('请帮我看看@build'))
+
+    expect(fixture.runtime.starts[0]?.profile.command).toBe('build-runtime')
+  })
+
   it('reuses an Agent session for the next channel turn', async () => {
     const fixture = await createFixture()
     const build = fixture.createAgent('Build', 'build')
