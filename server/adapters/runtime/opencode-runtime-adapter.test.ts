@@ -85,7 +85,7 @@ describe('OpenCodeRuntimeAdapter', () => {
 
     const session = await adapter.start(task, (event) => events.push(event))
 
-    expect(runner.spawns[0]?.options).toMatchObject({ command: 'opencode-bin', cwd: '/tmp/task-1' })
+    expect(runner.spawns[0]?.options).toMatchObject({ command: 'opencode-bin', cwd: '/tmp/task-1', stdinMode: 'ignore' })
     expect(runner.spawns[0]?.options.args).toEqual(expect.arrayContaining([
       'run', '--format', 'json', '--dir', '/tmp/task-1',
     ]))

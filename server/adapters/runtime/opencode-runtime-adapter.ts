@@ -57,6 +57,7 @@ export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
       args,
       cwd: session.worktreePath,
       env: session.profile.env,
+      stdinMode: 'ignore',
     })
     const parser = new LfJsonlParser()
     session.isStreaming = true
