@@ -334,14 +334,14 @@ describe('WorkspaceShell', () => {
     expect(screen.getByRole('button', { name: '重新检测 Agent Runtime' })).toBeEnabled()
   })
 
-  it('refreshes the snapshot and agent status after a task.changed event', async () => {
+  it('refreshes the snapshot and agent status after a task.status_changed event', async () => {
     const updated = structuredClone(snapshot)
     updated.workspaces[0].agents[0].status = 'busy'
     const api = makeApi({ getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockResolvedValueOnce(updated) })
     render(<WorkspaceShell api={api} />)
 
     await screen.findByText('空闲')
-    FakeEventSource.instances[0].emit('task.changed')
+    FakeEventSource.instances[0].emit('task.status_changed')
 
     expect(await screen.findByText('忙碌')).toBeInTheDocument()
     expect(api.getBootstrap).toHaveBeenCalledTimes(2)
