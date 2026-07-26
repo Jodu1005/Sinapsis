@@ -20,6 +20,7 @@ export interface WorkspaceMutationCatalog {
 export interface WorkspaceCatalog {
   hasWorkspace(workspaceId: string): boolean
   hasRepository(repositoryId: string): boolean
+  hasActiveChannelNamed(name: string): boolean
   createWorkspace(input: { name: string; leaseTtlMs?: number }): { id: string; name: string; leaseTtlMs: number; createdAt: string }
   inTransaction<T>(work: (catalog: WorkspaceMutationCatalog) => T): T
   createRepository: WorkspaceMutationCatalog['createRepository']
@@ -61,6 +62,7 @@ export class WorkspaceService {
     } catch (error) {
       throw new ValidationError(error instanceof Error ? error.message : 'Repository directory is not a Git repository.')
     }
+    const shouldCreateGeneral = !this.catalog.hasActiveChannelNamed('general')
     const repository = this.catalog.inTransaction((catalog) => {
       const repository = catalog.createRepository({
         workspaceId: input.workspaceId,
@@ -70,7 +72,7 @@ export class WorkspaceService {
         defaultBranch: inspection.defaultBranch,
         isClean: inspection.isClean,
       })
-      catalog.createChannel({ repositoryId: repository.id, name: 'general' })
+      if (shouldCreateGeneral) catalog.createChannel({ repositoryId: repository.id, name: 'general' })
       return repository
     })
     return toManagedRepository(repository, inspection)
@@ -86,7 +88,7 @@ export class WorkspaceService {
       return this.catalog.createChannel({ repositoryId: input.repositoryId, name })
     } catch (error) {
       if (isChannelUniqueConstraint(error)) {
-        throw new DomainError(`Channel #${name} already exists in this repository.`)
+        throw new DomainError(`Channel #${name} already exists.`)
       }
       throw error
     }
@@ -94,7 +96,7 @@ export class WorkspaceService {
 }
 
 function isChannelUniqueConstraint(error: unknown): boolean {
-  return error instanceof Error && error.message.includes('UNIQUE constraint failed: channels.repository_id, channels.name')
+  return error instanceof Error && error.message.includes('UNIQUE constraint failed')
 }
 
 function toManagedRepository(

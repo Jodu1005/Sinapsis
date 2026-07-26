@@ -180,10 +180,73 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(6, new Date().toISOString())
     }
 
+    const seventhMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 7').get()
+    if (!seventhMigration) {
+      if (!hasColumn(database, 'channels', 'archived_at')) database.exec('ALTER TABLE channels ADD COLUMN archived_at TEXT')
+      archiveLegacyDuplicateChannelNames(database)
+      database.exec('CREATE UNIQUE INDEX channels_active_normalized_name_unique_idx ON channels(lower(trim(name))) WHERE archived_at IS NULL')
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(7, new Date().toISOString())
+    }
+
+    const eighthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 8').get()
+    if (!eighthMigration) {
+      if (!hasColumn(database, 'messages', 'thread_root_id')) database.exec('ALTER TABLE messages ADD COLUMN thread_root_id TEXT REFERENCES messages(id)')
+      database.exec('CREATE INDEX messages_channel_thread_created_idx ON messages(channel_id, thread_root_id, created_at)')
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(8, new Date().toISOString())
+    }
+
+    const ninthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 9').get()
+    if (!ninthMigration) {
+      if (!hasColumn(database, 'tasks', 'thread_root_message_id')) database.exec('ALTER TABLE tasks ADD COLUMN thread_root_message_id TEXT REFERENCES messages(id)')
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(9, new Date().toISOString())
+    }
+
+    const tenthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 10').get()
+    if (!tenthMigration) {
+      database.exec(`
+        CREATE TABLE channel_agent_subscriptions (
+          channel_id TEXT NOT NULL REFERENCES channels(id),
+          agent_id TEXT NOT NULL REFERENCES agents(id),
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (channel_id, agent_id)
+        );
+        CREATE INDEX channel_agent_subscriptions_agent_idx ON channel_agent_subscriptions(agent_id);
+      `)
+      database.prepare(`
+        INSERT OR IGNORE INTO channel_agent_subscriptions (channel_id, agent_id, created_at)
+        SELECT channels.id, agents.id, ? FROM channels CROSS JOIN agents WHERE channels.archived_at IS NULL
+      `).run(new Date().toISOString())
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(10, new Date().toISOString())
+    }
+
     database.exec('COMMIT')
   } catch (error) {
     database.exec('ROLLBACK')
     throw error
+  }
+}
+
+function hasColumn(database: DatabaseSync, table: string, name: string): boolean {
+  return (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some((column) => column.name === name)
+}
+
+function archiveLegacyDuplicateChannelNames(database: DatabaseSync): void {
+  const duplicateGroups = database.prepare(`
+    SELECT lower(trim(name)) AS normalized_name FROM channels
+    GROUP BY lower(trim(name))
+    HAVING COUNT(*) > 1
+  `).all() as Array<{ normalized_name: string }>
+  const listChannels = database.prepare(`
+    SELECT id FROM channels
+    WHERE lower(trim(name)) = ?
+    ORDER BY created_at, id
+  `)
+  const archiveChannel = database.prepare('UPDATE channels SET archived_at = ? WHERE id = ?')
+  const archivedAt = new Date().toISOString()
+
+  for (const group of duplicateGroups) {
+    const duplicates = listChannels.all(group.normalized_name) as Array<{ id: string }>
+    for (const duplicate of duplicates.slice(1)) archiveChannel.run(archivedAt, duplicate.id)
   }
 }
 

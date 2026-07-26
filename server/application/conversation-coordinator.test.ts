@@ -66,6 +66,19 @@ describe('ConversationCoordinator', () => {
     expect(fixture.runtime.starts[0]?.profile.command).toBe('build-runtime')
   })
 
+  it('routes a mentioned Agent from another workspace while using that Agent workspace directory', async () => {
+    const fixture = await createFixture()
+    const remote = fixture.createRemoteAgent('Release', 'release')
+    fixture.setIdle(remote.agent, '2026-07-25T08:00:00.000Z')
+
+    await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('@Release 请检查发布配置。'))
+
+    expect(fixture.runtime.starts[0]).toMatchObject({
+      worktreePath: remote.repository.path,
+      profile: expect.objectContaining({ command: 'release-runtime' }),
+    })
+  })
+
   it('recognizes an Agent mention directly after Chinese text', async () => {
     const fixture = await createFixture()
     const build = fixture.createAgent('Build', 'build')
@@ -94,6 +107,23 @@ describe('ConversationCoordinator', () => {
     expect(fixture.runtime.inputs).toEqual([
       expect.objectContaining({ input: '第二条消息。' }),
     ])
+  })
+
+  it('keeps an Agent conversation and reply inside the triggering Thread', async () => {
+    const fixture = await createFixture()
+    const build = fixture.createAgent('Build', 'build')
+    fixture.setIdle(build, '2026-07-25T08:00:00.000Z')
+    const root = fixture.postHuman('请讨论部署方案。')
+    const threadMessage = fixture.postHuman('先看回滚策略。', root.id)
+
+    await fixture.coordinator.dispatch(fixture.channel.id, threadMessage)
+    fixture.runtime.emit(fixture.runtime.starts[0]!.taskId, { kind: 'text', text: '建议先保留可回滚版本。' })
+    fixture.runtime.emit(fixture.runtime.starts[0]!.taskId, { kind: 'settled' })
+
+    expect(fixture.runtime.starts[0]!.description).toContain('请讨论部署方案。')
+    expect(fixture.channelMessages()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ authorName: 'Build', threadRootMessageId: root.id, body: '建议先保留可回滚版本。' }),
+    ]))
   })
 
   it('bounds long channel history before passing it to a runtime', async () => {
@@ -197,11 +227,35 @@ describe('ConversationCoordinator', () => {
       model: '',
       env: {},
     })
+    const createRemoteAgent = (identity: string, mentionName: string) => {
+      const remoteWorkspace = repositories.createWorkspace({ name: 'Release' })
+      const remoteRepository = repositories.createRepository({
+        workspaceId: remoteWorkspace.id,
+        name: 'release',
+        path: '/workspace/release',
+        currentBranch: 'main',
+        defaultBranch: 'main',
+        isClean: true,
+      })
+      const agent = repositories.createAgent({
+        workspaceId: remoteWorkspace.id,
+        identity,
+        mentionName,
+        runtime: 'opencode',
+        capabilityTags: [],
+        maxConcurrentTasks: 1,
+        command: `${mentionName}-runtime`,
+        args: [],
+        model: '',
+        env: {},
+      })
+      return { agent, repository: remoteRepository }
+    }
     const setIdle = (agent: Agent, occurredAt: string) => repositories.setAgentStatus(agent.id, 'idle', new Date(occurredAt))
-    const postHuman = (body: string) => messages.postHuman(channel.id, body)
+    const postHuman = (body: string, threadRootMessageId?: string) => messages.postHuman(channel.id, body, null, threadRootMessageId)
     const channelMessages = () => repositories.getBootstrap().workspaces[0]!.recentMessages.filter((message) => message.channelId === channel.id)
 
-    return { repositories, repository, channel, runtime, coordinator, createAgent, setIdle, postHuman, channelMessages }
+    return { repositories, repository, channel, runtime, coordinator, createAgent, createRemoteAgent, setIdle, postHuman, channelMessages }
   }
 })
 

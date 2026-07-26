@@ -6,7 +6,7 @@ export interface WorkspaceApi {
   addRepository(workspaceId: string, input: { directory: string; name?: string }): Promise<RepositoryView>
   createAgent(workspaceId: string, input: CreateAgentRequest): Promise<AgentView>
   refreshAgentRuntime(agentId: string): Promise<void>
-  postMessage(channelId: string, input: { body: string; taskId?: string }): Promise<ChannelMessage>
+  postMessage(channelId: string, input: { body: string; taskId?: string; threadRootMessageId?: string }): Promise<ChannelMessage>
   createChannel(repositoryId: string, input: { name: string }): Promise<ChannelView>
   createTask(repositoryId: string, input: CreateTaskRequest): Promise<TaskView>
   getTaskDetails(taskId: string): Promise<TaskDetailView>
@@ -46,7 +46,7 @@ export class ApiClient implements WorkspaceApi {
   async refreshAgentRuntime(agentId: string): Promise<void> {
     await this.request(`/api/agents/${agentId}/runtime/refresh`, { method: 'POST' })
   }
-  async postMessage(channelId: string, input: { body: string; taskId?: string }): Promise<ChannelMessage> {
+  async postMessage(channelId: string, input: { body: string; taskId?: string; threadRootMessageId?: string }): Promise<ChannelMessage> {
     return this.request(`/api/channels/${channelId}/messages`, { method: 'POST', body: JSON.stringify(input) })
   }
   async createChannel(repositoryId: string, input: { name: string }): Promise<ChannelView> {

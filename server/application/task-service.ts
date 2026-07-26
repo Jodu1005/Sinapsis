@@ -27,11 +27,9 @@ export class TaskService {
       throw new NotFoundError(`Repository ${input.repositoryId} does not exist.`)
     }
 
-    const channel = input.channelId
-      ? repository.channels.find((candidate) => candidate.id === input.channelId)
-      : repository.channels.find((candidate) => candidate.name === 'general')
+    const channel = findChannel(this.repositories.getBootstrap().workspaces, input.channelId)
     if (!channel) {
-      throw new NotFoundError(`Channel ${input.channelId ?? 'general'} does not belong to repository ${repository.id}.`)
+      throw new NotFoundError(`Channel ${input.channelId ?? 'general'} does not exist.`)
     }
 
     if (input.directAgentId && !workspace.agents.some((agent) => agent.id === input.directAgentId)) {
@@ -53,7 +51,10 @@ export class TaskService {
       maxRetries: input.maxRetries,
     }
 
-    return this.repositories.inTransaction((unitOfWork) => createLabeledTask(unitOfWork, taskInput, inferredLabels, input.labels !== undefined))
+    return this.repositories.inTransaction((unitOfWork) => {
+      const root = unitOfWork.createMessage({ channelId: channel.id, senderType: 'system', authorName: 'Sinapsis', body: `任务「${input.title}」已创建。` })
+      return createLabeledTask(unitOfWork, { ...taskInput, threadRootMessageId: root.id }, inferredLabels, input.labels !== undefined)
+    })
   }
 
   listTasks(repositoryId: string): Task[] {
@@ -97,6 +98,11 @@ export class TaskService {
   private requireRepository(repositoryId: string): void {
     findWorkspaceForRepository(this.repositories.getBootstrap().workspaces, repositoryId)
   }
+}
+
+function findChannel(workspaces: BootstrapWorkspace[], channelId: string | undefined) {
+  const channels = workspaces.flatMap((workspace) => workspace.repositories.flatMap((repository) => repository.channels))
+  return channelId ? channels.find((candidate) => candidate.id === channelId) : channels.find((candidate) => candidate.name === 'general')
 }
 
 function canAcceptHumanInput(status: TaskStatus): boolean {

@@ -168,13 +168,16 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   app.post('/api/channels/:channelId/messages', asyncRoute(async (request, response) => {
     const body = objectBody(request.body)
-    assertOnlyKeys(body, ['body', 'taskId'])
+    assertOnlyKeys(body, ['body', 'taskId', 'threadRootMessageId'])
     const channelId = requiredParam(request.params.channelId, 'channelId')
     const taskId = optionalString(body, 'taskId')
-    const message = messages.postHuman(channelId, requiredString(body, 'body'), taskId)
+    const threadRootMessageId = optionalString(body, 'threadRootMessageId')
+    const message = messages.postHuman(channelId, requiredString(body, 'body'), taskId, threadRootMessageId)
     const mention = findMentionedAgent(repositories, channelId, message.body)
+    let deliveredToActiveTask = false
     if (mention?.status === 'busy') {
       coordinator.queueInputForActiveAgent(mention.id, message.body)
+      deliveredToActiveTask = true
     }
     if (mention?.status === 'idle' && taskId) {
       const task = repositories.getTask(taskId)
@@ -183,7 +186,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
         await coordinator.flush(taskId)
       }
     }
-    if (!taskId) {
+    if (!taskId && !deliveredToActiveTask) {
       await conversationCoordinator.dispatch(channelId, message)
     }
     response.status(201).json(message)
@@ -232,14 +235,15 @@ export function createApp(options: CreateAppOptions = {}): Express {
 }
 
 function findMentionedAgent(repositories: WorkspaceRepositories, channelId: string, body: string) {
-  for (const workspace of repositories.getBootstrap().workspaces) {
-    if (!workspace.repositories.some((repository) => repository.channels.some((channel) => channel.id === channelId))) continue
-    return [...workspace.agents]
-      .filter((agent) => exactMention(body, agent.identity))
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))[0]
-      ?? workspace.agents.find((agent) => exactMention(body, agent.mentionName))
-  }
-  return undefined
+  const workspaces = repositories.getBootstrap().workspaces
+  const channel = workspaces.flatMap((workspace) => workspace.repositories.flatMap((repository) => repository.channels)).find((candidate) => candidate.id === channelId)
+  if (!channel) return undefined
+  const agents = workspaces.flatMap((workspace) => workspace.agents)
+    .filter((agent) => !channel.subscriberAgentIds || channel.subscriberAgentIds.includes(agent.id))
+  return agents
+    .filter((agent) => exactMention(body, agent.identity))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))[0]
+    ?? agents.find((agent) => exactMention(body, agent.mentionName))
 }
 
 function exactMention(body: string, mention: string): boolean {
@@ -257,6 +261,13 @@ class RepositoryWorkspaceCatalog implements WorkspaceCatalog {
   hasRepository(repositoryId: string): boolean {
     return this.repositories.getBootstrap().workspaces.some((workspace) =>
       workspace.repositories.some((repository) => repository.id === repositoryId),
+    )
+  }
+
+  hasActiveChannelNamed(name: string): boolean {
+    const normalizedName = name.trim().toLocaleLowerCase()
+    return this.repositories.getBootstrap().workspaces.some((workspace) =>
+      workspace.repositories.some((repository) => repository.channels.some((channel) => channel.name.trim().toLocaleLowerCase() === normalizedName)),
     )
   }
 

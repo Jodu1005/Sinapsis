@@ -26,7 +26,7 @@ export interface RepositoryView {
   tasks: TaskView[]
 }
 
-export interface ChannelView { id: string; repositoryId: string; name: string; createdAt: string }
+export interface ChannelView { id: string; repositoryId: string; name: string; archivedAt?: string | null; subscriberAgentIds?: string[]; createdAt: string }
 
 export interface AgentView {
   id: string
@@ -49,6 +49,7 @@ export interface TaskView {
   id: string
   repositoryId: string
   channelId: string
+  threadRootMessageId?: string | null
   directAgentId: string | null
   title: string
   description: string
@@ -69,6 +70,7 @@ export interface TaskView {
 export interface ChannelMessage {
   id: string
   channelId: string
+  threadRootMessageId?: string | null
   taskId: string | null
   senderType: 'human' | 'agent' | 'system'
   senderId: string | null
@@ -98,6 +100,14 @@ export interface TaskEventView { id: string; taskId: string; type: string; paylo
 
 export function channelMessages(workspace: WorkspaceView, channelId: string): ChannelMessage[] {
   return workspace.recentMessages.filter((message) => message.channelId === channelId)
+}
+
+export function snapshotChannelMessages(snapshot: WorkspaceSnapshot, channelId: string): ChannelMessage[] {
+  return snapshot.workspaces.flatMap((workspace) => workspace.recentMessages).filter((message) => message.channelId === channelId)
+}
+
+export function snapshotAgents(snapshot: WorkspaceSnapshot): AgentView[] {
+  return snapshot.workspaces.flatMap((workspace) => workspace.agents)
 }
 
 export function distinctAgentsByIdentity(agents: AgentView[]): AgentView[] {

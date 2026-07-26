@@ -57,6 +57,7 @@ interface ChannelRow {
   id: string
   repository_id: string
   name: string
+  archived_at: string | null
   created_at: string
 }
 
@@ -64,6 +65,7 @@ interface TaskRow {
   id: string
   repository_id: string
   channel_id: string
+  thread_root_message_id: string | null
   direct_agent_id: string | null
   title: string
   description: string
@@ -134,6 +136,7 @@ interface ReviewDecisionRow {
 interface MessageRow {
   id: string
   channel_id: string
+  thread_root_id: string | null
   task_id: string | null
   sender_type: MessageSenderType
   sender_id: string | null
@@ -215,12 +218,16 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
       name: requireText(input.name, 'Channel name'),
       createdAt,
     }
-    this.database.prepare('INSERT INTO channels (id, repository_id, name, created_at) VALUES (?, ?, ?, ?)').run(
+    this.database.prepare('INSERT INTO channels (id, repository_id, name, archived_at, created_at) VALUES (?, ?, ?, ?, ?)').run(
       channel.id,
       channel.repositoryId,
       channel.name,
+      null,
       channel.createdAt,
     )
+    const agents = this.database.prepare('SELECT id FROM agents').all() as Array<{ id: string }>
+    const subscribe = this.database.prepare('INSERT OR IGNORE INTO channel_agent_subscriptions (channel_id, agent_id, created_at) VALUES (?, ?, ?)')
+    for (const agent of agents) subscribe.run(channel.id, agent.id, channel.createdAt)
     return channel
   }
 
@@ -252,6 +259,9 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
       JSON.stringify(agent.capabilityTags), agent.maxConcurrentTasks, agent.command, JSON.stringify(agent.args),
       agent.model, JSON.stringify(agent.env), agent.createdAt, agent.updatedAt,
     )
+    const channels = this.database.prepare('SELECT id FROM channels WHERE archived_at IS NULL').all() as Array<{ id: string }>
+    const subscribe = this.database.prepare('INSERT OR IGNORE INTO channel_agent_subscriptions (channel_id, agent_id, created_at) VALUES (?, ?, ?)')
+    for (const channel of channels) subscribe.run(channel.id, agent.id, createdAt)
     return agent
   }
 
@@ -261,6 +271,7 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
       id: randomUUID(),
       repositoryId: input.repositoryId,
       channelId: input.channelId,
+      threadRootMessageId: input.threadRootMessageId ?? null,
       directAgentId: input.directAgentId ?? null,
       title: requireText(input.title, 'Task title'),
       description: requireText(input.description, 'Task description'),
@@ -279,12 +290,12 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     }
     this.database.prepare(`
       INSERT INTO tasks (
-        id, repository_id, channel_id, direct_agent_id, title, description, acceptance_criteria,
+        id, repository_id, channel_id, thread_root_message_id, direct_agent_id, title, description, acceptance_criteria,
         labels_json, status, queued_at, attempt_count, max_retries, timeout_ms, lease_ttl_ms, branch_name,
         worktree_path, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      task.id, task.repositoryId, task.channelId, task.directAgentId, task.title, task.description,
+      task.id, task.repositoryId, task.channelId, task.threadRootMessageId ?? null, task.directAgentId, task.title, task.description,
       task.acceptanceCriteria, JSON.stringify(task.labels), task.status, task.queuedAt,
       task.attemptCount, task.maxRetries, task.timeoutMs, task.leaseTtlMs, task.branchName, task.worktreePath,
       task.createdAt, task.updatedAt,
@@ -308,10 +319,17 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
   }
 
   createMessage(input: CreateMessageInput): Message {
+    if (input.threadRootMessageId) {
+      const root = readMessage(this.database, input.threadRootMessageId)
+      if (!root || root.channelId !== input.channelId || root.threadRootMessageId) {
+        throw new Error('Thread root must be a root message in the same channel.')
+      }
+    }
     const createdAt = now()
     const message: Message = {
       id: randomUUID(),
       channelId: input.channelId,
+      threadRootMessageId: input.threadRootMessageId ?? null,
       taskId: input.taskId ?? null,
       senderType: input.senderType,
       senderId: input.senderId ?? null,
@@ -323,12 +341,21 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     }
     this.database.prepare(`
       INSERT INTO messages (
-        id, channel_id, task_id, sender_type, sender_id, author_name, body, created_at, updated_at, deleted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      message.id, message.channelId, message.taskId, message.senderType, message.senderId,
-      message.authorName, message.body, message.createdAt, message.updatedAt, message.deletedAt,
-    )
+        id, channel_id, thread_root_id, task_id, sender_type, sender_id, author_name, body, created_at, updated_at, deleted_at
+      ) VALUES ($id, $channelId, $threadRootMessageId, $taskId, $senderType, $senderId, $authorName, $body, $createdAt, $updatedAt, $deletedAt)
+    `).run({
+      id: message.id,
+      channelId: message.channelId,
+      threadRootMessageId: message.threadRootMessageId ?? null,
+      taskId: message.taskId,
+      senderType: message.senderType,
+      senderId: message.senderId,
+      authorName: message.authorName,
+      body: message.body,
+      createdAt: message.createdAt,
+      updatedAt: message.updatedAt,
+      deletedAt: message.deletedAt,
+    })
     this.afterCommit(event('message.created', 'message', message.id, createdAt))
     return message
   }
@@ -810,6 +837,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
       })
       unitOfWork.createMessage({
         channelId: task.channelId,
+        threadRootMessageId: task.threadRootMessageId,
         taskId: task.id,
         senderType: 'system',
         authorName: 'Sinapsis',
@@ -847,6 +875,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
       })
       unitOfWork.createMessage({
         channelId: task.channelId,
+        threadRootMessageId: task.threadRootMessageId,
         taskId: task.id,
         senderType: 'system',
         authorName: 'Sinapsis',
@@ -864,8 +893,11 @@ export class SqliteRepositories implements WorkspaceRepositories {
         const repositories = (this.sqlite.database.prepare('SELECT id, workspace_id, name, path, current_branch, default_branch, is_clean, created_at FROM repositories WHERE workspace_id = ? ORDER BY created_at').all(workspace.id) as unknown as RepositoryRow[])
           .map((repositoryRow) => {
             const repository = mapRepository(repositoryRow)
-            const channels = (this.sqlite.database.prepare('SELECT id, repository_id, name, created_at FROM channels WHERE repository_id = ? ORDER BY created_at').all(repository.id) as unknown as ChannelRow[])
-              .map(mapChannel)
+            const channels = (this.sqlite.database.prepare('SELECT id, repository_id, name, archived_at, created_at FROM channels WHERE repository_id = ? AND archived_at IS NULL ORDER BY created_at').all(repository.id) as unknown as ChannelRow[])
+              .map((channel) => ({
+                ...mapChannel(channel),
+                subscriberAgentIds: (this.sqlite.database.prepare('SELECT agent_id FROM channel_agent_subscriptions WHERE channel_id = ? ORDER BY agent_id').all(channel.id) as Array<{ agent_id: string }>).map((subscription) => subscription.agent_id),
+              }))
             const tasks = (this.sqlite.database.prepare('SELECT * FROM tasks WHERE repository_id = ? ORDER BY queued_at').all(repository.id) as unknown as TaskRow[])
               .map(mapTask)
             return { ...repository, channels, tasks }
@@ -943,7 +975,7 @@ function mapRepository(row: RepositoryRow): Repository {
 }
 
 function mapChannel(row: ChannelRow): Channel {
-  return { id: row.id, repositoryId: row.repository_id, name: row.name, createdAt: row.created_at }
+  return { id: row.id, repositoryId: row.repository_id, name: row.name, archivedAt: row.archived_at, createdAt: row.created_at }
 }
 
 function mapTask(row: TaskRow): Task {
@@ -951,6 +983,7 @@ function mapTask(row: TaskRow): Task {
     id: row.id,
     repositoryId: row.repository_id,
     channelId: row.channel_id,
+    threadRootMessageId: row.thread_root_message_id,
     directAgentId: row.direct_agent_id,
     title: row.title,
     description: row.description,
@@ -1017,6 +1050,7 @@ function mapMessage(row: MessageRow): Message {
   return {
     id: row.id,
     channelId: row.channel_id,
+    threadRootMessageId: row.thread_root_id,
     taskId: row.task_id,
     senderType: row.sender_type,
     senderId: row.sender_id,

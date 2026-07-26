@@ -23,6 +23,7 @@ export interface Task {
   id: string
   repositoryId: string
   channelId: string
+  threadRootMessageId?: string | null
   directAgentId: string | null
   title: string
   description: string
@@ -43,6 +44,7 @@ export interface Task {
 export interface CreateTaskInput {
   repositoryId: string
   channelId: string
+  threadRootMessageId?: string | null
   directAgentId?: string | null
   title: string
   description: string

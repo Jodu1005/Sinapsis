@@ -69,7 +69,7 @@ export class TaskExecutionCoordinator {
         unitOfWork.allocateTaskWorktree(task.id, allocation.branchName, allocation.worktreePath)
         unitOfWork.createTaskSession(task.id, agent.id)
         unitOfWork.transitionTask(task.id, 'running', 'Runtime 已在任务工作树中启动')
-        unitOfWork.createMessage({ channelId: task.channelId, taskId: task.id, senderType: 'agent', authorName: agent.identity, body: `开始处理「${task.title}」。` })
+        unitOfWork.createMessage({ channelId: task.channelId, threadRootMessageId: task.threadRootMessageId, taskId: task.id, senderType: 'agent', authorName: agent.identity, body: `开始处理「${task.title}」。` })
       })
 
       const adapter = this.runtimes[agent.runtime]
@@ -223,7 +223,8 @@ export class TaskExecutionCoordinator {
         return
       case 'needs_input':
         this.repositories.transitionTask(event.taskId, 'waiting_input', 'Runtime 请求人工决定')
-        this.messages.postAgent(this.task(event.taskId).channelId, event.taskId, execution.agentName, `我需要你的决定：${event.prompt}`)
+        const task = this.task(event.taskId)
+        this.messages.postAgent(task.channelId, event.taskId, execution.agentName, `我需要你的决定：${event.prompt}`, task.threadRootMessageId)
         return
       case 'error':
         if (!await this.flushRuntimeOutput(execution)) return
@@ -257,7 +258,7 @@ export class TaskExecutionCoordinator {
       return
     }
     this.repositories.finishTaskExecution(task.id, execution.agentId, 'in_review', 'Runtime 完成并检测到任务分支提交')
-    this.messages.postAgent(task.channelId, task.id, execution.agentName, `已完成「${task.title}」，已提交改动，等待你验收。`)
+    this.messages.postAgent(task.channelId, task.id, execution.agentName, `已完成「${task.title}」，已提交改动，等待你验收。`, task.threadRootMessageId)
     execution.active = false
     this.disarmTimeout(execution)
   }
@@ -274,6 +275,7 @@ export class TaskExecutionCoordinator {
       this.repositories.finishTaskExecution(taskId, agentId, 'needs_human', reason)
       unitOfWork.createMessage({
         channelId: task.channelId,
+        threadRootMessageId: task.threadRootMessageId,
         taskId,
         senderType: 'agent',
         authorName: this.agentName(agentId),

@@ -113,7 +113,7 @@ describe('WorkspaceShell', () => {
     expect(screen.queryByText('先看一下任务队列。')).not.toBeInTheDocument()
   })
 
-  it('shows channels from every workspace and switches context when one is selected', async () => {
+  it('shows channels from every workspace without switching the task workspace', async () => {
     const multiWorkspaceSnapshot = structuredClone(snapshot)
     const releaseWorkspace = structuredClone(snapshot.workspaces[0])
     releaseWorkspace.id = 'workspace-2'
@@ -133,8 +133,8 @@ describe('WorkspaceShell', () => {
     await user.click(await screen.findByRole('button', { name: '# release' }))
 
     expect(screen.getByText('这是 Release 工作空间的频道。')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Release' })).toHaveAttribute('aria-current', 'page')
-    expect(screen.getByRole('button', { name: '查看 发布 Agent 配置' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sinapsis' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.queryByRole('button', { name: '查看 发布 Agent 配置' })).not.toBeInTheDocument()
   })
 
   it('orders channels before workspace selection and tasks in the sidebar', async () => {
@@ -185,6 +185,25 @@ describe('WorkspaceShell', () => {
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
     expect(api.postMessage).toHaveBeenCalledWith('channel-general', { body: '大家同步一下。' })
+  })
+
+  it('opens a Thread and sends replies under its root message', async () => {
+    const threadedSnapshot = structuredClone(snapshot)
+    threadedSnapshot.workspaces[0].recentMessages.push({
+      id: 'message-reply', channelId: 'channel-general', threadRootMessageId: 'message-1', taskId: null, senderType: 'agent', senderId: 'agent-1', authorName: '实现 Agent', body: '我会跟进。',
+      createdAt: '2026-07-25T08:03:00.000Z', updatedAt: '2026-07-25T08:03:00.000Z', deletedAt: null,
+    })
+    const api = makeApi({ getBootstrap: vi.fn().mockResolvedValue(threadedSnapshot) })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await user.click(await screen.findByRole('button', { name: '回复 你 的消息' }))
+    const thread = screen.getByRole('region', { name: 'Thread' })
+    expect(thread).toHaveTextContent('我会跟进。')
+    await user.type(within(thread).getByRole('textbox', { name: '发送消息' }), '继续跟进。')
+    await user.click(within(thread).getByRole('button', { name: '发送消息' }))
+
+    expect(api.postMessage).toHaveBeenCalledWith('channel-general', { body: '继续跟进。', threadRootMessageId: 'message-1' })
   })
 
   it('creates a channel from the sidebar and selects it', async () => {
@@ -514,6 +533,7 @@ describe('WorkspaceShell', () => {
       acceptanceCriteria: createdTask.acceptanceCriteria,
       labels: ['frontend'],
       directAgentId: 'agent-1',
+      channelId: 'channel-general',
     })
     expect(await screen.findByRole('heading', { name: '概览' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'test-results' }))

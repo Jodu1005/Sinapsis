@@ -4,7 +4,7 @@ import type { GitClient } from '../ports/git-client'
 import { DomainError } from '../domain/task'
 
 describe('WorkspaceService', () => {
-  it('inspects a directory as a Git repository and creates its general channel', async () => {
+  it('inspects a directory as a Git repository and creates the first global general channel', async () => {
     const gitClient: GitClient = {
       inspectRepository: vi.fn().mockResolvedValue({
         rootPath: '/projects/sinapsis',
@@ -31,6 +31,18 @@ describe('WorkspaceService', () => {
       defaultBranch: 'main',
     })
     expect(repositories.createdChannels).toEqual([{ repositoryId: repository.id, name: 'general' }])
+  })
+
+  it('does not create a second general channel when adding another workspace repository', async () => {
+    const gitClient: GitClient = {
+      inspectRepository: vi.fn().mockResolvedValue({ rootPath: '/projects/workcode', currentBranch: 'main', defaultBranch: 'main', isClean: true }),
+    }
+    const repositories = new RecordingWorkspaceRepository('workspace-2', true)
+    const service = new WorkspaceService(repositories, gitClient)
+
+    await service.addRepository({ workspaceId: 'workspace-2', directory: '/projects/workcode', name: 'WorkCode' })
+
+    expect(repositories.createdChannels).toEqual([])
   })
 
   it('rejects a directory that Git cannot inspect', async () => {
@@ -60,13 +72,13 @@ describe('WorkspaceService', () => {
     expect(repositories.persistedChannels).toEqual([])
   })
 
-  it('maps a repository-local channel uniqueness constraint to a domain conflict', () => {
+  it('maps a global channel uniqueness constraint to a domain conflict', () => {
     const gitClient: GitClient = { inspectRepository: vi.fn() }
     const repositories = new DuplicateChannelWorkspaceRepository('workspace-1')
     const service = new WorkspaceService(repositories, gitClient)
 
     expect(() => service.createChannel({ repositoryId: 'repository-1', name: 'general' }))
-      .toThrow(new DomainError('Channel #general already exists in this repository.'))
+      .toThrow(new DomainError('Channel #general already exists.'))
   })
 })
 
@@ -74,7 +86,7 @@ class RecordingWorkspaceRepository {
   readonly createdChannels: Array<{ repositoryId: string; name: string }> = []
   private repositoryNumber = 0
 
-  constructor(private readonly workspaceId: string) {}
+  constructor(private readonly workspaceId: string, private readonly hasGeneral = false) {}
 
   hasWorkspace(workspaceId: string): boolean {
     return workspaceId === this.workspaceId
@@ -82,6 +94,10 @@ class RecordingWorkspaceRepository {
 
   hasRepository(_repositoryId: string): boolean {
     return false
+  }
+
+  hasActiveChannelNamed(name: string): boolean {
+    return this.hasGeneral && name === 'general'
   }
 
   createWorkspace(input: { name: string; leaseTtlMs?: number }) {

@@ -20,6 +20,8 @@ export interface Channel {
   id: string
   repositoryId: string
   name: string
+  archivedAt?: string | null
+  subscriberAgentIds?: string[]
   createdAt: string
 }
 

@@ -154,6 +154,32 @@ describe('SQLite workspace repositories', () => {
     expect(repositories.getTask(task.id)?.status).toBe('queued')
   })
 
+  it('stores replies under a root message and rejects roots from another channel', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const root = repositories.createMessage({ channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: '讨论任务调度。' })
+    const reply = repositories.createMessage({ channelId: channel.id, threadRootMessageId: root.id, senderType: 'agent', authorName: 'Newton', body: '我会先检查队列。' })
+    const otherChannel = repositories.createChannel({ repositoryId: channel.repositoryId, name: 'release' })
+
+    expect(repositories.getBootstrap().workspaces[0]!.recentMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: reply.id, threadRootMessageId: root.id }),
+    ]))
+    expect(() => repositories.createMessage({ channelId: otherChannel.id, threadRootMessageId: root.id, senderType: 'human', authorName: 'Jodu', body: '不能跨频道回复。' }))
+      .toThrow('Thread root must be a root message in the same channel.')
+  })
+
+  it('automatically subscribes existing and newly created Agents to active channels', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const workspaceId = repositories.getBootstrap().workspaces[0]!.id
+    const firstAgent = repositories.createAgent({ workspaceId, identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: [], maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {} })
+    const secondChannel = repositories.createChannel({ repositoryId: channel.repositoryId, name: 'release' })
+
+    const channels = repositories.getBootstrap().workspaces[0]!.repositories[0]!.channels
+    expect(channels.find((candidate) => candidate.id === channel.id)?.subscriberAgentIds).toContain(firstAgent.id)
+    expect(channels.find((candidate) => candidate.id === secondChannel.id)?.subscriberAgentIds).toContain(firstAgent.id)
+  })
+
   it('returns an empty bootstrap snapshot for a new database', async () => {
     const databasePath = await createDatabasePath()
     const app = createApp({ databasePath })
@@ -192,26 +218,28 @@ describe('SQLite workspace repositories', () => {
     expect(repositories.getAgent(agent.id)).toMatchObject({ status: 'idle', updatedAt: '2026-07-26T05:00:00.000Z' })
   })
 
-  it('migrates legacy duplicate channel names without deleting channels and then enforces repository-local uniqueness', async () => {
+  it('archives legacy duplicate channel names and enforces global active-channel uniqueness', async () => {
     const { repositories, databasePath } = await createRepositories()
     const channel = createChannel(repositories)
-    database!.database.exec('DROP INDEX channels_repository_name_unique_idx')
-    database!.database.prepare('DELETE FROM schema_migrations WHERE version = 4').run()
+    const secondWorkspace = repositories.createWorkspace({ name: 'WorkCode' })
+    const secondRepository = repositories.createRepository({ workspaceId: secondWorkspace.id, name: 'workcode', path: '/projects/workcode' })
+    database!.database.exec('DROP INDEX channels_active_normalized_name_unique_idx')
+    database!.database.prepare('DELETE FROM schema_migrations WHERE version = 7').run()
     database!.database.prepare('INSERT INTO channels (id, repository_id, name, created_at) VALUES (?, ?, ?, ?)').run(
-      'legacy-duplicate-channel', channel.repositoryId, channel.name, '2026-07-24T00:00:00.000Z',
+      'legacy-duplicate-channel', secondRepository.id, channel.name, '2026-07-24T00:00:00.000Z',
     )
     database!.close()
     database = undefined
     database = createSqliteDatabase(databasePath)
 
-    const channels = database.database.prepare('SELECT id, name FROM channels WHERE repository_id = ? ORDER BY created_at, id').all(channel.repositoryId)
+    const channels = database.database.prepare('SELECT id, name, archived_at FROM channels WHERE name = ? ORDER BY created_at, id').all(channel.name)
     expect(channels).toEqual([
-      { id: 'legacy-duplicate-channel', name: 'engineering' },
-      expect.objectContaining({ name: 'engineering-2' }),
+      { id: 'legacy-duplicate-channel', name: 'engineering', archived_at: null },
+      expect.objectContaining({ name: 'engineering', archived_at: expect.any(String) }),
     ])
     expect(() => database!.database.prepare('INSERT INTO channels (id, repository_id, name, created_at) VALUES (?, ?, ?, ?)').run(
       'another-duplicate-channel', channel.repositoryId, 'engineering', '2026-07-25T00:00:00.000Z',
-    )).toThrow('UNIQUE constraint failed: channels.repository_id, channels.name')
+    )).toThrow(/UNIQUE constraint failed/)
   })
 
   async function createRepositories(): Promise<{

@@ -17,6 +17,7 @@ interface ConversationExecution {
   key: string
   runtimeTaskId: string
   channelId: string
+  threadRootMessageId: string | null
   agent: Agent
   adapter: RuntimeAdapter
   session: RuntimeSession | null
@@ -45,11 +46,16 @@ export class ConversationCoordinator {
   async dispatch(channelId: string, message: Message): Promise<void> {
     if (message.channelId !== channelId) throw new DomainError('Message does not belong to this channel.')
 
-    const context = this.requireChannelContext(channelId)
-    const agent = this.selectAgent(context.workspace, channelId, message.body)
+    const snapshot = this.repositories.getBootstrap()
+    const context = this.requireChannelContext(snapshot.workspaces, channelId)
+    const threadRootMessageId = message.threadRootMessageId ?? null
+    const agents = snapshot.workspaces.flatMap((workspace) => workspace.agents)
+      .filter((agent) => !context.channel.subscriberAgentIds || context.channel.subscriberAgentIds.includes(agent.id))
+    const agent = this.selectAgent(agents, channelId, threadRootMessageId, message.body)
     if (!agent) throw new DomainError('No idle Agent is available for this channel.')
 
-    const key = conversationKey(channelId, agent.id)
+    const agentContext = this.requireAgentContext(snapshot.workspaces, agent.id)
+    const key = conversationKey(channelId, agent.id, threadRootMessageId)
     const existing = this.executions.get(key)
     if (existing?.session) {
       this.sendToExistingSession(existing, message.body)
@@ -66,6 +72,7 @@ export class ConversationCoordinator {
       key,
       runtimeTaskId: `conversation-${randomUUID()}`,
       channelId,
+      threadRootMessageId,
       agent,
       adapter,
       session: null,
@@ -80,10 +87,10 @@ export class ConversationCoordinator {
         taskId: execution.runtimeTaskId,
         mode: 'conversation',
         title: `频道 #${context.channel.name} 对话`,
-        description: this.recentChannelContext(context.workspace, channelId, message.id),
+        description: this.recentConversationContext(context.workspace, channelId, message.id, threadRootMessageId),
         acceptanceCriteria: '在频道中给出简洁、清晰的回复。',
         initialMessage: message.body,
-        worktreePath: context.repository.path,
+        worktreePath: agentContext.repository.path,
         profile: {
           runtime: agent.runtime,
           command: agent.command,
@@ -142,6 +149,7 @@ export class ConversationCoordinator {
       null,
       execution.agent.identity,
       body || '我已处理这条消息，但没有生成可展示的回复。',
+      execution.threadRootMessageId,
     )
   }
 
@@ -151,22 +159,22 @@ export class ConversationCoordinator {
     execution.active = false
     this.executions.delete(execution.key)
     this.repositories.setAgentStatus(execution.agent.id, 'idle', new Date())
-    this.messages.postAgent(execution.channelId, null, execution.agent.identity, `抱歉，我暂时无法回复：${reason}`)
+    this.messages.postAgent(execution.channelId, null, execution.agent.identity, `抱歉，我暂时无法回复：${reason}`, execution.threadRootMessageId)
   }
 
-  private selectAgent(workspace: BootstrapWorkspace, channelId: string, body: string): Agent | undefined {
-    const mentioned = mentionedAgent(workspace.agents, body)
+  private selectAgent(agents: Agent[], channelId: string, threadRootMessageId: string | null, body: string): Agent | undefined {
+    const mentioned = mentionedAgent(agents, body)
     if (mentioned) {
-      const existing = this.executions.get(conversationKey(channelId, mentioned.id))
+      const existing = this.executions.get(conversationKey(channelId, mentioned.id, threadRootMessageId))
       return mentioned.status === 'idle' || existing?.active ? mentioned : undefined
     }
-    return workspace.agents
+    return agents
       .filter((agent) => agent.status === 'idle')
       .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id))[0]
   }
 
-  private requireChannelContext(channelId: string): ChannelContext {
-    for (const workspace of this.repositories.getBootstrap().workspaces) {
+  private requireChannelContext(workspaces: BootstrapWorkspace[], channelId: string): ChannelContext {
+    for (const workspace of workspaces) {
       for (const repository of workspace.repositories) {
         const channel = repository.channels.find((candidate) => candidate.id === channelId)
         if (channel) return { workspace, repository, channel }
@@ -175,9 +183,19 @@ export class ConversationCoordinator {
     throw new DomainError(`Channel ${channelId} does not exist.`)
   }
 
-  private recentChannelContext(workspace: BootstrapWorkspace, channelId: string, currentMessageId: string): string {
+  private requireAgentContext(workspaces: BootstrapWorkspace[], agentId: string): { workspace: BootstrapWorkspace; repository: BootstrapWorkspace['repositories'][number] } {
+    for (const workspace of workspaces) {
+      if (!workspace.agents.some((agent) => agent.id === agentId)) continue
+      const repository = workspace.repositories[0]
+      if (repository) return { workspace, repository }
+    }
+    throw new DomainError(`Agent ${agentId} does not have a workspace repository.`)
+  }
+
+  private recentConversationContext(workspace: BootstrapWorkspace, channelId: string, currentMessageId: string, threadRootMessageId: string | null): string {
     const history = workspace.recentMessages
       .filter((message) => message.channelId === channelId && message.id !== currentMessageId)
+      .filter((message) => !threadRootMessageId || message.id === threadRootMessageId || message.threadRootMessageId === threadRootMessageId)
       .slice(-8)
       .map((message) => `${message.authorName}: ${compactContextBody(message.body)}`)
     return history.join('\n') || '（频道尚无此前消息。）'
@@ -189,8 +207,8 @@ function compactContextBody(body: string): string {
   return normalized.length > 600 ? `${normalized.slice(0, 600)}...` : normalized
 }
 
-function conversationKey(channelId: string, agentId: string): string {
-  return `${channelId}:${agentId}`
+function conversationKey(channelId: string, agentId: string, threadRootMessageId: string | null): string {
+  return `${channelId}:${threadRootMessageId ?? 'timeline'}:${agentId}`
 }
 
 function exactMention(body: string, mention: string): boolean {

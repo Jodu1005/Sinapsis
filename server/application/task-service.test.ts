@@ -207,7 +207,7 @@ describe('TaskService channel ownership', () => {
     closeDatabase = undefined
   })
 
-  it('creates a task in an explicitly selected repository channel and rejects a foreign channel', () => {
+  it('creates a task Thread in an explicitly selected global channel', () => {
     const app = createApp()
     closeDatabase = app.locals.closeDatabase as () => void
     const repositories = app.locals.repositories as WorkspaceRepositories
@@ -215,25 +215,23 @@ describe('TaskService channel ownership', () => {
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
     const general = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
     const build = repositories.createChannel({ repositoryId: repository.id, name: 'build' })
-    const foreignRepository = repositories.createRepository({ workspaceId: workspace.id, name: 'docs', path: '/projects/docs' })
-    const foreign = repositories.createChannel({ repositoryId: foreignRepository.id, name: 'general' })
     const service = new TaskService(repositories)
 
-    expect(service.createTask({
+    const task = service.createTask({
       repositoryId: repository.id,
       channelId: build.id,
       title: 'Build',
       description: 'Build',
       acceptanceCriteria: 'Pass',
-    }).channelId).toBe(build.id)
+    })
+    const messages = repositories.getBootstrap().workspaces[0]!.recentMessages
+
+    expect(task.channelId).toBe(build.id)
+    expect(task.threadRootMessageId).toEqual(expect.any(String))
+    expect(messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: task.threadRootMessageId, channelId: build.id, threadRootMessageId: null, body: '任务「Build」已创建。' }),
+    ]))
     expect(general.id).not.toBe(build.id)
-    expect(() => service.createTask({
-      repositoryId: repository.id,
-      channelId: foreign.id,
-      title: 'Build',
-      description: 'Build',
-      acceptanceCriteria: 'Pass',
-    })).toThrow('does not belong')
   })
 })
 
