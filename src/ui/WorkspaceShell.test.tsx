@@ -116,7 +116,7 @@ describe('WorkspaceShell', () => {
     expect(screen.queryByText('先看一下任务队列。')).not.toBeInTheDocument()
   })
 
-  it('shows channels from every workspace without switching the task workspace', async () => {
+  it('switches the workspace context to the selected channel owner', async () => {
     const multiWorkspaceSnapshot = structuredClone(snapshot)
     const releaseWorkspace = structuredClone(snapshot.workspaces[0])
     releaseWorkspace.id = 'workspace-2'
@@ -136,8 +136,8 @@ describe('WorkspaceShell', () => {
     await user.click(await screen.findByRole('button', { name: '# release' }))
 
     expect(screen.getByText('这是 Release 工作空间的频道。')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Sinapsis' })).toHaveAttribute('aria-current', 'page')
-    expect(screen.queryByRole('button', { name: '查看 发布 Agent 配置' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Release' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: '查看 发布 Agent 配置' })).toBeInTheDocument()
   })
 
   it('moves archived channels into a collapsible read-only folder', async () => {

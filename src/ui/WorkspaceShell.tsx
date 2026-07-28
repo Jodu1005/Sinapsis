@@ -58,6 +58,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
 
   const workspace = snapshot?.workspaces.find((candidate) => candidate.id === selectedWorkspaceId) ?? snapshot?.workspaces[0]
   const selection = useMemo(() => findSelection(snapshot, selectedChannelId), [snapshot, selectedChannelId])
+  useEffect(() => { if (selection.workspace && selectedWorkspaceId !== selection.workspace.id) setSelectedWorkspaceId(selection.workspace.id) }, [selection.workspace, selectedWorkspaceId])
   useEffect(() => { if (workspace && selectedWorkspaceId !== workspace.id) setSelectedWorkspaceId(workspace.id) }, [workspace, selectedWorkspaceId])
   useEffect(() => { if (selection.channel && selectedChannelId !== selection.channel.id) setSelectedChannelId(selection.channel.id) }, [selection.channel, selectedChannelId])
   useEffect(() => {
@@ -136,6 +137,8 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     return undefined
   }
   const selectChannel = (channelId: string) => {
+    const nextSelection = findSelection(snapshot, channelId)
+    if (nextSelection.workspace) setSelectedWorkspaceId(nextSelection.workspace.id)
     setSelectedChannelId(channelId)
     setSelectedThreadRootId(null)
     setSelectedTaskId(null)
@@ -258,8 +261,8 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
 }
 
 function findSelection(snapshot: WorkspaceSnapshot | null, selectedChannelId: string | null) {
-  const all = snapshot?.workspaces.flatMap((workspace) => workspace.repositories.flatMap((repository) => repository.channels.map((channel) => ({ repository, channel })))) ?? []
-  return all.find((candidate) => candidate.channel.id === selectedChannelId) ?? all[0] ?? { repository: undefined, channel: undefined }
+  const all = snapshot?.workspaces.flatMap((workspace) => workspace.repositories.flatMap((repository) => repository.channels.map((channel) => ({ workspace, repository, channel })))) ?? []
+  return all.find((candidate) => candidate.channel.id === selectedChannelId) ?? all[0] ?? { workspace: undefined, repository: undefined, channel: undefined }
 }
 
 function findTask(workspace: WorkspaceView | undefined, taskId: string | null): TaskView | undefined {
