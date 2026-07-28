@@ -136,7 +136,8 @@ describe('WorkspaceShell', () => {
     await user.click(await screen.findByRole('button', { name: '# release' }))
 
     expect(screen.getByText('这是 Release 工作空间的频道。')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Release' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('group', { name: '当前频道工作空间：Release' })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: '当前频道工作空间：Sinapsis' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '查看 发布 Agent 配置' })).toBeInTheDocument()
   })
 
@@ -489,15 +490,18 @@ describe('WorkspaceShell', () => {
     expect(api.getBootstrap).toHaveBeenCalledTimes(2)
   })
 
-  it('opens a task directly from its workspace without changing the channel', async () => {
+  it('shows each workspace task inside its owning channel', async () => {
     render(<WorkspaceShell api={makeApi()} />)
     const user = userEvent.setup()
 
+    await screen.findByRole('button', { name: '# general' })
+    expect(screen.queryByRole('button', { name: '修复频道界面' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '# build' }))
     await screen.findByRole('button', { name: '修复频道界面' })
     await user.click(screen.getByRole('button', { name: '修复频道界面' }))
 
     expect(await screen.findByRole('heading', { name: '概览' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '# general' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '# build' })).toBeInTheDocument()
   })
 
   it('keeps the message area usable while narrow-screen drawers are closed', async () => {

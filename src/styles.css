@@ -39,11 +39,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .workspace-lockup strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-mark { display: grid; width: 25px; height: 25px; place-items: center; color: #17211d; background: #9bd5ba; border-radius: 6px; font-size: 13px; font-weight: 800; }
 .workspace-list { display: grid; gap: 3px; margin-top: 10px; }
-.workspace-selector { display: flex; align-items: center; width: 100%; min-width: 0; gap: 9px; padding: 5px 7px; border: 0; border-radius: 4px; color: #b7c7be; background: transparent; text-align: left; }
-.workspace-selector span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
-.workspace-selector:hover { color: #fff; background: #31443a; }
-.workspace-selector[aria-current="page"] { color: #17211d; background: #9bd5ba; }
-.workspace-selector[aria-current="page"] .workspace-mark { color: #dff4e8; background: #17634f; }
+.workspace-context { display: flex; align-items: center; width: 100%; min-width: 0; gap: 9px; padding: 5px 7px; border-radius: 4px; color: #17211d; background: #9bd5ba; }
+.workspace-context span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.workspace-context .workspace-mark { color: #dff4e8; background: #17634f; }
 .sidebar-section-label { padding: 22px 8px 7px; color: #9eb0a6; font-size: 11px; font-weight: 700; letter-spacing: 0; text-transform: uppercase; }
 .sidebar-channel-heading { display: flex; align-items: center; justify-content: space-between; padding: 22px 4px 7px 8px; color: #9eb0a6; font-size: 11px; font-weight: 700; letter-spacing: 0; text-transform: uppercase; }
 .sidebar-channel-heading .channel-create { width: 26px; height: 26px; color: #b7c7be; }
