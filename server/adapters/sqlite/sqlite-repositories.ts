@@ -4,6 +4,7 @@ import type { Agent, AgentStatus, CreateAgentInput } from '../../domain/agent'
 import type { DomainEvent } from '../../domain/events'
 import type { CreateMessageInput, Message, MessageSenderType } from '../../domain/message'
 import {
+  DomainError,
   type CreateTaskInput,
   type ReviewDecision,
   type Task,
@@ -232,6 +233,34 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     return channel
   }
 
+  archiveChannel(channelId: string, occurredAt: Date): Channel {
+    const channel = readChannel(this.database, channelId)
+    if (!channel) throw new Error(`Channel ${channelId} does not exist.`)
+    if (channel.archivedAt) return channel
+    const activeTask = this.database.prepare(`
+      SELECT id FROM tasks WHERE channel_id = ? AND status NOT IN ('accepted', 'merged', 'cancelled') LIMIT 1
+    `).get(channelId)
+    if (activeTask) throw new DomainError(`Channel #${channel.name} has unfinished tasks and cannot be archived.`)
+    const archivedAt = occurredAt.toISOString()
+    this.database.prepare('UPDATE channels SET archived_at = ? WHERE id = ?').run(archivedAt, channelId)
+    this.afterCommit(event('channel.changed', 'channel', channelId, archivedAt))
+    return { ...channel, archivedAt }
+  }
+
+  restoreChannel(channelId: string, occurredAt: Date): Channel {
+    const channel = readChannel(this.database, channelId)
+    if (!channel) throw new Error(`Channel ${channelId} does not exist.`)
+    if (!channel.archivedAt) return channel
+    const conflictingChannel = this.database.prepare(`
+      SELECT id FROM channels WHERE lower(trim(name)) = lower(trim(?)) AND archived_at IS NULL AND id != ? LIMIT 1
+    `).get(channel.name, channelId)
+    if (conflictingChannel) throw new DomainError(`Channel #${channel.name} already exists.`)
+    const updatedAt = occurredAt.toISOString()
+    this.database.prepare('UPDATE channels SET archived_at = NULL WHERE id = ?').run(channelId)
+    this.afterCommit(event('channel.changed', 'channel', channelId, updatedAt))
+    return { ...channel, archivedAt: null }
+  }
+
   createAgent(input: CreateAgentInput): Agent {
     const createdAt = now()
     const agent: Agent = {
@@ -332,6 +361,9 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
   }
 
   createMessage(input: CreateMessageInput): Message {
+    const channel = readChannel(this.database, input.channelId)
+    if (!channel) throw new Error(`Channel ${input.channelId} does not exist.`)
+    if (channel.archivedAt) throw new DomainError(`Channel #${channel.name} is archived and read-only.`)
     if (input.threadRootMessageId) {
       const root = readMessage(this.database, input.threadRootMessageId)
       if (!root || root.channelId !== input.channelId || root.threadRootMessageId) {
@@ -535,6 +567,14 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return this.inTransaction((unitOfWork) => unitOfWork.createChannel(input))
   }
 
+  archiveChannel(channelId: string, occurredAt: Date): Channel {
+    return this.inTransaction((unitOfWork) => unitOfWork.archiveChannel(channelId, occurredAt))
+  }
+
+  restoreChannel(channelId: string, occurredAt: Date): Channel {
+    return this.inTransaction((unitOfWork) => unitOfWork.restoreChannel(channelId, occurredAt))
+  }
+
   createAgent(input: CreateAgentInput): Agent {
     return this.inTransaction((unitOfWork) => unitOfWork.createAgent(input))
   }
@@ -677,6 +717,10 @@ export class SqliteRepositories implements WorkspaceRepositories {
 
   getMessage(messageId: string): Message | undefined {
     return readMessage(this.sqlite.database, messageId)
+  }
+
+  getChannel(channelId: string): Channel | undefined {
+    return readChannel(this.sqlite.database, channelId)
   }
 
   hasAgentMention(workspaceId: string, mentionName: string): boolean {
@@ -910,7 +954,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
         const repositories = (this.sqlite.database.prepare('SELECT id, workspace_id, name, path, current_branch, default_branch, is_clean, created_at FROM repositories WHERE workspace_id = ? ORDER BY created_at').all(workspace.id) as unknown as RepositoryRow[])
           .map((repositoryRow) => {
             const repository = mapRepository(repositoryRow)
-            const channels = (this.sqlite.database.prepare('SELECT id, repository_id, name, archived_at, created_at FROM channels WHERE repository_id = ? AND archived_at IS NULL ORDER BY created_at').all(repository.id) as unknown as ChannelRow[])
+            const channels = (this.sqlite.database.prepare('SELECT id, repository_id, name, archived_at, created_at FROM channels WHERE repository_id = ? ORDER BY archived_at IS NOT NULL, created_at').all(repository.id) as unknown as ChannelRow[])
               .map((channel) => ({
                 ...mapChannel(channel),
                 subscriberAgentIds: (this.sqlite.database.prepare('SELECT agent_id FROM channel_agent_subscriptions WHERE channel_id = ? ORDER BY agent_id').all(channel.id) as Array<{ agent_id: string }>).map((subscription) => subscription.agent_id),
@@ -948,6 +992,11 @@ function readTask(database: DatabaseSync, taskId: string): Task | undefined {
 function readMessage(database: DatabaseSync, messageId: string): Message | undefined {
   const row = database.prepare('SELECT * FROM messages WHERE id = ?').get(messageId) as MessageRow | undefined
   return row ? mapMessage(row) : undefined
+}
+
+function readChannel(database: DatabaseSync, channelId: string): Channel | undefined {
+  const row = database.prepare('SELECT id, repository_id, name, archived_at, created_at FROM channels WHERE id = ?').get(channelId) as ChannelRow | undefined
+  return row ? mapChannel(row) : undefined
 }
 
 function readAgent(database: DatabaseSync, agentId: string): Agent | undefined {

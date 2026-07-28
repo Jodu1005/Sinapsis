@@ -9,6 +9,8 @@ export interface WorkspaceApi {
   refreshAgentRuntime(agentId: string): Promise<void>
   postMessage(channelId: string, input: { body: string; taskId?: string; threadRootMessageId?: string }): Promise<ChannelMessage>
   createChannel(repositoryId: string, input: { name: string }): Promise<ChannelView>
+  archiveChannel(channelId: string): Promise<ChannelView>
+  restoreChannel(channelId: string): Promise<ChannelView>
   createTask(repositoryId: string, input: CreateTaskRequest): Promise<TaskView>
   getTaskDetails(taskId: string): Promise<TaskDetailView>
   queueTaskInput(taskId: string, body: string): Promise<TaskInputView>
@@ -56,6 +58,12 @@ export class ApiClient implements WorkspaceApi {
   }
   async createChannel(repositoryId: string, input: { name: string }): Promise<ChannelView> {
     return this.request(`/api/repositories/${repositoryId}/channels`, { method: 'POST', body: JSON.stringify(input) })
+  }
+  async archiveChannel(channelId: string): Promise<ChannelView> {
+    return this.request(`/api/channels/${channelId}/archive`, { method: 'POST' })
+  }
+  async restoreChannel(channelId: string): Promise<ChannelView> {
+    return this.request(`/api/channels/${channelId}/restore`, { method: 'POST' })
   }
   async createTask(repositoryId: string, input: CreateTaskRequest): Promise<TaskView> {
     return this.request(`/api/repositories/${repositoryId}/tasks`, { method: 'POST', body: JSON.stringify(input) })

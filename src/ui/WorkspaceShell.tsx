@@ -35,6 +35,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const [creatingAgent, setCreatingAgent] = useState(false)
   const [creatingWorkspace, setCreatingWorkspace] = useState(false)
   const [creatingChannelRepositoryId, setCreatingChannelRepositoryId] = useState<string | null>(null)
+  const [channelActionError, setChannelActionError] = useState<string | null>(null)
   const [refreshingAgentId, setRefreshingAgentId] = useState<string | null>(null)
   const [navOpen, setNavOpen] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
@@ -101,6 +102,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   if (!selection.channel || !selection.repository) return <main className="workspace-loading"><p>这个工作空间还没有频道。</p></main>
 
   const sendMessage = async (body: string) => {
+    if (selection.channel?.archivedAt) throw new Error('此频道已归档，只能查看历史记录。')
     const intent = parseMessageIntent(body, workspace.agents)
     if (intent.kind === 'error') throw new Error(intent.message)
     if (intent.kind === 'message') {
@@ -128,6 +130,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   }
   const sendThreadMessage = async (body: string) => {
     if (!threadRoot) return undefined
+    if (selection.channel?.archivedAt) throw new Error('此频道已归档，只能查看历史记录。')
     await api.postMessage(selection.channel!.id, { body, threadRootMessageId: threadRoot.id })
     await refresh()
     return undefined
@@ -138,6 +141,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     setSelectedTaskId(null)
     setSelectedTaskRepositoryId(null)
     setComposerRepositoryId(null)
+    setChannelActionError(null)
     setNavOpen(false)
   }
   const selectWorkspace = (workspaceId: string) => {
@@ -150,6 +154,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const selectTask = (repositoryId: string, taskId: string) => { setSelectedTaskRepositoryId(repositoryId); setSelectedTaskId(taskId); setContextOpen(true); setNavOpen(false) }
   const createTask = async (input: CreateTaskRequest) => {
     if (!composerRepository) throw new Error('没有可用的代码仓上下文。')
+    if (selection.channel?.archivedAt) throw new Error('此频道已归档，不能创建任务。')
     const task = await api.createTask(composerRepository.id, { ...input, channelId: selection.channel!.id })
     await refresh()
     setComposerRepositoryId(null)
@@ -195,6 +200,24 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     setSelectedTaskRepositoryId(null)
     setCreatingChannelRepositoryId(null)
   }
+  const archiveChannel = async (channelId: string) => {
+    setChannelActionError(null)
+    try {
+      await api.archiveChannel(channelId)
+      await refresh()
+    } catch (cause) {
+      setChannelActionError(cause instanceof Error ? cause.message : '无法归档频道。')
+    }
+  }
+  const restoreChannel = async (channelId: string) => {
+    setChannelActionError(null)
+    try {
+      await api.restoreChannel(channelId)
+      await refresh()
+    } catch (cause) {
+      setChannelActionError(cause instanceof Error ? cause.message : '无法恢复频道。')
+    }
+  }
   const refreshAgentRuntime = async () => {
     if (!selectedAgent || refreshingAgentId) return
     setRefreshingAgentId(selectedAgent.id)
@@ -212,16 +235,17 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     await refresh()
   }
   return <div className="workspace-shell">
-    <RepositorySidebar workspace={workspace} workspaces={snapshot.workspaces} selectedChannelId={selection.channel.id} selectedTaskId={selectedTask?.id ?? null} onSelectWorkspace={selectWorkspace} onSelectChannel={selectChannel} onSelectTask={selectTask} onCreateTask={setComposerRepositoryId} onCreateChannel={setCreatingChannelRepositoryId} onCreateWorkspace={() => setCreatingWorkspace(true)} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
+    <RepositorySidebar workspace={workspace} workspaces={snapshot.workspaces} selectedChannelId={selection.channel.id} selectedTaskId={selectedTask?.id ?? null} onSelectWorkspace={selectWorkspace} onSelectChannel={selectChannel} onSelectTask={selectTask} onCreateTask={setComposerRepositoryId} onCreateChannel={setCreatingChannelRepositoryId} onArchiveChannel={archiveChannel} onRestoreChannel={restoreChannel} channelReadOnly={Boolean(selection.channel.archivedAt)} onCreateWorkspace={() => setCreatingWorkspace(true)} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
     <main className="conversation-panel">
-      <header className="channel-header"><NavigationToggle onClick={() => setNavOpen(true)} /><div className="channel-heading"><h1># {selection.channel.name}</h1><p>全局频道</p></div><div className="header-actions"><span className="connection-state" data-reconnecting={reconnecting}>{reconnecting ? '正在重新连接' : '已连接'}</span><button type="button" className="icon-button" aria-label="打开上下文" data-tooltip="打开上下文" onClick={() => setContextOpen(true)}><PanelRightOpen size={18} /></button></div></header>
+      <header className="channel-header"><NavigationToggle onClick={() => setNavOpen(true)} /><div className="channel-heading"><h1># {selection.channel.name}</h1><p>{selection.channel.archivedAt ? '已归档频道 · 只读' : '全局频道'}</p></div><div className="header-actions"><span className="connection-state" data-reconnecting={reconnecting}>{reconnecting ? '正在重新连接' : '已连接'}</span><button type="button" className="icon-button" aria-label="打开上下文" data-tooltip="打开上下文" onClick={() => setContextOpen(true)}><PanelRightOpen size={18} /></button></div></header>
+      {channelActionError && <p className="channel-action-error" role="alert">{channelActionError}</p>}
       <ChannelTimeline messages={messages} typingAgents={typingAgents} onOpenThread={(message) => { setSelectedThreadRootId(message.id); setContextOpen(true) }} />
-      <MessageComposer channelName={selection.channel.name} agents={agents} onSend={sendMessage} />
+      {selection.channel.archivedAt ? <div className="archived-channel-notice" role="status">此频道已归档，只能查看历史记录。</div> : <MessageComposer channelName={selection.channel.name} agents={agents} onSend={sendMessage} />}
     </main>
     <aside className="context-panel" aria-label="任务与上下文" aria-hidden={narrowContext && !contextOpen || undefined} inert={narrowContext && !contextOpen} data-mobile-open={contextOpen}>
       <header className="context-header"><strong>上下文</strong><button type="button" className="icon-button context-close" aria-label="关闭上下文" data-tooltip="关闭上下文" onClick={() => setContextOpen(false)}><X size={17} /></button></header>
-      {threadRoot && <ThreadPanel root={threadRoot} replies={threadReplies} agents={agents} onSend={sendThreadMessage} onClose={() => setSelectedThreadRootId(null)} />}
-      {taskScope && <section className="context-section"><div className="context-section-heading"><h2>{taskRepository ? `${taskRepository.name} 任务` : `${workspace.name} 任务`}</h2><button type="button" className="icon-button" aria-label="新建当前上下文任务" data-tooltip="新建任务" onClick={() => setComposerRepositoryId(taskScope.id)}>+</button></div><TaskList tasks={taskScope.tasks.filter((task) => taskRepository || task.channelId === selection.channel!.id)} selectedTaskId={selectedTask?.id ?? null} onSelect={setSelectedTaskId} /></section>}
+      {threadRoot && <ThreadPanel root={threadRoot} replies={threadReplies} agents={agents} readOnly={Boolean(selection.channel.archivedAt)} onSend={sendThreadMessage} onClose={() => setSelectedThreadRootId(null)} />}
+      {taskScope && <section className="context-section"><div className="context-section-heading"><h2>{taskRepository ? `${taskRepository.name} 任务` : `${workspace.name} 任务`}</h2>{!selection.channel.archivedAt && <button type="button" className="icon-button" aria-label="新建当前上下文任务" data-tooltip="新建任务" onClick={() => setComposerRepositoryId(taskScope.id)}>+</button>}</div><TaskList tasks={taskScope.tasks.filter((task) => taskRepository || task.channelId === selection.channel!.id)} selectedTaskId={selectedTask?.id ?? null} onSelect={setSelectedTaskId} /></section>}
       {selectedTask && <section className="context-section task-details-context">{taskDetails ? <TaskDetailPanel details={taskDetails} onQueueInput={(body) => queueTaskInput(taskDetails.task.id, body)} onReview={(action) => reviewTask(taskDetails.task.id, action)} onRequeue={() => requeueTask(taskDetails.task.id)} onReadArtifact={(artifactId) => api.readArtifact(taskDetails.task.id, artifactId)} /> : <p className="context-empty">{taskDetailsError ?? '正在读取任务详情...'}</p>}</section>}
       <section className="context-section"><h2>频道操作</h2><button type="button" className="context-action" onClick={() => setContextOpen(false)}><PanelRightClose size={16} /> 收起上下文</button></section>
     </aside>

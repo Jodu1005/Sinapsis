@@ -2,10 +2,11 @@ import { Bot, CornerDownRight, X } from 'lucide-react'
 import type { AgentView, ChannelMessage } from '../domain/workspace-view'
 import { MessageComposer } from './MessageComposer'
 
-export function ThreadPanel({ root, replies, agents, onSend, onClose }: {
+export function ThreadPanel({ root, replies, agents, readOnly = false, onSend, onClose }: {
   root: ChannelMessage
   replies: ChannelMessage[]
   agents: AgentView[]
+  readOnly?: boolean
   onSend(body: string): Promise<{ notice?: string } | void>
   onClose(): void
 }) {
@@ -15,7 +16,7 @@ export function ThreadPanel({ root, replies, agents, onSend, onClose }: {
       <ThreadMessage message={root} />
       {replies.map((message) => <ThreadMessage key={message.id} message={message} />)}
     </div>
-    <MessageComposer channelName="Thread" agents={agents} onSend={onSend} />
+    {readOnly ? <p className="archived-channel-notice">此频道已归档，只能查看历史记录。</p> : <MessageComposer channelName="Thread" agents={agents} onSend={onSend} />}
   </section>
 }
 

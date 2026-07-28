@@ -59,6 +59,8 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     updateAgentResponsibilities: vi.fn().mockResolvedValue(snapshot.workspaces[0]!.agents[0]!),
     postMessage: vi.fn().mockResolvedValue(undefined),
     createChannel: vi.fn(),
+    archiveChannel: vi.fn(),
+    restoreChannel: vi.fn(),
     createTask: vi.fn(),
     getTaskDetails: vi.fn().mockResolvedValue(createdTaskDetails),
     queueTaskInput: vi.fn(),
@@ -136,6 +138,50 @@ describe('WorkspaceShell', () => {
     expect(screen.getByText('这是 Release 工作空间的频道。')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Sinapsis' })).toHaveAttribute('aria-current', 'page')
     expect(screen.queryByRole('button', { name: '查看 发布 Agent 配置' })).not.toBeInTheDocument()
+  })
+
+  it('moves archived channels into a collapsible read-only folder', async () => {
+    const archivedSnapshot = structuredClone(snapshot)
+    archivedSnapshot.workspaces[0].repositories[0].channels[1].archivedAt = '2026-07-28T08:00:00.000Z'
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={makeApi({ getBootstrap: vi.fn().mockResolvedValue(archivedSnapshot) })} />)
+
+    await screen.findByRole('button', { name: '# general' })
+    expect(screen.queryByRole('button', { name: '# build' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '已归档频道（1）' }))
+    await user.click(screen.getByRole('button', { name: '# build' }))
+
+    expect(screen.getByText('此频道已归档，只能查看历史记录。')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '发送消息' })).not.toBeInTheDocument()
+  })
+
+  it('archives and restores channels from their sidebar controls', async () => {
+    const archivedSnapshot = structuredClone(snapshot)
+    archivedSnapshot.workspaces[0].repositories[0].channels[1].archivedAt = '2026-07-28T08:00:00.000Z'
+    const api = makeApi({
+      archiveChannel: vi.fn().mockResolvedValue(archivedSnapshot.workspaces[0].repositories[0].channels[1]),
+      restoreChannel: vi.fn().mockResolvedValue(snapshot.workspaces[0].repositories[0].channels[1]),
+      getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockResolvedValueOnce(archivedSnapshot).mockResolvedValueOnce(snapshot),
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await user.click(await screen.findByRole('button', { name: '归档 # build' }))
+    expect(api.archiveChannel).toHaveBeenCalledWith('channel-build')
+    await user.click(await screen.findByRole('button', { name: '已归档频道（1）' }))
+    await user.click(screen.getByRole('button', { name: '恢复 # build' }))
+
+    expect(api.restoreChannel).toHaveBeenCalledWith('channel-build')
+  })
+
+  it('shows an archive failure without leaving an unhandled sidebar action', async () => {
+    const api = makeApi({ archiveChannel: vi.fn().mockRejectedValue(new Error('频道仍有未完成任务。')) })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await user.click(await screen.findByRole('button', { name: '归档 # build' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('频道仍有未完成任务。')
   })
 
   it('orders channels before workspace selection and tasks in the sidebar', async () => {

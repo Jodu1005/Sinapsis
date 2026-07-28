@@ -31,6 +31,9 @@ export class TaskService {
     if (!channel) {
       throw new NotFoundError(`Channel ${input.channelId ?? 'general'} does not exist.`)
     }
+    if (channel.archivedAt) {
+      throw new DomainError(`Channel #${channel.name} is archived and read-only.`)
+    }
 
     if (input.directAgentId && !workspace.agents.some((agent) => agent.id === input.directAgentId)) {
       throw new NotFoundError(`Agent ${input.directAgentId} does not belong to this workspace.`)
@@ -102,7 +105,7 @@ export class TaskService {
 
 function findChannel(workspaces: BootstrapWorkspace[], channelId: string | undefined) {
   const channels = workspaces.flatMap((workspace) => workspace.repositories.flatMap((repository) => repository.channels))
-  return channelId ? channels.find((candidate) => candidate.id === channelId) : channels.find((candidate) => candidate.name === 'general')
+  return channelId ? channels.find((candidate) => candidate.id === channelId) : channels.find((candidate) => candidate.name === 'general' && !candidate.archivedAt)
 }
 
 function canAcceptHumanInput(status: TaskStatus): boolean {

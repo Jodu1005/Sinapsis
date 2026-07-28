@@ -293,4 +293,50 @@ describe('local service API', () => {
     await expect(response.json()).resolves.toMatchObject({ id: agent.id, responsibilities: ['前端界面与交互', '组件测试'], env: ['API_TOKEN'] })
     expect(repositories.getAgent(agent.id)?.responsibilities).toEqual(['前端界面与交互', '组件测试'])
   })
+
+  it('archives a channel as read-only and restores it unless its name has been reused', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'legacy' })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const archiveResponse = await fetch(`${server.baseUrl}/api/channels/${channel.id}/archive`, { method: 'POST' })
+    const archivedBootstrap = await fetch(`${server.baseUrl}/api/bootstrap`).then((response) => response.json()) as { workspaces: Array<{ repositories: Array<{ channels: Array<{ id: string; archivedAt: string | null }> }> }> }
+    const messageResponse = await fetch(`${server.baseUrl}/api/channels/${channel.id}/messages`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ body: '不应发送' }),
+    })
+    const taskResponse = await fetch(`${server.baseUrl}/api/repositories/${repository.id}/tasks`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        channelId: channel.id, title: '不应创建', description: '归档频道不应创建任务', acceptanceCriteria: '无', labels: [],
+      }),
+    })
+
+    expect(archiveResponse.status).toBe(200)
+    expect(archivedBootstrap.workspaces[0]!.repositories[0]!.channels).toContainEqual(expect.objectContaining({ id: channel.id, archivedAt: expect.any(String) }))
+    expect(messageResponse.status).toBe(409)
+    expect(taskResponse.status).toBe(409)
+
+    const replacement = repositories.createChannel({ repositoryId: repository.id, name: 'legacy' })
+    expect(replacement.id).not.toBe(channel.id)
+    const restoreConflict = await fetch(`${server.baseUrl}/api/channels/${channel.id}/restore`, { method: 'POST' })
+    expect(restoreConflict.status).toBe(409)
+  })
+
+  it('does not archive a channel with an active task', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'delivery' })
+    repositories.createTask({ repositoryId: repository.id, channelId: channel.id, title: '运行中任务', description: '保持频道可写', acceptanceCriteria: '完成', labels: [] })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/channels/${channel.id}/archive`, { method: 'POST' })
+
+    expect(response.status).toBe(409)
+  })
 })

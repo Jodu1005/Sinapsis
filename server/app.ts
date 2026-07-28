@@ -108,6 +108,18 @@ export function createApp(options: CreateAppOptions = {}): Express {
     response.status(201).json(channel)
   }))
 
+  app.post('/api/channels/:channelId/archive', asyncRoute((request, response) => {
+    const channelId = requiredParam(request.params.channelId, 'channelId')
+    if (!repositories.getChannel(channelId)) throw new NotFoundError(`Channel ${channelId} does not exist.`)
+    response.json(repositories.archiveChannel(channelId, new Date()))
+  }))
+
+  app.post('/api/channels/:channelId/restore', asyncRoute((request, response) => {
+    const channelId = requiredParam(request.params.channelId, 'channelId')
+    if (!repositories.getChannel(channelId)) throw new NotFoundError(`Channel ${channelId} does not exist.`)
+    response.json(repositories.restoreChannel(channelId, new Date()))
+  }))
+
   app.post('/api/workspaces/:workspaceId/agents', asyncRoute(async (request, response) => {
     const body = objectBody(request.body)
     const runtime = requiredString(body, 'runtime')
@@ -282,7 +294,7 @@ class RepositoryWorkspaceCatalog implements WorkspaceCatalog {
   hasActiveChannelNamed(name: string): boolean {
     const normalizedName = name.trim().toLocaleLowerCase()
     return this.repositories.getBootstrap().workspaces.some((workspace) =>
-      workspace.repositories.some((repository) => repository.channels.some((channel) => channel.name.trim().toLocaleLowerCase() === normalizedName)),
+      workspace.repositories.some((repository) => repository.channels.some((channel) => !channel.archivedAt && channel.name.trim().toLocaleLowerCase() === normalizedName)),
     )
   }
 

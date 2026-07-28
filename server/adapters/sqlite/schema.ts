@@ -227,6 +227,12 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(11, new Date().toISOString())
     }
 
+    const twelfthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 12').get()
+    if (!twelfthMigration) {
+      database.exec('DROP INDEX IF EXISTS channels_repository_name_unique_idx')
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(12, new Date().toISOString())
+    }
+
     database.exec('COMMIT')
   } catch (error) {
     database.exec('ROLLBACK')
