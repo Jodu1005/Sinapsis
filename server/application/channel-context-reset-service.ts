@@ -1,4 +1,4 @@
-import { canResetChannelContext } from '../../shared/channel-policy'
+import { getChannelCapabilities } from '../../shared/channel-policy'
 import { DomainError, type Task } from '../domain/task'
 import type { Channel } from '../domain/workspace'
 import type { WorkspaceRepositories } from '../ports/repositories'
@@ -24,7 +24,8 @@ export class ChannelContextResetService {
     const channel = this.repositories.getChannel(channelId)
     if (!channel) throw new DomainError(`Channel ${channelId} does not exist.`)
     if (channel.archivedAt) throw new DomainError(`Archived channel #${channel.name} cannot reset its context.`)
-    if (!canResetChannelContext(channel.name)) throw new DomainError(`Only #summit can reset channel context.`)
+    const systemKey = (channel as Channel & { systemKey?: string | null }).systemKey
+    if (!getChannelCapabilities(systemKey).resetContext) throw new DomainError(`Only #summit can reset channel context.`)
 
     await this.conversations.cancelChannel(channelId)
     const activeTasks = this.repositories.getTasksForChannel(channelId)

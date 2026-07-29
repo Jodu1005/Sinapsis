@@ -5,15 +5,18 @@ import path from 'node:path'
 export interface ServiceConfig {
   dataDir: string
   port: number
+  maxWorkspaceBindingsPerChannel: number
 }
 
 const defaultDataDir = path.join(homedir(), '.sinapsis')
 const defaultPort = 4174
+const defaultMaxWorkspaceBindingsPerChannel = 5
 
 export function getServiceConfig(environment = process.env): ServiceConfig {
   return {
     dataDir: environment.SINAPSIS_DATA_DIR?.trim() || defaultDataDir,
     port: parsePort(environment.SINAPSIS_PORT),
+    maxWorkspaceBindingsPerChannel: parseMaxWorkspaceBindingsPerChannel(environment.SINAPSIS_MAX_CHANNEL_WORKSPACES),
   }
 }
 
@@ -33,4 +36,18 @@ function parsePort(value: string | undefined): number {
   }
 
   return port
+}
+
+function parseMaxWorkspaceBindingsPerChannel(value: string | undefined): number {
+  if (!value) {
+    return defaultMaxWorkspaceBindingsPerChannel
+  }
+
+  const limit = Number(value)
+
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error('SINAPSIS_MAX_CHANNEL_WORKSPACES must be a positive integer.')
+  }
+
+  return limit
 }
