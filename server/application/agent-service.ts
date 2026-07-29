@@ -69,7 +69,7 @@ export class AgentService {
 
     const mention = requiredMention(input.mention)
     if (this.workspaces.hasAgentMention(input.workspaceId, mention)) {
-      throw new DomainError(`Agent mention @${mention} already exists in this workspace.`)
+      throw new DomainError(`Agent mention @${mention} already exists globally.`)
     }
 
     const profile = this.profiles.resolve(input.runtime, input.runtimeOverrides)
@@ -91,7 +91,7 @@ export class AgentService {
       })
     } catch (error) {
       if (isMentionUniqueConstraint(error)) {
-        throw new DomainError(`Agent mention @${mention} already exists in this workspace.`)
+        throw new DomainError(`Agent mention @${mention} already exists globally.`)
       }
       throw error
     }
@@ -155,7 +155,9 @@ function requiredMention(value: string): string {
 }
 
 function isMentionUniqueConstraint(error: unknown): boolean {
-  return error instanceof Error && error.message.includes('UNIQUE constraint failed: agents.workspace_id, agents.mention_name')
+  return error instanceof Error
+    && error.message.includes('UNIQUE constraint failed')
+    && (error.message.includes('agents_mention_name_unique_idx') || error.message.includes('agents.mention_name'))
 }
 
 function requiredText(value: string, name: string): string {

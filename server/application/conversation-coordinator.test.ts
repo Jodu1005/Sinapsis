@@ -254,19 +254,23 @@ describe('ConversationCoordinator', () => {
       messages,
     })
 
-    const createAgent = (identity: string, mentionName: string, responsibilities: string[] = ['通用回复']): Agent => repositories.createAgent({
-      workspaceId: workspace.id,
-      identity,
-      mentionName,
-      runtime: 'opencode',
-      capabilityTags: [],
-      responsibilities,
-      maxConcurrentTasks: 1,
-      command: `${mentionName}-runtime`,
-      args: [],
-      model: '',
-      env: {},
-    })
+    const createAgent = (identity: string, mentionName: string, responsibilities: string[] = ['通用回复']): Agent => {
+      const agent = repositories.createAgent({
+        workspaceId: workspace.id,
+        identity,
+        mentionName,
+        runtime: 'opencode',
+        capabilityTags: [],
+        responsibilities,
+        maxConcurrentTasks: 1,
+        command: `${mentionName}-runtime`,
+        args: [],
+        model: '',
+        env: {},
+      })
+      repositories.addChannelAgent(channel.id, agent.id, new Date())
+      return agent
+    }
     const createRemoteAgent = (identity: string, mentionName: string) => {
       const remoteWorkspace = repositories.createWorkspace({ name: 'Release' })
       const remoteRepository = repositories.createRepository({
@@ -290,6 +294,7 @@ describe('ConversationCoordinator', () => {
         model: '',
         env: {},
       })
+      repositories.addChannelAgent(channel.id, agent.id, new Date())
       return { agent, repository: remoteRepository }
     }
     const setIdle = (agent: Agent, occurredAt: string) => repositories.setAgentStatus(agent.id, 'idle', new Date(occurredAt))

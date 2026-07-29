@@ -44,13 +44,13 @@ describe('AgentService', () => {
     })).rejects.toThrow('Workspace missing-workspace does not exist.')
   })
 
-  it('rejects a duplicate mention inside one workspace', async () => {
+  it('rejects a duplicate mention globally', async () => {
     const service = new AgentService(new RecordingAgentRepository(['workspace-1']), availableDetector())
     const input = { workspaceId: 'workspace-1', identity: 'Build engineer', mention: 'build', runtime: 'opencode' as const, capabilityTags: [] }
 
     await service.createAgent(input)
 
-    await expect(service.createAgent({ ...input, identity: 'Another engineer' })).rejects.toThrow('Agent mention @build already exists in this workspace.')
+    await expect(service.createAgent({ ...input, identity: 'Another engineer' })).rejects.toThrow('Agent mention @build already exists globally.')
   })
 
   it('merges overrides into a runtime preset without dropping preset fields', () => {

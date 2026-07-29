@@ -171,16 +171,57 @@ describe('SQLite workspace repositories', () => {
       .toThrow('Thread root must be a root message in the same channel.')
   })
 
-  it('automatically subscribes existing and newly created Agents to active channels', async () => {
+  it('changes ordinary channel membership only through explicit relationship operations', async () => {
     const { repositories } = await createRepositories()
     const channel = createChannel(repositories)
     const workspaceId = repositories.getBootstrap().workspaces[0]!.id
-    const firstAgent = repositories.createAgent({ workspaceId, identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: [], maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {} })
-    const secondChannel = repositories.createChannel({ name: 'release' })
+    const summit = repositories.createChannel({ name: 'summit' })
+    const agent = repositories.createAgent({ workspaceId, identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: [], maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {} })
 
-    const channels = repositories.getBootstrap().workspaces[0]!.repositories[0]!.channels
-    expect(channels.find((candidate) => candidate.id === channel.id)?.subscriberAgentIds).toContain(firstAgent.id)
-    expect(channels.find((candidate) => candidate.id === secondChannel.id)?.subscriberAgentIds).toContain(firstAgent.id)
+    expect(repositories.getChannelAgentIds(channel.id)).toEqual([])
+    expect(repositories.getChannelAgentIds(summit.id)).toEqual([agent.id])
+    expect(database!.database.prepare('SELECT 1 FROM channel_agent_memberships WHERE channel_id = ? AND agent_id = ?').get(summit.id, agent.id)).toBeUndefined()
+
+    repositories.addChannelAgent(channel.id, agent.id, new Date('2026-07-29T01:00:00.000Z'))
+    repositories.addChannelAgent(channel.id, agent.id, new Date('2026-07-29T01:01:00.000Z'))
+    expect(repositories.getChannelAgentIds(channel.id)).toEqual([agent.id])
+    repositories.removeChannelAgent(channel.id, agent.id)
+    repositories.removeChannelAgent(channel.id, agent.id)
+    expect(repositories.getChannelAgentIds(channel.id)).toEqual([])
+
+    repositories.bindChannelWorkspace(channel.id, workspaceId, new Date('2026-07-29T01:02:00.000Z'))
+    repositories.bindChannelWorkspace(channel.id, workspaceId, new Date('2026-07-29T01:03:00.000Z'))
+    expect(repositories.getChannelWorkspaceIds(channel.id)).toEqual([workspaceId])
+    repositories.unbindChannelWorkspace(channel.id, workspaceId)
+    repositories.unbindChannelWorkspace(channel.id, workspaceId)
+    expect(repositories.getChannelWorkspaceIds(channel.id)).toEqual([])
+
+    expect(() => repositories.addChannelAgent(summit.id, agent.id, new Date())).toThrow('Summit membership is managed dynamically.')
+    expect(() => repositories.removeChannelAgent(summit.id, agent.id)).toThrow('Summit membership is managed dynamically.')
+  })
+
+  it('treats direct assignment and active leases as unfinished Agent work', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const workspaceId = repositories.getBootstrap().workspaces[0]!.id
+    const repositoryId = repositories.getBootstrap().workspaces[0]!.repositories[0]!.id
+    const agent = repositories.createAgent({ workspaceId, identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: [], maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {} })
+    const direct = repositories.createTask({
+      repositoryId, channelId: channel.id, directAgentId: agent.id,
+      title: 'Direct task', description: 'Description', acceptanceCriteria: 'Done',
+    })
+
+    expect(repositories.hasUnfinishedTask(channel.id, workspaceId, agent.id)).toBe(true)
+    repositories.transitionTask(direct.id, 'cancelled', 'No longer needed')
+
+    const shared = repositories.createTask({
+      repositoryId, channelId: channel.id,
+      title: 'Shared task', description: 'Description', acceptanceCriteria: 'Done',
+    })
+    repositories.setAgentStatus(agent.id, 'idle', new Date('2026-07-29T02:00:00.000Z'))
+    expect(repositories.hasUnfinishedTask(channel.id, workspaceId, agent.id)).toBe(false)
+    expect(repositories.claimNextTask(agent.id, new Date('2026-07-29T02:01:00.000Z'))?.task.id).toBe(shared.id)
+    expect(repositories.hasUnfinishedTask(channel.id, workspaceId, agent.id)).toBe(true)
   })
 
   it('hides pre-reset channel messages and tasks from the current bootstrap context', async () => {
@@ -323,6 +364,19 @@ describe('SQLite workspace repositories', () => {
     ).get(fixture.summitId, createdAgent.id)).toBeUndefined()
   })
 
+  it('rolls back migration 14 when version 13 has normalized duplicate Agent mentions', async () => {
+    const databasePath = await createDatabasePath()
+    createVersion13Fixture(databasePath, { duplicateNormalizedMention: true })
+
+    expect(() => createSqliteDatabase(databasePath)).toThrow('Migration 14 cannot globalize duplicate Agent mention @legacy.')
+
+    const legacy = new DatabaseSync(databasePath)
+    expect(legacy.prepare('SELECT version FROM schema_migrations WHERE version = 14').get()).toBeUndefined()
+    expect((legacy.prepare('PRAGMA table_info(channels)').all() as Array<{ name: string }>).map((column) => column.name)).not.toContain('system_key')
+    expect(() => legacy.prepare('SELECT * FROM channel_agent_memberships').all()).toThrow(/no such table/)
+    legacy.close()
+  })
+
   async function createRepositories(): Promise<{
     repositories: SqliteRepositories
     publisher: RecordingPublisher
@@ -358,7 +412,7 @@ describe('SQLite workspace repositories', () => {
     })
   }
 
-  function createVersion13Fixture(databasePath: string) {
+  function createVersion13Fixture(databasePath: string, options: { duplicateNormalizedMention?: boolean } = {}) {
     const legacy = new DatabaseSync(databasePath)
     const createdAt = '2026-07-29T00:00:00.000Z'
     const fixture = {
@@ -398,6 +452,13 @@ describe('SQLite workspace repositories', () => {
       INSERT INTO agents (id, workspace_id, identity, mention_name, runtime, status, capability_tags_json, responsibilities_json, max_concurrent_tasks, command, args_json, model, env_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(fixture.agentId, fixture.workspaceId, 'Legacy agent', 'legacy', 'pi', 'idle', '[]', '[]', 1, 'pi', '[]', '', '{}', createdAt, createdAt)
+    if (options.duplicateNormalizedMention) {
+      legacy.prepare('INSERT INTO workspaces (id, name, lease_ttl_ms, created_at) VALUES (?, ?, ?, ?)').run('workspace-v13-duplicate', 'Duplicate workspace', 30000, createdAt)
+      legacy.prepare(`
+        INSERT INTO agents (id, workspace_id, identity, mention_name, runtime, status, capability_tags_json, responsibilities_json, max_concurrent_tasks, command, args_json, model, env_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('agent-v13-duplicate', 'workspace-v13-duplicate', 'Duplicate agent', ' Legacy ', 'pi', 'idle', '[]', '[]', 1, 'pi', '[]', '', '{}', createdAt, createdAt)
+    }
     legacy.prepare('INSERT INTO channel_agent_subscriptions (channel_id, agent_id, created_at) VALUES (?, ?, ?)').run(fixture.summitId, fixture.agentId, createdAt)
     legacy.prepare('INSERT INTO channel_agent_subscriptions (channel_id, agent_id, created_at) VALUES (?, ?, ?)').run(fixture.ordinaryChannelId, fixture.agentId, createdAt)
     legacy.prepare(`

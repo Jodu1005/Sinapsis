@@ -237,11 +237,6 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     this.database.prepare('INSERT INTO channels (id, repository_id, name, system_key, archived_at, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
       channel.id, repositoryId, channel.name, channel.systemKey, null, channel.createdAt,
     )
-    if (channel.systemKey !== summitSystemKey) {
-      const agents = this.database.prepare('SELECT id FROM agents').all() as Array<{ id: string }>
-      const addMember = this.database.prepare('INSERT OR IGNORE INTO channel_agent_memberships (channel_id, agent_id, created_at) VALUES (?, ?, ?)')
-      for (const agent of agents) addMember.run(channel.id, agent.id, channel.createdAt)
-    }
     return readChannel(this.database, channel.id)!
   }
 
@@ -302,21 +297,23 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
       createdAt,
       updatedAt: createdAt,
     }
-    this.database.prepare(`
-      INSERT INTO agents (
-        id, workspace_id, identity, mention_name, runtime, status, capability_tags_json, responsibilities_json,
-        max_concurrent_tasks, command, args_json, model, env_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      agent.id, workspaceId, agent.identity, agent.mentionName, agent.runtime, agent.status,
-      JSON.stringify(agent.capabilityTags), JSON.stringify(agent.responsibilities), agent.maxConcurrentTasks, agent.command, JSON.stringify(agent.args),
-      agent.model, JSON.stringify(agent.env), agent.createdAt, agent.updatedAt,
-    )
-    const channels = this.database.prepare(`
-      SELECT id FROM channels WHERE archived_at IS NULL AND (system_key IS NULL OR system_key != ?)
-    `).all(summitSystemKey) as Array<{ id: string }>
-    const addMember = this.database.prepare('INSERT OR IGNORE INTO channel_agent_memberships (channel_id, agent_id, created_at) VALUES (?, ?, ?)')
-    for (const channel of channels) addMember.run(channel.id, agent.id, createdAt)
+    try {
+      this.database.prepare(`
+        INSERT INTO agents (
+          id, workspace_id, identity, mention_name, runtime, status, capability_tags_json, responsibilities_json,
+          max_concurrent_tasks, command, args_json, model, env_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        agent.id, workspaceId, agent.identity, agent.mentionName, agent.runtime, agent.status,
+        JSON.stringify(agent.capabilityTags), JSON.stringify(agent.responsibilities), agent.maxConcurrentTasks, agent.command, JSON.stringify(agent.args),
+        agent.model, JSON.stringify(agent.env), agent.createdAt, agent.updatedAt,
+      )
+    } catch (error) {
+      if (isGlobalAgentMentionConstraint(error)) {
+        throw new DomainError(`Agent mention @${agent.mentionName} already exists globally.`)
+      }
+      throw error
+    }
     return agent
   }
 
@@ -822,9 +819,13 @@ export class SqliteRepositories implements WorkspaceRepositories {
   hasUnfinishedTask(channelId: string, workspaceId: string, agentId?: string): boolean {
     const row = agentId
       ? this.sqlite.database.prepare(`
-          SELECT 1 FROM tasks WHERE channel_id = ? AND workspace_id = ? AND direct_agent_id = ?
+          SELECT 1 FROM tasks WHERE channel_id = ? AND workspace_id = ?
+          AND (
+            direct_agent_id = ?
+            OR EXISTS (SELECT 1 FROM task_leases WHERE task_leases.task_id = tasks.id AND task_leases.agent_id = ?)
+          )
           AND status NOT IN ('accepted', 'merged', 'cancelled') LIMIT 1
-        `).get(channelId, workspaceId, agentId)
+        `).get(channelId, workspaceId, agentId, agentId)
       : this.sqlite.database.prepare(`
           SELECT 1 FROM tasks WHERE channel_id = ? AND workspace_id = ?
           AND status NOT IN ('accepted', 'merged', 'cancelled') LIMIT 1
@@ -1148,6 +1149,12 @@ function oldestRepositoryId(database: DatabaseSync): string | undefined {
 
 function workspaceIdForRepository(database: DatabaseSync, repositoryId: string): string | undefined {
   return (database.prepare('SELECT workspace_id FROM repositories WHERE id = ?').get(repositoryId) as { workspace_id: string } | undefined)?.workspace_id
+}
+
+function isGlobalAgentMentionConstraint(error: unknown): boolean {
+  return error instanceof Error
+    && error.message.includes('UNIQUE constraint failed')
+    && (error.message.includes('agents_mention_name_unique_idx') || error.message.includes('agents.mention_name'))
 }
 
 function mapWorkspace(row: WorkspaceRow): Workspace {
