@@ -1,11 +1,13 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp } from '../../app'
 import { DomainError, transitionTask, type Task } from '../../domain/task'
 import type { DomainEvent } from '../../domain/events'
 import type { DomainEventPublisher } from '../../ports/domain-event-publisher'
+import { summitSystemKey } from '../../../shared/channel-policy'
 import { createSqliteDatabase, type SqliteDatabase } from './database'
 import { SqliteRepositories } from './sqlite-repositories'
 import { startHttpTestServer } from '../../test/http-test-server'
@@ -133,8 +135,9 @@ describe('SQLite workspace repositories', () => {
   it('does not alter task state when a human message is edited or deleted', async () => {
     const { repositories } = await createRepositories()
     const channel = createChannel(repositories)
+    const repositoryId = repositories.getBootstrap().workspaces[0]!.repositories[0]!.id
     const task = repositories.createTask({
-      repositoryId: channel.repositoryId,
+      repositoryId,
       channelId: channel.id,
       title: 'Build the queue',
       description: 'Persist queued tasks.',
@@ -159,7 +162,7 @@ describe('SQLite workspace repositories', () => {
     const channel = createChannel(repositories)
     const root = repositories.createMessage({ channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: '讨论任务调度。' })
     const reply = repositories.createMessage({ channelId: channel.id, threadRootMessageId: root.id, senderType: 'agent', authorName: 'Newton', body: '我会先检查队列。' })
-    const otherChannel = repositories.createChannel({ repositoryId: channel.repositoryId, name: 'release' })
+    const otherChannel = repositories.createChannel({ name: 'release' })
 
     expect(repositories.getBootstrap().workspaces[0]!.recentMessages).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: reply.id, threadRootMessageId: root.id }),
@@ -173,7 +176,7 @@ describe('SQLite workspace repositories', () => {
     const channel = createChannel(repositories)
     const workspaceId = repositories.getBootstrap().workspaces[0]!.id
     const firstAgent = repositories.createAgent({ workspaceId, identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: [], maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {} })
-    const secondChannel = repositories.createChannel({ repositoryId: channel.repositoryId, name: 'release' })
+    const secondChannel = repositories.createChannel({ name: 'release' })
 
     const channels = repositories.getBootstrap().workspaces[0]!.repositories[0]!.channels
     expect(channels.find((candidate) => candidate.id === channel.id)?.subscriberAgentIds).toContain(firstAgent.id)
@@ -183,8 +186,9 @@ describe('SQLite workspace repositories', () => {
   it('hides pre-reset channel messages and tasks from the current bootstrap context', async () => {
     const { repositories } = await createRepositories()
     const channel = createChannel(repositories)
+    const repositoryId = repositories.getBootstrap().workspaces[0]!.repositories[0]!.id
     const beforeReset = repositories.createTask({
-      repositoryId: channel.repositoryId,
+      repositoryId,
       channelId: channel.id,
       title: '旧任务',
       description: '这条任务应保留在存储中。',
@@ -203,7 +207,7 @@ describe('SQLite workspace repositories', () => {
     await new Promise((resolve) => setTimeout(resolve, 1))
 
     const afterReset = repositories.createTask({
-      repositoryId: channel.repositoryId,
+      repositoryId,
       channelId: channel.id,
       title: '新任务',
       description: '这条任务属于新的上下文。',
@@ -265,6 +269,7 @@ describe('SQLite workspace repositories', () => {
   it('archives legacy duplicate channel names and enforces global active-channel uniqueness', async () => {
     const { repositories, databasePath } = await createRepositories()
     const channel = createChannel(repositories)
+    const repositoryId = repositories.getBootstrap().workspaces[0]!.repositories[0]!.id
     const secondWorkspace = repositories.createWorkspace({ name: 'WorkCode' })
     const secondRepository = repositories.createRepository({ workspaceId: secondWorkspace.id, name: 'workcode', path: '/projects/workcode' })
     database!.database.exec('DROP INDEX channels_active_normalized_name_unique_idx')
@@ -282,8 +287,40 @@ describe('SQLite workspace repositories', () => {
       expect.objectContaining({ name: 'engineering', archived_at: expect.any(String) }),
     ])
     expect(() => database!.database.prepare('INSERT INTO channels (id, repository_id, name, created_at) VALUES (?, ?, ?, ?)').run(
-      'another-duplicate-channel', channel.repositoryId, 'engineering', '2026-07-25T00:00:00.000Z',
+      'another-duplicate-channel', repositoryId, 'engineering', '2026-07-25T00:00:00.000Z',
     )).toThrow(/UNIQUE constraint failed/)
+  })
+
+  it('migrates a version 13 database to global channel relationships', async () => {
+    const databasePath = await createDatabasePath()
+    const fixture = createVersion13Fixture(databasePath)
+
+    database = createSqliteDatabase(databasePath)
+    const repositories = new SqliteRepositories(database, new RecordingPublisher())
+
+    expect(repositories.getChannel(fixture.summitId)).toMatchObject({
+      systemKey: summitSystemKey,
+      memberAgentIds: [fixture.agentId],
+      boundWorkspaceIds: [fixture.workspaceId],
+    })
+    expect(repositories.getChannel(fixture.ordinaryChannelId)?.memberAgentIds).toContain(fixture.agentId)
+    expect(repositories.getTask(fixture.taskId)).toMatchObject({ workspaceId: fixture.workspaceId })
+
+    const createdAgent = repositories.createAgent({
+      identity: 'Ada',
+      mentionName: 'ada',
+      runtime: 'pi',
+      capabilityTags: [],
+      maxConcurrentTasks: 1,
+      command: 'pi',
+      args: [],
+      model: '',
+      env: {},
+    })
+    expect(repositories.getChannel(fixture.summitId)?.memberAgentIds).toContain(createdAgent.id)
+    expect(database.database.prepare(
+      'SELECT 1 FROM channel_agent_memberships WHERE channel_id = ? AND agent_id = ?',
+    ).get(fixture.summitId, createdAgent.id)).toBeUndefined()
   })
 
   async function createRepositories(): Promise<{
@@ -319,5 +356,55 @@ describe('SQLite workspace repositories', () => {
       repositoryId: repository.id,
       name: 'engineering',
     })
+  }
+
+  function createVersion13Fixture(databasePath: string) {
+    const legacy = new DatabaseSync(databasePath)
+    const createdAt = '2026-07-29T00:00:00.000Z'
+    const fixture = {
+      workspaceId: 'workspace-v13',
+      repositoryId: 'repository-v13',
+      summitId: 'channel-summit-v13',
+      ordinaryChannelId: 'channel-engineering-v13',
+      agentId: 'agent-v13',
+      taskId: 'task-v13',
+    }
+
+    legacy.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, lease_ttl_ms INTEGER NOT NULL DEFAULT 30000 CHECK(lease_ttl_ms > 0));
+      CREATE TABLE repositories (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), name TEXT NOT NULL, path TEXT NOT NULL, created_at TEXT NOT NULL, current_branch TEXT NOT NULL DEFAULT '', default_branch TEXT NOT NULL DEFAULT '', is_clean INTEGER NOT NULL DEFAULT 1);
+      CREATE TABLE channels (id TEXT PRIMARY KEY, repository_id TEXT NOT NULL REFERENCES repositories(id), name TEXT NOT NULL, created_at TEXT NOT NULL, archived_at TEXT, context_reset_at TEXT);
+      CREATE TABLE agents (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), mention_name TEXT NOT NULL, runtime TEXT NOT NULL, status TEXT NOT NULL, capability_tags_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, identity TEXT NOT NULL DEFAULT '', max_concurrent_tasks INTEGER NOT NULL DEFAULT 1, command TEXT NOT NULL DEFAULT '', args_json TEXT NOT NULL DEFAULT '[]', model TEXT NOT NULL DEFAULT '', env_json TEXT NOT NULL DEFAULT '{}', responsibilities_json TEXT NOT NULL DEFAULT '[]');
+      CREATE TABLE tasks (id TEXT PRIMARY KEY, repository_id TEXT NOT NULL REFERENCES repositories(id), channel_id TEXT NOT NULL REFERENCES channels(id), direct_agent_id TEXT REFERENCES agents(id), title TEXT NOT NULL, description TEXT NOT NULL, acceptance_criteria TEXT NOT NULL, labels_json TEXT NOT NULL, status TEXT NOT NULL, queued_at TEXT NOT NULL, attempt_count INTEGER NOT NULL, max_retries INTEGER NOT NULL, timeout_ms INTEGER NOT NULL, branch_name TEXT, worktree_path TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, lease_ttl_ms INTEGER CHECK(lease_ttl_ms IS NULL OR lease_ttl_ms > 0), thread_root_message_id TEXT);
+      CREATE TABLE channel_agent_subscriptions (channel_id TEXT NOT NULL REFERENCES channels(id), agent_id TEXT NOT NULL REFERENCES agents(id), created_at TEXT NOT NULL, PRIMARY KEY (channel_id, agent_id));
+      CREATE UNIQUE INDEX agents_workspace_mention_unique_idx ON agents(workspace_id, mention_name);
+      CREATE UNIQUE INDEX channels_active_normalized_name_unique_idx ON channels(lower(trim(name))) WHERE archived_at IS NULL;
+    `)
+    const insertMigration = legacy.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+    for (let version = 1; version <= 13; version += 1) insertMigration.run(version, createdAt)
+    legacy.prepare('INSERT INTO workspaces (id, name, lease_ttl_ms, created_at) VALUES (?, ?, ?, ?)').run(fixture.workspaceId, 'Legacy workspace', 30000, createdAt)
+    legacy.prepare('INSERT INTO repositories (id, workspace_id, name, path, current_branch, default_branch, is_clean, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+      fixture.repositoryId, fixture.workspaceId, 'Legacy repository', '/projects/legacy', 'main', 'main', 1, createdAt,
+    )
+    legacy.prepare('INSERT INTO channels (id, repository_id, name, archived_at, context_reset_at, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+      fixture.summitId, fixture.repositoryId, 'summit', null, null, createdAt,
+    )
+    legacy.prepare('INSERT INTO channels (id, repository_id, name, archived_at, context_reset_at, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+      fixture.ordinaryChannelId, fixture.repositoryId, 'engineering', null, null, createdAt,
+    )
+    legacy.prepare(`
+      INSERT INTO agents (id, workspace_id, identity, mention_name, runtime, status, capability_tags_json, responsibilities_json, max_concurrent_tasks, command, args_json, model, env_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(fixture.agentId, fixture.workspaceId, 'Legacy agent', 'legacy', 'pi', 'idle', '[]', '[]', 1, 'pi', '[]', '', '{}', createdAt, createdAt)
+    legacy.prepare('INSERT INTO channel_agent_subscriptions (channel_id, agent_id, created_at) VALUES (?, ?, ?)').run(fixture.summitId, fixture.agentId, createdAt)
+    legacy.prepare('INSERT INTO channel_agent_subscriptions (channel_id, agent_id, created_at) VALUES (?, ?, ?)').run(fixture.ordinaryChannelId, fixture.agentId, createdAt)
+    legacy.prepare(`
+      INSERT INTO tasks (id, repository_id, channel_id, direct_agent_id, title, description, acceptance_criteria, labels_json, status, queued_at, attempt_count, max_retries, timeout_ms, lease_ttl_ms, branch_name, worktree_path, created_at, updated_at, thread_root_message_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(fixture.taskId, fixture.repositoryId, fixture.ordinaryChannelId, null, 'Legacy task', 'Description', 'Done', '[]', 'queued', createdAt, 0, 2, 900000, null, null, null, createdAt, createdAt, null)
+    legacy.close()
+    return fixture
   }
 })

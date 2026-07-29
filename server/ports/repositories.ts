@@ -43,9 +43,13 @@ export interface LeaseRecovery {
   outcome: 'requeued' | 'needs_human'
 }
 
+export type LegacyCreateChannelInput = CreateChannelInput & { repositoryId: string }
+export type LegacyChannel = Channel & { repositoryId: string }
+
 export interface WorkspaceUnitOfWork {
   createWorkspace(input: CreateWorkspaceInput): Workspace
   createRepository(input: CreateRepositoryInput): Repository
+  createChannel(input: LegacyCreateChannelInput): LegacyChannel
   createChannel(input: CreateChannelInput): Channel
   archiveChannel(channelId: string, occurredAt: Date): Channel
   restoreChannel(channelId: string, occurredAt: Date): Channel
@@ -72,6 +76,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   inTransaction<T>(work: (unitOfWork: WorkspaceUnitOfWork) => T): T
   createWorkspace(input: CreateWorkspaceInput): Workspace
   createRepository(input: CreateRepositoryInput): Repository
+  createChannel(input: LegacyCreateChannelInput): LegacyChannel
   createChannel(input: CreateChannelInput): Channel
   archiveChannel(channelId: string, occurredAt: Date): Channel
   restoreChannel(channelId: string, occurredAt: Date): Channel
@@ -101,7 +106,15 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   getTaskArtifact(taskId: string, artifactId: string): TaskArtifact | undefined
   getMessage(messageId: string): Message | undefined
   getChannel(channelId: string): Channel | undefined
-  hasAgentMention(workspaceId: string, mentionName: string): boolean
+  listAgents(): Agent[]
+  getChannelAgentIds(channelId: string): string[]
+  addChannelAgent(channelId: string, agentId: string, occurredAt: Date): void
+  removeChannelAgent(channelId: string, agentId: string): void
+  getChannelWorkspaceIds(channelId: string): string[]
+  bindChannelWorkspace(channelId: string, workspaceId: string, occurredAt: Date): void
+  unbindChannelWorkspace(channelId: string, workspaceId: string): void
+  hasUnfinishedTask(channelId: string, workspaceId: string, agentId?: string): boolean
+  hasAgentMention(workspaceIdOrMention: string, mentionName?: string): boolean
   getIdleAgentIds(): string[]
   recoverOrphanedAgents(occurredAt: Date): number
   setAgentStatus(agentId: string, status: AgentStatus, occurredAt: Date): Agent

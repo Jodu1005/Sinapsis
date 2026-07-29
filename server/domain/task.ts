@@ -21,6 +21,8 @@ export class DomainError extends Error {
 
 export interface Task {
   id: string
+  /** Present on all repository-returned Tasks; optional for legacy test fixtures. */
+  workspaceId?: string
   repositoryId: string
   channelId: string
   threadRootMessageId?: string | null
@@ -42,6 +44,7 @@ export interface Task {
 }
 
 export interface CreateTaskInput {
+  workspaceId?: string
   repositoryId: string
   channelId: string
   threadRootMessageId?: string | null

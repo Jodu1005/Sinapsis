@@ -14,7 +14,8 @@ export type SessionStatus = (typeof sessionStatuses)[number]
 
 export interface Agent {
   id: string
-  workspaceId: string
+  /** @deprecated SQLite compatibility locator; global Agent results do not include it. */
+  workspaceId?: string
   identity: string
   mentionName: string
   runtime: 'opencode' | 'pi' | 'claude-code'
@@ -31,7 +32,8 @@ export interface Agent {
 }
 
 export interface CreateAgentInput {
-  workspaceId: string
+  /** @deprecated SQLite compatibility locator; ignored for global Agents. */
+  workspaceId?: string
   identity: string
   mentionName: string
   runtime: Agent['runtime']

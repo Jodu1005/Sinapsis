@@ -29,12 +29,15 @@ import type { DomainEventPublisher } from '../../ports/domain-event-publisher'
 import type {
   BootstrapSnapshot,
   ExpiredLease,
+  LegacyChannel,
+  LegacyCreateChannelInput,
   LeaseRecovery,
   TaskClaim,
   WorkspaceRepositories,
   WorkspaceUnitOfWork,
 } from '../../ports/repositories'
 import type { SqliteDatabase } from './database'
+import { summitSystemKey } from '../../../shared/channel-policy'
 
 interface WorkspaceRow {
   id: string
@@ -58,6 +61,7 @@ interface ChannelRow {
   id: string
   repository_id: string
   name: string
+  system_key: string | null
   archived_at: string | null
   context_reset_at: string | null
   created_at: string
@@ -65,6 +69,7 @@ interface ChannelRow {
 
 interface TaskRow {
   id: string
+  workspace_id: string
   repository_id: string
   channel_id: string
   thread_root_message_id: string | null
@@ -213,25 +218,31 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     return repository
   }
 
-  createChannel(input: CreateChannelInput): Channel {
+  createChannel(input: LegacyCreateChannelInput): LegacyChannel
+  createChannel(input: CreateChannelInput): Channel
+  createChannel(input: CreateChannelInput): Channel | LegacyChannel {
     const createdAt = now()
-    const channel: Channel = {
+    const repositoryId = oldestRepositoryId(this.database)
+    if (!repositoryId) throw new DomainError('A global Channel requires an existing Repository.')
+    const normalizedName = requireText(input.name, 'Channel name')
+    const systemKey = input.systemKey ?? (normalizedName.toLocaleLowerCase() === summitSystemKey ? summitSystemKey : null)
+    const channel = {
       id: randomUUID(),
-      repositoryId: input.repositoryId,
-      name: requireText(input.name, 'Channel name'),
+      name: normalizedName,
+      systemKey,
+      memberAgentIds: [],
+      boundWorkspaceIds: [],
       createdAt,
     }
-    this.database.prepare('INSERT INTO channels (id, repository_id, name, archived_at, created_at) VALUES (?, ?, ?, ?, ?)').run(
-      channel.id,
-      channel.repositoryId,
-      channel.name,
-      null,
-      channel.createdAt,
+    this.database.prepare('INSERT INTO channels (id, repository_id, name, system_key, archived_at, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+      channel.id, repositoryId, channel.name, channel.systemKey, null, channel.createdAt,
     )
-    const agents = this.database.prepare('SELECT id FROM agents').all() as Array<{ id: string }>
-    const subscribe = this.database.prepare('INSERT OR IGNORE INTO channel_agent_subscriptions (channel_id, agent_id, created_at) VALUES (?, ?, ?)')
-    for (const agent of agents) subscribe.run(channel.id, agent.id, channel.createdAt)
-    return channel
+    if (channel.systemKey !== summitSystemKey) {
+      const agents = this.database.prepare('SELECT id FROM agents').all() as Array<{ id: string }>
+      const addMember = this.database.prepare('INSERT OR IGNORE INTO channel_agent_memberships (channel_id, agent_id, created_at) VALUES (?, ?, ?)')
+      for (const agent of agents) addMember.run(channel.id, agent.id, channel.createdAt)
+    }
+    return readChannel(this.database, channel.id)!
   }
 
   archiveChannel(channelId: string, occurredAt: Date): Channel {
@@ -273,9 +284,10 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
 
   createAgent(input: CreateAgentInput): Agent {
     const createdAt = now()
+    const workspaceId = oldestWorkspaceId(this.database)
+    if (!workspaceId) throw new DomainError('A global Agent requires an existing Workspace.')
     const agent: Agent = {
       id: randomUUID(),
-      workspaceId: input.workspaceId,
       identity: requireText(input.identity, 'Agent identity'),
       mentionName: requireText(input.mentionName, 'Agent mention'),
       runtime: input.runtime,
@@ -296,13 +308,15 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
         max_concurrent_tasks, command, args_json, model, env_json, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      agent.id, agent.workspaceId, agent.identity, agent.mentionName, agent.runtime, agent.status,
+      agent.id, workspaceId, agent.identity, agent.mentionName, agent.runtime, agent.status,
       JSON.stringify(agent.capabilityTags), JSON.stringify(agent.responsibilities), agent.maxConcurrentTasks, agent.command, JSON.stringify(agent.args),
       agent.model, JSON.stringify(agent.env), agent.createdAt, agent.updatedAt,
     )
-    const channels = this.database.prepare('SELECT id FROM channels WHERE archived_at IS NULL').all() as Array<{ id: string }>
-    const subscribe = this.database.prepare('INSERT OR IGNORE INTO channel_agent_subscriptions (channel_id, agent_id, created_at) VALUES (?, ?, ?)')
-    for (const channel of channels) subscribe.run(channel.id, agent.id, createdAt)
+    const channels = this.database.prepare(`
+      SELECT id FROM channels WHERE archived_at IS NULL AND (system_key IS NULL OR system_key != ?)
+    `).all(summitSystemKey) as Array<{ id: string }>
+    const addMember = this.database.prepare('INSERT OR IGNORE INTO channel_agent_memberships (channel_id, agent_id, created_at) VALUES (?, ?, ?)')
+    for (const channel of channels) addMember.run(channel.id, agent.id, createdAt)
     return agent
   }
 
@@ -319,8 +333,11 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
 
   createTask(input: CreateTaskInput): Task {
     const createdAt = now()
+    const workspaceId = input.workspaceId ?? workspaceIdForRepository(this.database, input.repositoryId)
+    if (!workspaceId) throw new DomainError(`Task repository ${input.repositoryId} does not belong to a Workspace.`)
     const task: Task = {
       id: randomUUID(),
+      workspaceId,
       repositoryId: input.repositoryId,
       channelId: input.channelId,
       threadRootMessageId: input.threadRootMessageId ?? null,
@@ -342,12 +359,12 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     }
     this.database.prepare(`
       INSERT INTO tasks (
-        id, repository_id, channel_id, thread_root_message_id, direct_agent_id, title, description, acceptance_criteria,
+        id, workspace_id, repository_id, channel_id, thread_root_message_id, direct_agent_id, title, description, acceptance_criteria,
         labels_json, status, queued_at, attempt_count, max_retries, timeout_ms, lease_ttl_ms, branch_name,
         worktree_path, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      task.id, task.repositoryId, task.channelId, task.threadRootMessageId ?? null, task.directAgentId, task.title, task.description,
+      task.id, workspaceId, task.repositoryId, task.channelId, task.threadRootMessageId ?? null, task.directAgentId, task.title, task.description,
       task.acceptanceCriteria, JSON.stringify(task.labels), task.status, task.queuedAt,
       task.attemptCount, task.maxRetries, task.timeoutMs, task.leaseTtlMs, task.branchName, task.worktreePath,
       task.createdAt, task.updatedAt,
@@ -573,7 +590,9 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return this.inTransaction((unitOfWork) => unitOfWork.createRepository(input))
   }
 
-  createChannel(input: CreateChannelInput): Channel {
+  createChannel(input: LegacyCreateChannelInput): LegacyChannel
+  createChannel(input: CreateChannelInput): Channel
+  createChannel(input: CreateChannelInput): Channel | LegacyChannel {
     return this.inTransaction((unitOfWork) => unitOfWork.createChannel(input))
   }
 
@@ -742,10 +761,82 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return readChannel(this.sqlite.database, channelId)
   }
 
-  hasAgentMention(workspaceId: string, mentionName: string): boolean {
+  listAgents(): Agent[] {
+    return (this.sqlite.database.prepare('SELECT * FROM agents ORDER BY created_at, id').all() as unknown as AgentRow[]).map(mapAgent)
+  }
+
+  getChannelAgentIds(channelId: string): string[] {
+    const channel = readChannel(this.sqlite.database, channelId)
+    if (!channel) return []
+    if (channel.systemKey === summitSystemKey) return this.listAgents().map((agent) => agent.id)
+    return (this.sqlite.database.prepare(
+      'SELECT agent_id FROM channel_agent_memberships WHERE channel_id = ? ORDER BY agent_id',
+    ).all(channelId) as Array<{ agent_id: string }>).map((row) => row.agent_id)
+  }
+
+  addChannelAgent(channelId: string, agentId: string, occurredAt: Date): void {
+    this.inTransaction(() => {
+      const channel = readChannel(this.sqlite.database, channelId)
+      if (!channel) throw new Error(`Channel ${channelId} does not exist.`)
+      if (channel.systemKey === summitSystemKey) throw new DomainError('Summit membership is managed dynamically.')
+      if (!readAgent(this.sqlite.database, agentId)) throw new Error(`Agent ${agentId} does not exist.`)
+      this.sqlite.database.prepare(`
+        INSERT OR IGNORE INTO channel_agent_memberships (channel_id, agent_id, created_at) VALUES (?, ?, ?)
+      `).run(channelId, agentId, occurredAt.toISOString())
+    })
+  }
+
+  removeChannelAgent(channelId: string, agentId: string): void {
+    this.inTransaction(() => {
+      const channel = readChannel(this.sqlite.database, channelId)
+      if (!channel) throw new Error(`Channel ${channelId} does not exist.`)
+      if (channel.systemKey === summitSystemKey) throw new DomainError('Summit membership is managed dynamically.')
+      this.sqlite.database.prepare('DELETE FROM channel_agent_memberships WHERE channel_id = ? AND agent_id = ?').run(channelId, agentId)
+    })
+  }
+
+  getChannelWorkspaceIds(channelId: string): string[] {
+    return (this.sqlite.database.prepare(
+      'SELECT workspace_id FROM channel_workspace_bindings WHERE channel_id = ? ORDER BY workspace_id',
+    ).all(channelId) as Array<{ workspace_id: string }>).map((row) => row.workspace_id)
+  }
+
+  bindChannelWorkspace(channelId: string, workspaceId: string, occurredAt: Date): void {
+    this.inTransaction(() => {
+      if (!readChannel(this.sqlite.database, channelId)) throw new Error(`Channel ${channelId} does not exist.`)
+      const workspace = this.sqlite.database.prepare('SELECT 1 FROM workspaces WHERE id = ?').get(workspaceId)
+      if (!workspace) throw new Error(`Workspace ${workspaceId} does not exist.`)
+      this.sqlite.database.prepare(`
+        INSERT OR IGNORE INTO channel_workspace_bindings (channel_id, workspace_id, created_at) VALUES (?, ?, ?)
+      `).run(channelId, workspaceId, occurredAt.toISOString())
+    })
+  }
+
+  unbindChannelWorkspace(channelId: string, workspaceId: string): void {
+    this.inTransaction(() => {
+      if (!readChannel(this.sqlite.database, channelId)) throw new Error(`Channel ${channelId} does not exist.`)
+      this.sqlite.database.prepare('DELETE FROM channel_workspace_bindings WHERE channel_id = ? AND workspace_id = ?').run(channelId, workspaceId)
+    })
+  }
+
+  hasUnfinishedTask(channelId: string, workspaceId: string, agentId?: string): boolean {
+    const row = agentId
+      ? this.sqlite.database.prepare(`
+          SELECT 1 FROM tasks WHERE channel_id = ? AND workspace_id = ? AND direct_agent_id = ?
+          AND status NOT IN ('accepted', 'merged', 'cancelled') LIMIT 1
+        `).get(channelId, workspaceId, agentId)
+      : this.sqlite.database.prepare(`
+          SELECT 1 FROM tasks WHERE channel_id = ? AND workspace_id = ?
+          AND status NOT IN ('accepted', 'merged', 'cancelled') LIMIT 1
+        `).get(channelId, workspaceId)
+    return row !== undefined
+  }
+
+  hasAgentMention(workspaceIdOrMention: string, mentionName?: string): boolean {
+    const mention = mentionName ?? workspaceIdOrMention
     const row = this.sqlite.database.prepare(
-      'SELECT 1 FROM agents WHERE workspace_id = ? AND mention_name = ? LIMIT 1',
-    ).get(workspaceId, mentionName)
+      'SELECT 1 FROM agents WHERE lower(trim(mention_name)) = lower(trim(?)) LIMIT 1',
+    ).get(mention)
     return row !== undefined
   }
 
@@ -973,11 +1064,8 @@ export class SqliteRepositories implements WorkspaceRepositories {
         const repositories = (this.sqlite.database.prepare('SELECT id, workspace_id, name, path, current_branch, default_branch, is_clean, created_at FROM repositories WHERE workspace_id = ? ORDER BY created_at').all(workspace.id) as unknown as RepositoryRow[])
           .map((repositoryRow) => {
             const repository = mapRepository(repositoryRow)
-            const channels = (this.sqlite.database.prepare('SELECT id, repository_id, name, archived_at, context_reset_at, created_at FROM channels WHERE repository_id = ? ORDER BY archived_at IS NOT NULL, created_at').all(repository.id) as unknown as ChannelRow[])
-              .map((channel) => ({
-                ...mapChannel(channel),
-                subscriberAgentIds: (this.sqlite.database.prepare('SELECT agent_id FROM channel_agent_subscriptions WHERE channel_id = ? ORDER BY agent_id').all(channel.id) as Array<{ agent_id: string }>).map((subscription) => subscription.agent_id),
-              }))
+            const channels = (this.sqlite.database.prepare('SELECT id, repository_id, name, system_key, archived_at, context_reset_at, created_at FROM channels WHERE repository_id = ? ORDER BY archived_at IS NOT NULL, created_at').all(repository.id) as unknown as ChannelRow[])
+              .map((channel) => mapChannel(this.sqlite.database, channel))
             const tasks = (this.sqlite.database.prepare(`
               SELECT tasks.* FROM tasks
               JOIN channels ON channels.id = tasks.channel_id
@@ -1022,8 +1110,8 @@ function readMessage(database: DatabaseSync, messageId: string): Message | undef
 }
 
 function readChannel(database: DatabaseSync, channelId: string): Channel | undefined {
-  const row = database.prepare('SELECT id, repository_id, name, archived_at, context_reset_at, created_at FROM channels WHERE id = ?').get(channelId) as ChannelRow | undefined
-  return row ? mapChannel(row) : undefined
+  const row = database.prepare('SELECT id, repository_id, name, system_key, archived_at, context_reset_at, created_at FROM channels WHERE id = ?').get(channelId) as ChannelRow | undefined
+  return row ? mapChannel(database, row) : undefined
 }
 
 function readAgent(database: DatabaseSync, agentId: string): Agent | undefined {
@@ -1050,6 +1138,18 @@ function labelsMatch(capabilityTags: string[], labels: string[]): boolean {
   return labels.every((label) => capabilities.has(label))
 }
 
+function oldestWorkspaceId(database: DatabaseSync): string | undefined {
+  return (database.prepare('SELECT id FROM workspaces ORDER BY created_at, rowid LIMIT 1').get() as { id: string } | undefined)?.id
+}
+
+function oldestRepositoryId(database: DatabaseSync): string | undefined {
+  return (database.prepare('SELECT id FROM repositories ORDER BY created_at, rowid LIMIT 1').get() as { id: string } | undefined)?.id
+}
+
+function workspaceIdForRepository(database: DatabaseSync, repositoryId: string): string | undefined {
+  return (database.prepare('SELECT workspace_id FROM repositories WHERE id = ?').get(repositoryId) as { workspace_id: string } | undefined)?.workspace_id
+}
+
 function mapWorkspace(row: WorkspaceRow): Workspace {
   return { id: row.id, name: row.name, leaseTtlMs: row.lease_ttl_ms, createdAt: row.created_at }
 }
@@ -1067,11 +1167,20 @@ function mapRepository(row: RepositoryRow): Repository {
   }
 }
 
-function mapChannel(row: ChannelRow): Channel {
+function mapChannel(database: DatabaseSync, row: ChannelRow): Channel {
+  const memberAgentIds = row.system_key === summitSystemKey
+    ? (database.prepare('SELECT id FROM agents ORDER BY created_at, id').all() as Array<{ id: string }>).map((agent) => agent.id)
+    : (database.prepare('SELECT agent_id FROM channel_agent_memberships WHERE channel_id = ? ORDER BY agent_id').all(row.id) as Array<{ agent_id: string }>).map((membership) => membership.agent_id)
+  const boundWorkspaceIds = (database.prepare(
+    'SELECT workspace_id FROM channel_workspace_bindings WHERE channel_id = ? ORDER BY workspace_id',
+  ).all(row.id) as Array<{ workspace_id: string }>).map((binding) => binding.workspace_id)
   return {
     id: row.id,
-    repositoryId: row.repository_id,
     name: row.name,
+    systemKey: row.system_key,
+    memberAgentIds,
+    boundWorkspaceIds,
+    subscriberAgentIds: memberAgentIds,
     archivedAt: row.archived_at,
     contextResetAt: row.context_reset_at,
     createdAt: row.created_at,
@@ -1081,6 +1190,7 @@ function mapChannel(row: ChannelRow): Channel {
 function mapTask(row: TaskRow): Task {
   return {
     id: row.id,
+    workspaceId: row.workspace_id,
     repositoryId: row.repository_id,
     channelId: row.channel_id,
     threadRootMessageId: row.thread_root_message_id,
@@ -1165,7 +1275,6 @@ function mapMessage(row: MessageRow): Message {
 function mapAgent(row: AgentRow): Agent {
   return {
     id: row.id,
-    workspaceId: row.workspace_id,
     identity: row.identity,
     mentionName: row.mention_name,
     runtime: row.runtime,

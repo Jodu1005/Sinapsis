@@ -239,6 +239,55 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(13, new Date().toISOString())
     }
 
+    const fourteenthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 14').get()
+    if (!fourteenthMigration) {
+      database.exec(`
+        ALTER TABLE channels ADD COLUMN system_key TEXT;
+        ALTER TABLE tasks ADD COLUMN workspace_id TEXT REFERENCES workspaces(id);
+
+        CREATE UNIQUE INDEX channels_system_key_unique_idx
+          ON channels(system_key) WHERE system_key IS NOT NULL;
+
+        CREATE TABLE channel_agent_memberships (
+          channel_id TEXT NOT NULL REFERENCES channels(id),
+          agent_id TEXT NOT NULL REFERENCES agents(id),
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (channel_id, agent_id)
+        );
+
+        CREATE TABLE channel_workspace_bindings (
+          channel_id TEXT NOT NULL REFERENCES channels(id),
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (channel_id, workspace_id)
+        );
+      `)
+      database.prepare(`
+        UPDATE channels SET system_key = 'summit'
+        WHERE archived_at IS NULL AND lower(trim(name)) = 'summit'
+      `).run()
+      database.prepare(`
+        INSERT INTO channel_agent_memberships (channel_id, agent_id, created_at)
+        SELECT channel_id, agent_id, created_at FROM channel_agent_subscriptions
+      `).run()
+      database.prepare(`
+        INSERT INTO channel_workspace_bindings (channel_id, workspace_id, created_at)
+        SELECT channels.id, repositories.workspace_id, channels.created_at
+        FROM channels JOIN repositories ON repositories.id = channels.repository_id
+      `).run()
+      database.prepare(`
+        UPDATE tasks SET workspace_id = (
+          SELECT repositories.workspace_id FROM repositories WHERE repositories.id = tasks.repository_id
+        )
+      `).run()
+      assertNoLegacyGlobalAgentMentionDuplicates(database)
+      database.exec(`
+        DROP INDEX agents_workspace_mention_unique_idx;
+        CREATE UNIQUE INDEX agents_mention_name_unique_idx ON agents(lower(trim(mention_name)));
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(14, new Date().toISOString())
+    }
+
     database.exec('COMMIT')
   } catch (error) {
     database.exec('ROLLBACK')
@@ -248,6 +297,19 @@ export function migrateSchema(database: DatabaseSync): void {
 
 function hasColumn(database: DatabaseSync, table: string, name: string): boolean {
   return (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some((column) => column.name === name)
+}
+
+function assertNoLegacyGlobalAgentMentionDuplicates(database: DatabaseSync): void {
+  const duplicate = database.prepare(`
+    SELECT lower(trim(mention_name)) AS mention_name
+    FROM agents
+    GROUP BY lower(trim(mention_name))
+    HAVING COUNT(*) > 1
+    LIMIT 1
+  `).get() as { mention_name: string } | undefined
+  if (duplicate) {
+    throw new Error(`Migration 14 cannot globalize duplicate Agent mention @${duplicate.mention_name}. Resolve the duplicate before retrying.`)
+  }
 }
 
 function archiveLegacyDuplicateChannelNames(database: DatabaseSync): void {
