@@ -11,6 +11,7 @@ import { createSqliteDatabase } from './adapters/sqlite/database'
 import { SqliteRepositories } from './adapters/sqlite/sqlite-repositories'
 import { AgentService } from './application/agent-service'
 import { ChannelMessageService } from './application/channel-message-service'
+import { ChannelContextResetService } from './application/channel-context-reset-service'
 import { ConversationCoordinator } from './application/conversation-coordinator'
 import { TaskExecutionCoordinator } from './application/task-execution-coordinator'
 import { TaskReviewService } from './application/task-review-service'
@@ -28,7 +29,7 @@ export interface CreateAppOptions {
   gitClient?: GitClient
   runtimeAvailabilityDetector?: RuntimeAvailabilityDetector
   executionCoordinator?: TaskExecutionCoordinator
-  conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'> & Partial<Pick<ConversationCoordinator, 'getTypingAgentIds'>>
+  conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'> & Partial<Pick<ConversationCoordinator, 'getTypingAgentIds' | 'cancelChannel'>>
   scheduler?: TaskScheduler
   reviewService?: TaskReviewService
 }
@@ -57,6 +58,9 @@ export function createApp(options: CreateAppOptions = {}): Express {
     messages,
   })
   const conversationCoordinator = options.conversationCoordinator ?? new ConversationCoordinator({ repositories, runtimes, messages })
+  const channelContextResetService = new ChannelContextResetService(repositories, {
+    cancelChannel: async (channelId) => conversationCoordinator.cancelChannel?.(channelId),
+  }, coordinator)
   const scheduler = options.scheduler ?? new TaskScheduler(repositories, coordinator)
   const reviewService = options.reviewService ?? new TaskReviewService(repositories, coordinator, messages)
 
@@ -118,6 +122,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
     const channelId = requiredParam(request.params.channelId, 'channelId')
     if (!repositories.getChannel(channelId)) throw new NotFoundError(`Channel ${channelId} does not exist.`)
     response.json(repositories.restoreChannel(channelId, new Date()))
+  }))
+
+  app.post('/api/channels/:channelId/context-reset', asyncRoute(async (request, response) => {
+    response.json(await channelContextResetService.reset(requiredParam(request.params.channelId, 'channelId')))
   }))
 
   app.post('/api/workspaces/:workspaceId/agents', asyncRoute(async (request, response) => {

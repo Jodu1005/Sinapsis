@@ -26,7 +26,7 @@ export interface RepositoryView {
   tasks: TaskView[]
 }
 
-export interface ChannelView { id: string; repositoryId: string; name: string; archivedAt?: string | null; subscriberAgentIds?: string[]; createdAt: string }
+export interface ChannelView { id: string; repositoryId: string; name: string; archivedAt?: string | null; contextResetAt?: string | null; subscriberAgentIds?: string[]; createdAt: string }
 
 export interface AgentView {
   id: string

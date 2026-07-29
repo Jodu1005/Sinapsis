@@ -339,4 +339,31 @@ describe('local service API', () => {
 
     expect(response.status).toBe(409)
   })
+
+  it('only permits the summit channel to reset its current context', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const summit = repositories.createChannel({ repositoryId: repository.id, name: 'summit' })
+    const engineering = repositories.createChannel({ repositoryId: repository.id, name: 'engineering' })
+    const task = repositories.createTask({
+      repositoryId: repository.id,
+      channelId: summit.id,
+      title: '排队任务',
+      description: '会被逻辑取消。',
+      acceptanceCriteria: '不进入新的上下文。',
+      labels: [],
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const summitResponse = await fetch(`${server.baseUrl}/api/channels/${summit.id}/context-reset`, { method: 'POST' })
+    const regularResponse = await fetch(`${server.baseUrl}/api/channels/${engineering.id}/context-reset`, { method: 'POST' })
+
+    expect(summitResponse.status).toBe(200)
+    await expect(summitResponse.json()).resolves.toMatchObject({ id: summit.id, contextResetAt: expect.any(String) })
+    expect(repositories.getTask(task.id)).toMatchObject({ status: 'cancelled' })
+    expect(regularResponse.status).toBe(409)
+  })
 })

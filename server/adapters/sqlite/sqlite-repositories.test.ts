@@ -180,6 +180,50 @@ describe('SQLite workspace repositories', () => {
     expect(channels.find((candidate) => candidate.id === secondChannel.id)?.subscriberAgentIds).toContain(firstAgent.id)
   })
 
+  it('hides pre-reset channel messages and tasks from the current bootstrap context', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const beforeReset = repositories.createTask({
+      repositoryId: channel.repositoryId,
+      channelId: channel.id,
+      title: '旧任务',
+      description: '这条任务应保留在存储中。',
+      acceptanceCriteria: '不出现在当前上下文。',
+    })
+    const beforeMessage = repositories.createMessage({
+      channelId: channel.id,
+      senderType: 'human',
+      authorName: 'Jodu',
+      body: '这条消息应保留在存储中。',
+    })
+
+    const resetAt = new Date()
+    repositories.resetChannelContext(channel.id, resetAt)
+
+    await new Promise((resolve) => setTimeout(resolve, 1))
+
+    const afterReset = repositories.createTask({
+      repositoryId: channel.repositoryId,
+      channelId: channel.id,
+      title: '新任务',
+      description: '这条任务属于新的上下文。',
+      acceptanceCriteria: '显示在当前上下文。',
+    })
+    const afterMessage = repositories.createMessage({
+      channelId: channel.id,
+      senderType: 'human',
+      authorName: 'Jodu',
+      body: '这条消息属于新的上下文。',
+    })
+
+    const snapshot = repositories.getBootstrap().workspaces[0]!
+    expect(repositories.getTask(beforeReset.id)).toBeDefined()
+    expect(repositories.getMessage(beforeMessage.id)).toBeDefined()
+    expect(snapshot.repositories[0]!.tasks.map((task) => task.id)).toEqual([afterReset.id])
+    expect(snapshot.recentMessages.map((message) => message.id)).toEqual([afterMessage.id])
+    expect(snapshot.repositories[0]!.channels[0]).toMatchObject({ contextResetAt: resetAt.toISOString() })
+  })
+
   it('returns an empty bootstrap snapshot for a new database', async () => {
     const databasePath = await createDatabasePath()
     const app = createApp({ databasePath })

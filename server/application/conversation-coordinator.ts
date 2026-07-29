@@ -100,6 +100,7 @@ export class ConversationCoordinator {
           policy: 'task-worktree',
         },
       }, (event) => this.handleRuntimeEvent(execution, event))
+      if (!execution.active) adapter.cancel(execution.session)
     } catch (error) {
       this.fail(execution, error instanceof Error ? error.message : 'Runtime 启动失败')
     }
@@ -109,6 +110,20 @@ export class ConversationCoordinator {
     return [...this.executions.values()]
       .filter((execution) => execution.channelId === channelId && execution.active)
       .map((execution) => execution.agent.id)
+  }
+
+  async cancelChannel(channelId: string): Promise<void> {
+    const executions = [...this.executions.values()].filter((execution) => execution.channelId === channelId)
+    await Promise.all(executions.map(async (execution) => {
+      execution.active = false
+      execution.pendingText = []
+      this.executions.delete(execution.key)
+      try {
+        if (execution.session) execution.adapter.cancel(execution.session)
+      } finally {
+        this.repositories.setAgentStatus(execution.agent.id, 'idle', new Date())
+      }
+    }))
   }
 
   private sendToExistingSession(execution: ConversationExecution, body: string): void {

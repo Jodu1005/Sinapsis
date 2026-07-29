@@ -59,6 +59,7 @@ interface ChannelRow {
   repository_id: string
   name: string
   archived_at: string | null
+  context_reset_at: string | null
   created_at: string
 }
 
@@ -259,6 +260,15 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     this.database.prepare('UPDATE channels SET archived_at = NULL WHERE id = ?').run(channelId)
     this.afterCommit(event('channel.changed', 'channel', channelId, updatedAt))
     return { ...channel, archivedAt: null }
+  }
+
+  resetChannelContext(channelId: string, occurredAt: Date): Channel {
+    const channel = readChannel(this.database, channelId)
+    if (!channel) throw new Error(`Channel ${channelId} does not exist.`)
+    const contextResetAt = occurredAt.toISOString()
+    this.database.prepare('UPDATE channels SET context_reset_at = ? WHERE id = ?').run(contextResetAt, channelId)
+    this.afterCommit(event('channel.changed', 'channel', channelId, contextResetAt))
+    return { ...channel, contextResetAt }
   }
 
   createAgent(input: CreateAgentInput): Agent {
@@ -575,6 +585,10 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return this.inTransaction((unitOfWork) => unitOfWork.restoreChannel(channelId, occurredAt))
   }
 
+  resetChannelContext(channelId: string, occurredAt: Date): Channel {
+    return this.inTransaction((unitOfWork) => unitOfWork.resetChannelContext(channelId, occurredAt))
+  }
+
   createAgent(input: CreateAgentInput): Agent {
     return this.inTransaction((unitOfWork) => unitOfWork.createAgent(input))
   }
@@ -692,6 +706,11 @@ export class SqliteRepositories implements WorkspaceRepositories {
 
   getTasksForRepository(repositoryId: string): Task[] {
     return (this.sqlite.database.prepare('SELECT * FROM tasks WHERE repository_id = ? ORDER BY queued_at').all(repositoryId) as unknown as TaskRow[])
+      .map(mapTask)
+  }
+
+  getTasksForChannel(channelId: string): Task[] {
+    return (this.sqlite.database.prepare('SELECT * FROM tasks WHERE channel_id = ? ORDER BY queued_at').all(channelId) as unknown as TaskRow[])
       .map(mapTask)
   }
 
@@ -954,12 +973,18 @@ export class SqliteRepositories implements WorkspaceRepositories {
         const repositories = (this.sqlite.database.prepare('SELECT id, workspace_id, name, path, current_branch, default_branch, is_clean, created_at FROM repositories WHERE workspace_id = ? ORDER BY created_at').all(workspace.id) as unknown as RepositoryRow[])
           .map((repositoryRow) => {
             const repository = mapRepository(repositoryRow)
-            const channels = (this.sqlite.database.prepare('SELECT id, repository_id, name, archived_at, created_at FROM channels WHERE repository_id = ? ORDER BY archived_at IS NOT NULL, created_at').all(repository.id) as unknown as ChannelRow[])
+            const channels = (this.sqlite.database.prepare('SELECT id, repository_id, name, archived_at, context_reset_at, created_at FROM channels WHERE repository_id = ? ORDER BY archived_at IS NOT NULL, created_at').all(repository.id) as unknown as ChannelRow[])
               .map((channel) => ({
                 ...mapChannel(channel),
                 subscriberAgentIds: (this.sqlite.database.prepare('SELECT agent_id FROM channel_agent_subscriptions WHERE channel_id = ? ORDER BY agent_id').all(channel.id) as Array<{ agent_id: string }>).map((subscription) => subscription.agent_id),
               }))
-            const tasks = (this.sqlite.database.prepare('SELECT * FROM tasks WHERE repository_id = ? ORDER BY queued_at').all(repository.id) as unknown as TaskRow[])
+            const tasks = (this.sqlite.database.prepare(`
+              SELECT tasks.* FROM tasks
+              JOIN channels ON channels.id = tasks.channel_id
+              WHERE tasks.repository_id = ?
+                AND (channels.context_reset_at IS NULL OR tasks.created_at > channels.context_reset_at)
+              ORDER BY tasks.queued_at
+            `).all(repository.id) as unknown as TaskRow[])
               .map(mapTask)
             return { ...repository, channels, tasks }
           })
@@ -969,7 +994,9 @@ export class SqliteRepositories implements WorkspaceRepositories {
           SELECT messages.* FROM messages
           JOIN channels ON channels.id = messages.channel_id
           JOIN repositories ON repositories.id = channels.repository_id
-          WHERE repositories.workspace_id = ? AND messages.deleted_at IS NULL
+          WHERE repositories.workspace_id = ?
+            AND messages.deleted_at IS NULL
+            AND (channels.context_reset_at IS NULL OR messages.created_at > channels.context_reset_at)
           ORDER BY messages.created_at DESC, messages.rowid DESC LIMIT 50
         `).all(workspace.id) as unknown as MessageRow[])
           .map(mapMessage)
@@ -995,7 +1022,7 @@ function readMessage(database: DatabaseSync, messageId: string): Message | undef
 }
 
 function readChannel(database: DatabaseSync, channelId: string): Channel | undefined {
-  const row = database.prepare('SELECT id, repository_id, name, archived_at, created_at FROM channels WHERE id = ?').get(channelId) as ChannelRow | undefined
+  const row = database.prepare('SELECT id, repository_id, name, archived_at, context_reset_at, created_at FROM channels WHERE id = ?').get(channelId) as ChannelRow | undefined
   return row ? mapChannel(row) : undefined
 }
 
@@ -1041,7 +1068,14 @@ function mapRepository(row: RepositoryRow): Repository {
 }
 
 function mapChannel(row: ChannelRow): Channel {
-  return { id: row.id, repositoryId: row.repository_id, name: row.name, archivedAt: row.archived_at, createdAt: row.created_at }
+  return {
+    id: row.id,
+    repositoryId: row.repository_id,
+    name: row.name,
+    archivedAt: row.archived_at,
+    contextResetAt: row.context_reset_at,
+    createdAt: row.created_at,
+  }
 }
 
 function mapTask(row: TaskRow): Task {

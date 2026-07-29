@@ -61,6 +61,7 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     createChannel: vi.fn(),
     archiveChannel: vi.fn(),
     restoreChannel: vi.fn(),
+    resetChannelContext: vi.fn(),
     createTask: vi.fn(),
     getTaskDetails: vi.fn().mockResolvedValue(createdTaskDetails),
     queueTaskInput: vi.fn(),
@@ -173,6 +174,40 @@ describe('WorkspaceShell', () => {
     await user.click(screen.getByRole('button', { name: '恢复 # build' }))
 
     expect(api.restoreChannel).toHaveBeenCalledWith('channel-build')
+  })
+
+  it('only presents and confirms context reset for the summit channel', async () => {
+    const summitSnapshot = structuredClone(snapshot)
+    summitSnapshot.workspaces[0].repositories[0].channels[0].name = 'summit'
+    const clearedSnapshot = structuredClone(summitSnapshot)
+    clearedSnapshot.workspaces[0].repositories[0].tasks = []
+    clearedSnapshot.workspaces[0].recentMessages = []
+    const resetChannelContext = vi.fn().mockResolvedValue({
+      ...summitSnapshot.workspaces[0].repositories[0].channels[0],
+      contextResetAt: '2026-07-29T08:00:00.000Z',
+    })
+    const api = makeApi({
+      resetChannelContext,
+      getBootstrap: vi.fn().mockResolvedValueOnce(summitSnapshot).mockResolvedValueOnce(clearedSnapshot),
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    expect(await screen.findByRole('button', { name: '清空频道上下文' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '清空频道上下文' }))
+    const dialog = screen.getByRole('dialog', { name: '清空 summit 上下文' })
+    await user.click(within(dialog).getByRole('button', { name: '清空上下文' }))
+
+    expect(resetChannelContext).toHaveBeenCalledWith('channel-general')
+    expect(await screen.findByRole('heading', { name: '# summit' })).toBeInTheDocument()
+    expect(screen.queryByText('先看一下任务队列。')).not.toBeInTheDocument()
+  })
+
+  it('does not offer context reset for a regular channel', async () => {
+    render(<WorkspaceShell api={makeApi()} />)
+
+    await screen.findByRole('heading', { name: '# general' })
+    expect(screen.queryByRole('button', { name: '清空频道上下文' })).not.toBeInTheDocument()
   })
 
   it('shows an archive failure without leaving an unhandled sidebar action', async () => {

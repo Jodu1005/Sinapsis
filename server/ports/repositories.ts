@@ -49,6 +49,7 @@ export interface WorkspaceUnitOfWork {
   createChannel(input: CreateChannelInput): Channel
   archiveChannel(channelId: string, occurredAt: Date): Channel
   restoreChannel(channelId: string, occurredAt: Date): Channel
+  resetChannelContext(channelId: string, occurredAt: Date): Channel
   createAgent(input: CreateAgentInput): Agent
   updateAgentResponsibilities(agentId: string, responsibilities: string[]): Agent
   createTask(input: CreateTaskInput): Task
@@ -74,6 +75,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   createChannel(input: CreateChannelInput): Channel
   archiveChannel(channelId: string, occurredAt: Date): Channel
   restoreChannel(channelId: string, occurredAt: Date): Channel
+  resetChannelContext(channelId: string, occurredAt: Date): Channel
   createAgent(input: CreateAgentInput): Agent
   updateAgentResponsibilities(agentId: string, responsibilities: string[]): Agent
   createTask(input: CreateTaskInput): Task
@@ -94,6 +96,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   getTask(taskId: string): Task | undefined
   getAgent(agentId: string): Agent | undefined
   getTasksForRepository(repositoryId: string): Task[]
+  getTasksForChannel(channelId: string): Task[]
   getTaskDetails(taskId: string): TaskDetails | undefined
   getTaskArtifact(taskId: string, artifactId: string): TaskArtifact | undefined
   getMessage(messageId: string): Message | undefined

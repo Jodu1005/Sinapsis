@@ -163,6 +163,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .selected-task code { padding: 2px 4px; border-radius: 3px; background: #e7ece8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .context-action { display: flex; align-items: center; width: 100%; gap: 8px; padding: 7px 0; border: 0; color: #405048; background: transparent; text-align: left; }
 .context-action:hover { color: var(--green); }
+.context-danger { color: #a64536; }
+.context-danger:hover { color: #813328; }
 .thread-panel { display: grid; min-height: 0; border-bottom: 1px solid var(--line); background: #fff; }
 .thread-panel > header { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 7px 12px; border-bottom: 1px solid var(--line); }
 .thread-panel > header strong { color: var(--ink); font-size: 12px; }
@@ -217,10 +219,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .spin { animation: spin .85s linear infinite; }
 
 .panel-scrim { position: fixed; z-index: 30; inset: 0; display: grid; padding: 20px; overflow-y: auto; place-items: center; background: rgb(16 31 23 / 42%); }
-.task-composer-panel, .agent-config-dialog, .workspace-create-dialog, .channel-create-dialog { width: min(100%, 500px); border: 1px solid #cad7d0; border-radius: 6px; background: #fff; box-shadow: 0 18px 50px rgb(12 31 22 / 27%); }
-.task-composer-panel > header, .agent-config-dialog > header, .workspace-create-dialog > header, .channel-create-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 17px 18px 14px; border-bottom: 1px solid var(--line); }
-.task-composer-panel header p, .agent-config-dialog header p, .workspace-create-dialog header p, .channel-create-dialog header p { margin: 0; color: var(--muted); font-size: 12px; }
-.task-composer-panel h2, .agent-config-dialog h2, .workspace-create-dialog h2, .channel-create-dialog h2 { margin: 2px 0 0; color: var(--ink); font-size: 17px; }
+.task-composer-panel, .agent-config-dialog, .workspace-create-dialog, .channel-create-dialog, .channel-context-reset-dialog { width: min(100%, 500px); border: 1px solid #cad7d0; border-radius: 6px; background: #fff; box-shadow: 0 18px 50px rgb(12 31 22 / 27%); }
+.task-composer-panel > header, .agent-config-dialog > header, .workspace-create-dialog > header, .channel-create-dialog > header, .channel-context-reset-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 17px 18px 14px; border-bottom: 1px solid var(--line); }
+.task-composer-panel header p, .agent-config-dialog header p, .workspace-create-dialog header p, .channel-create-dialog header p, .channel-context-reset-dialog header p { margin: 0; color: var(--muted); font-size: 12px; }
+.task-composer-panel h2, .agent-config-dialog h2, .workspace-create-dialog h2, .channel-create-dialog h2, .channel-context-reset-dialog h2 { margin: 2px 0 0; color: var(--ink); font-size: 17px; }
 .task-composer-panel form { display: grid; gap: 7px; padding: 16px 18px 18px; }
 .task-composer-panel label { margin-top: 4px; color: #405048; font-size: 12px; font-weight: 700; }
 .task-composer-panel input, .task-composer-panel textarea, .task-composer-panel select { width: 100%; border: 1px solid #c9d3cd; border-radius: 4px; padding: 7px 9px; color: var(--ink); background: #fff; }
@@ -239,6 +241,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .channel-create-dialog input { width: 100%; border: 1px solid #c9d3cd; border-radius: 4px; padding: 7px 9px; color: var(--ink); background: #fff; }
 .channel-create-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .channel-create-dialog .primary-action { min-width: 92px; margin: 0; }
+.channel-context-reset-copy { display: grid; gap: 9px; padding: 16px 18px 6px; color: #405048; font-size: 13px; line-height: 1.5; }
+.channel-context-reset-copy p { margin: 0; }
+.channel-context-reset-error { margin: 6px 18px; }
+.channel-context-reset-dialog footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px 18px; }
+.danger-action { display: inline-flex; min-width: 118px; align-items: center; justify-content: center; gap: 7px; border: 1px solid #a64536; border-radius: 4px; padding: 8px 11px; color: #fff; background: #a64536; font: inherit; font-weight: 700; }
+.danger-action:hover:not(:disabled) { background: #813328; }
 .assignment-note { margin: 2px 0 0; color: #087b62 !important; font-size: 12px; }
 .agent-config-dialog dl { display: grid; gap: 11px; margin: 0; padding: 18px; }
 .agent-create-form { display: grid; gap: 7px; padding: 16px 18px 18px; }

@@ -11,6 +11,7 @@ export interface WorkspaceApi {
   createChannel(repositoryId: string, input: { name: string }): Promise<ChannelView>
   archiveChannel(channelId: string): Promise<ChannelView>
   restoreChannel(channelId: string): Promise<ChannelView>
+  resetChannelContext(channelId: string): Promise<ChannelView>
   createTask(repositoryId: string, input: CreateTaskRequest): Promise<TaskView>
   getTaskDetails(taskId: string): Promise<TaskDetailView>
   queueTaskInput(taskId: string, body: string): Promise<TaskInputView>
@@ -64,6 +65,9 @@ export class ApiClient implements WorkspaceApi {
   }
   async restoreChannel(channelId: string): Promise<ChannelView> {
     return this.request(`/api/channels/${channelId}/restore`, { method: 'POST' })
+  }
+  async resetChannelContext(channelId: string): Promise<ChannelView> {
+    return this.request(`/api/channels/${channelId}/context-reset`, { method: 'POST' })
   }
   async createTask(repositoryId: string, input: CreateTaskRequest): Promise<TaskView> {
     return this.request(`/api/repositories/${repositoryId}/tasks`, { method: 'POST', body: JSON.stringify(input) })

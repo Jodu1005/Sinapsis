@@ -233,6 +233,12 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(12, new Date().toISOString())
     }
 
+    const thirteenthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 13').get()
+    if (!thirteenthMigration) {
+      if (!hasColumn(database, 'channels', 'context_reset_at')) database.exec('ALTER TABLE channels ADD COLUMN context_reset_at TEXT')
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(13, new Date().toISOString())
+    }
+
     database.exec('COMMIT')
   } catch (error) {
     database.exec('ROLLBACK')

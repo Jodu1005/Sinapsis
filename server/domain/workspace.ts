@@ -21,6 +21,7 @@ export interface Channel {
   repositoryId: string
   name: string
   archivedAt?: string | null
+  contextResetAt?: string | null
   subscriberAgentIds?: string[]
   createdAt: string
 }

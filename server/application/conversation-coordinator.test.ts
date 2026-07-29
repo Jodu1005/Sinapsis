@@ -131,6 +131,23 @@ describe('ConversationCoordinator', () => {
     expect(fixture.coordinator.getTypingAgentIds(fixture.channel.id)).toEqual([])
   })
 
+  it('cancels an active channel conversation without posting a cancellation reply', async () => {
+    const fixture = await createFixture()
+    const build = fixture.createAgent('Build', 'build')
+    fixture.setIdle(build, '2026-07-25T08:00:00.000Z')
+
+    await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('请检查这个问题。'))
+    const runtimeTaskId = fixture.runtime.starts[0]!.taskId
+    await fixture.coordinator.cancelChannel(fixture.channel.id)
+    fixture.runtime.emit(runtimeTaskId, { kind: 'text', text: '不应显示。' })
+    fixture.runtime.emit(runtimeTaskId, { kind: 'settled' })
+
+    expect(fixture.runtime.cancellations.map((session) => session.taskId)).toEqual([runtimeTaskId])
+    expect(fixture.coordinator.getTypingAgentIds(fixture.channel.id)).toEqual([])
+    expect(fixture.repositories.getAgent(build.id)?.status).toBe('idle')
+    expect(fixture.channelMessages().filter((message) => message.senderType === 'agent')).toEqual([])
+  })
+
   it('keeps an Agent conversation and reply inside the triggering Thread', async () => {
     const fixture = await createFixture()
     const build = fixture.createAgent('Build', 'build')

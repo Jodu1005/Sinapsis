@@ -1,4 +1,4 @@
-import { PanelRightClose, PanelRightOpen, X } from 'lucide-react'
+import { PanelRightClose, PanelRightOpen, Trash2, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CreateAgentRequest, CreateTaskRequest, WorkspaceApi } from '../api/client'
 import { ApiClient } from '../api/client'
@@ -17,6 +17,8 @@ import { WorkspaceSetup } from './WorkspaceSetup'
 import { WorkspaceCreateDialog } from './WorkspaceCreateDialog'
 import { ChannelCreateDialog } from './ChannelCreateDialog'
 import { ThreadPanel } from './ThreadPanel'
+import { ChannelContextResetDialog } from './ChannelContextResetDialog'
+import { canResetChannelContext } from '../../shared/channel-policy'
 
 export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const [defaultApi] = useState(() => new ApiClient())
@@ -40,6 +42,8 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const [navOpen, setNavOpen] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
   const [selectedThreadRootId, setSelectedThreadRootId] = useState<string | null>(null)
+  const [contextResetDialogOpen, setContextResetDialogOpen] = useState(false)
+  const [resettingChannelContext, setResettingChannelContext] = useState(false)
   const narrowNavigation = useMediaQuery('(max-width: 700px)')
   const narrowContext = useMediaQuery('(max-width: 980px)')
   const refresh = useCallback(async () => {
@@ -214,6 +218,26 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
       setChannelActionError(cause instanceof Error ? cause.message : '无法恢复频道。')
     }
   }
+  const resetChannelContext = async () => {
+    if (!selection.channel || resettingChannelContext) return
+    setResettingChannelContext(true)
+    setChannelActionError(null)
+    try {
+      await api.resetChannelContext(selection.channel.id)
+      setSelectedTaskId(null)
+      setSelectedTaskRepositoryId(null)
+      setTaskDetails(null)
+      setSelectedThreadRootId(null)
+      await refresh()
+      setContextResetDialogOpen(false)
+      setResettingChannelContext(false)
+    } catch (cause) {
+      setResettingChannelContext(false)
+      const resetError = cause instanceof Error ? cause : new Error('无法清空频道上下文。')
+      setChannelActionError(resetError.message)
+      throw resetError
+    }
+  }
   const refreshAgentRuntime = async () => {
     if (!selectedAgent || refreshingAgentId) return
     setRefreshingAgentId(selectedAgent.id)
@@ -243,13 +267,14 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
       {threadRoot && <ThreadPanel root={threadRoot} replies={threadReplies} agents={agents} readOnly={Boolean(selection.channel.archivedAt)} onSend={sendThreadMessage} onClose={() => setSelectedThreadRootId(null)} />}
       {taskScope && <section className="context-section"><div className="context-section-heading"><h2>{taskRepository ? `${taskRepository.name} 任务` : `${workspace.name} 任务`}</h2>{!selection.channel.archivedAt && <button type="button" className="icon-button" aria-label="新建当前上下文任务" data-tooltip="新建任务" onClick={() => setComposerRepositoryId(taskScope.id)}>+</button>}</div><TaskList tasks={taskScope.tasks.filter((task) => taskRepository || task.channelId === selection.channel!.id)} selectedTaskId={selectedTask?.id ?? null} onSelect={setSelectedTaskId} /></section>}
       {selectedTask && <section className="context-section task-details-context">{taskDetails ? <TaskDetailPanel details={taskDetails} onQueueInput={(body) => queueTaskInput(taskDetails.task.id, body)} onReview={(action) => reviewTask(taskDetails.task.id, action)} onRequeue={() => requeueTask(taskDetails.task.id)} onReadArtifact={(artifactId) => api.readArtifact(taskDetails.task.id, artifactId)} /> : <p className="context-empty">{taskDetailsError ?? '正在读取任务详情...'}</p>}</section>}
-      <section className="context-section"><h2>频道操作</h2><button type="button" className="context-action" onClick={() => setContextOpen(false)}><PanelRightClose size={16} /> 收起上下文</button></section>
+      <section className="context-section"><h2>频道操作</h2>{!selection.channel.archivedAt && canResetChannelContext(selection.channel.name) && <button type="button" className="context-action context-danger" onClick={() => setContextResetDialogOpen(true)}><Trash2 size={16} /> 清空频道上下文</button>}<button type="button" className="context-action" onClick={() => setContextOpen(false)}><PanelRightClose size={16} /> 收起上下文</button></section>
     </aside>
     {composerRepository && <TaskComposerPanel repository={composerRepository} agents={workspace.agents} onCreate={createTask} onClose={() => setComposerRepositoryId(null)} />}
     {creatingWorkspace && <WorkspaceCreateDialog onCreate={createWorkspace} onClose={() => setCreatingWorkspace(false)} />}
     {creatingChannelRepositoryId && <ChannelCreateDialog onCreate={createChannel} onClose={() => setCreatingChannelRepositoryId(null)} />}
     {creatingAgent && <AgentCreateDialog onCreate={createAgent} onClose={() => setCreatingAgent(false)} />}
     {selectedAgent && <AgentConfigDialog agent={selectedAgent} refreshingRuntime={refreshingAgentId === selectedAgent.id} onRefreshRuntime={refreshAgentRuntime} onUpdateResponsibilities={updateAgentResponsibilities} onClose={() => setSelectedAgent(null)} />}
+    {contextResetDialogOpen && <ChannelContextResetDialog channelName={selection.channel.name} onConfirm={resetChannelContext} onClose={() => setContextResetDialogOpen(false)} />}
   </div>
 }
 
