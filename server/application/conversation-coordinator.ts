@@ -113,17 +113,26 @@ export class ConversationCoordinator {
   }
 
   async cancelChannel(channelId: string): Promise<void> {
-    const executions = [...this.executions.values()].filter((execution) => execution.channelId === channelId)
+    await this.cancelExecutions((execution) => execution.channelId === channelId)
+  }
+
+  async cancelAgentInChannel(channelId: string, agentId: string): Promise<void> {
+    await this.cancelExecutions((execution) => execution.channelId === channelId && execution.agent.id === agentId)
+  }
+
+  private async cancelExecutions(matches: (execution: ConversationExecution) => boolean): Promise<void> {
+    const executions = [...this.executions.values()].filter((execution) => execution.active && matches(execution))
+    const affectedAgentIds = new Set(executions.map((execution) => execution.agent.id))
     await Promise.all(executions.map(async (execution) => {
       execution.active = false
       execution.pendingText = []
       this.executions.delete(execution.key)
-      try {
-        if (execution.session) execution.adapter.cancel(execution.session)
-      } finally {
-        this.repositories.setAgentStatus(execution.agent.id, 'idle', new Date())
-      }
+      if (execution.session) execution.adapter.cancel(execution.session)
     }))
+    for (const agentId of affectedAgentIds) {
+      const stillActive = [...this.executions.values()].some((execution) => execution.active && execution.agent.id === agentId)
+      this.repositories.setAgentStatus(agentId, stillActive ? 'busy' : 'idle', new Date())
+    }
   }
 
   private sendToExistingSession(execution: ConversationExecution, body: string): void {

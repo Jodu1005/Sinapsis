@@ -366,4 +366,117 @@ describe('local service API', () => {
     expect(repositories.getTask(task.id)).toMatchObject({ status: 'cancelled' })
     expect(regularResponse.status).toBe(409)
   })
+
+  it('manages ordinary channel members through human-only routes and keeps summit automatic', async () => {
+    const cancellations: Array<{ channelId: string; agentId: string }> = []
+    const app = createApp({
+      conversationCoordinator: {
+        dispatch: async () => undefined,
+        cancelAgentInChannel: async (channelId, agentId) => {
+          cancellations.push({ channelId, agentId })
+        },
+      },
+    })
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'engineering' })
+    const summit = repositories.createChannel({ name: 'summit' })
+    const newton = createTestAgent(repositories, 'Newton', 'newton')
+    const clawd = createTestAgent(repositories, 'Clawd', 'clawd')
+    repositories.bindChannelWorkspace(channel.id, workspace.id, new Date())
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const addNewton = await fetch(`${server.baseUrl}/api/channels/${channel.id}/agents`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: newton.id }),
+    })
+    const addNewtonAgain = await fetch(`${server.baseUrl}/api/channels/${channel.id}/agents`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: newton.id }),
+    })
+    await fetch(`${server.baseUrl}/api/channels/${channel.id}/agents`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: clawd.id }),
+    })
+    const forgedActor = await fetch(`${server.baseUrl}/api/channels/${channel.id}/agents`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: clawd.id, actorType: 'agent' }),
+    })
+    const summitMutation = await fetch(`${server.baseUrl}/api/channels/${summit.id}/agents`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agentId: newton.id }),
+    })
+
+    expect(addNewton.status).toBe(200)
+    expect(addNewtonAgain.status).toBe(200)
+    await expect(addNewtonAgain.json()).resolves.toHaveLength(1)
+    expect(forgedActor.status).toBe(400)
+    expect(summitMutation.status).toBe(409)
+
+    repositories.createTask({
+      workspaceId: workspace.id,
+      repositoryId: repository.id,
+      channelId: channel.id,
+      directAgentId: newton.id,
+      title: 'Active task',
+      description: 'Membership must remain while this task is unfinished.',
+      acceptanceCriteria: 'Accepted',
+    })
+    const busyRemoval = await fetch(`${server.baseUrl}/api/channels/${channel.id}/agents/${newton.id}`, { method: 'DELETE' })
+    const idleRemoval = await fetch(`${server.baseUrl}/api/channels/${channel.id}/agents/${clawd.id}`, { method: 'DELETE' })
+
+    expect(busyRemoval.status).toBe(409)
+    expect(idleRemoval.status).toBe(200)
+    expect(cancellations).toEqual([{ channelId: channel.id, agentId: clawd.id }])
+  })
+
+  it('manages channel workspace bindings idempotently and enforces limits and unfinished work', async () => {
+    const app = createApp({ maxWorkspaceBindingsPerChannel: 1 })
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const otherWorkspace = repositories.createWorkspace({ name: 'Docs' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'engineering' })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const bind = await fetch(`${server.baseUrl}/api/channels/${channel.id}/workspaces`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceId: workspace.id }),
+    })
+    const duplicate = await fetch(`${server.baseUrl}/api/channels/${channel.id}/workspaces`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceId: workspace.id }),
+    })
+    const overLimit = await fetch(`${server.baseUrl}/api/channels/${channel.id}/workspaces`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workspaceId: otherWorkspace.id }),
+    })
+
+    expect(bind.status).toBe(200)
+    expect(duplicate.status).toBe(200)
+    await expect(duplicate.json()).resolves.toHaveLength(1)
+    expect(overLimit.status).toBe(409)
+
+    repositories.createTask({
+      workspaceId: workspace.id,
+      repositoryId: repository.id,
+      channelId: channel.id,
+      title: 'Active task',
+      description: 'The binding must remain.',
+      acceptanceCriteria: 'Accepted',
+    })
+    const unbind = await fetch(`${server.baseUrl}/api/channels/${channel.id}/workspaces/${workspace.id}`, { method: 'DELETE' })
+
+    expect(unbind.status).toBe(409)
+    expect(repositories.getChannelWorkspaceIds(channel.id)).toEqual([workspace.id])
+  })
 })
+
+function createTestAgent(repositories: WorkspaceRepositories, identity: string, mentionName: string) {
+  return repositories.createAgent({
+    identity,
+    mentionName,
+    runtime: 'pi',
+    capabilityTags: ['general'],
+    maxConcurrentTasks: 1,
+    command: 'pi',
+    args: [],
+    model: '',
+    env: {},
+  })
+}

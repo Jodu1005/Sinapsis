@@ -10,8 +10,10 @@ import { SseDomainEventPublisher } from './adapters/sse/sse-domain-event-publish
 import { createSqliteDatabase } from './adapters/sqlite/database'
 import { SqliteRepositories } from './adapters/sqlite/sqlite-repositories'
 import { AgentService } from './application/agent-service'
+import { ChannelMembershipService } from './application/channel-membership-service'
 import { ChannelMessageService } from './application/channel-message-service'
 import { ChannelContextResetService } from './application/channel-context-reset-service'
+import { ChannelWorkspaceService } from './application/channel-workspace-service'
 import { ConversationCoordinator } from './application/conversation-coordinator'
 import { TaskExecutionCoordinator } from './application/task-execution-coordinator'
 import { TaskReviewService } from './application/task-review-service'
@@ -26,17 +28,19 @@ import type { WorkspaceRepositories, WorkspaceUnitOfWork } from './ports/reposit
 
 export interface CreateAppOptions {
   databasePath?: string
+  maxWorkspaceBindingsPerChannel?: number
   gitClient?: GitClient
   runtimeAvailabilityDetector?: RuntimeAvailabilityDetector
   executionCoordinator?: TaskExecutionCoordinator
-  conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'> & Partial<Pick<ConversationCoordinator, 'getTypingAgentIds' | 'cancelChannel'>>
+  conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'> & Partial<Pick<ConversationCoordinator, 'getTypingAgentIds' | 'cancelChannel' | 'cancelAgentInChannel'>>
   scheduler?: TaskScheduler
   reviewService?: TaskReviewService
 }
 
 export function createApp(options: CreateAppOptions = {}): Express {
   const app = express()
-  const databasePath = options.databasePath ?? defaultDatabasePath()
+  const serviceConfig = getServiceConfig()
+  const databasePath = options.databasePath ?? defaultDatabasePath(serviceConfig.dataDir)
   const database = createSqliteDatabase(databasePath)
   const eventPublisher = new SseDomainEventPublisher()
   const repositories = new SqliteRepositories(database, eventPublisher)
@@ -61,6 +65,13 @@ export function createApp(options: CreateAppOptions = {}): Express {
   const channelContextResetService = new ChannelContextResetService(repositories, {
     cancelChannel: async (channelId) => conversationCoordinator.cancelChannel?.(channelId),
   }, coordinator)
+  const channelMembershipService = new ChannelMembershipService(repositories, {
+    cancelAgentInChannel: async (channelId, agentId) => conversationCoordinator.cancelAgentInChannel?.(channelId, agentId),
+  })
+  const channelWorkspaceService = new ChannelWorkspaceService(
+    repositories,
+    options.maxWorkspaceBindingsPerChannel ?? serviceConfig.maxWorkspaceBindingsPerChannel,
+  )
   const scheduler = options.scheduler ?? new TaskScheduler(repositories, coordinator)
   const reviewService = options.reviewService ?? new TaskReviewService(repositories, coordinator, messages)
 
@@ -126,6 +137,52 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   app.post('/api/channels/:channelId/context-reset', asyncRoute(async (request, response) => {
     response.json(await channelContextResetService.reset(requiredParam(request.params.channelId, 'channelId')))
+  }))
+
+  app.get('/api/channels/:channelId/agents', asyncRoute((request, response) => {
+    response.json(channelMembershipService.list(requiredParam(request.params.channelId, 'channelId')).map(sanitizeAgent))
+  }))
+
+  app.post('/api/channels/:channelId/agents', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['agentId'])
+    const agents = channelMembershipService.add(
+      requiredParam(request.params.channelId, 'channelId'),
+      requiredString(body, 'agentId'),
+      'human',
+    )
+    response.json(agents.map(sanitizeAgent))
+  }))
+
+  app.delete('/api/channels/:channelId/agents/:agentId', asyncRoute(async (request, response) => {
+    const agents = await channelMembershipService.remove(
+      requiredParam(request.params.channelId, 'channelId'),
+      requiredParam(request.params.agentId, 'agentId'),
+      'human',
+    )
+    response.json(agents.map(sanitizeAgent))
+  }))
+
+  app.get('/api/channels/:channelId/workspaces', asyncRoute((request, response) => {
+    response.json(channelWorkspaceService.list(requiredParam(request.params.channelId, 'channelId')))
+  }))
+
+  app.post('/api/channels/:channelId/workspaces', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['workspaceId'])
+    response.json(channelWorkspaceService.bind(
+      requiredParam(request.params.channelId, 'channelId'),
+      requiredString(body, 'workspaceId'),
+      'human',
+    ))
+  }))
+
+  app.delete('/api/channels/:channelId/workspaces/:workspaceId', asyncRoute((request, response) => {
+    response.json(channelWorkspaceService.unbind(
+      requiredParam(request.params.channelId, 'channelId'),
+      requiredParam(request.params.workspaceId, 'workspaceId'),
+      'human',
+    ))
   }))
 
   app.post('/api/workspaces/:workspaceId/agents', asyncRoute(async (request, response) => {
@@ -458,10 +515,10 @@ const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => 
   response.status(500).json({ error: 'Internal server error.' })
 }
 
-function defaultDatabasePath(): string {
+function defaultDatabasePath(dataDir = getServiceConfig().dataDir): string {
   if (process.env.NODE_ENV === 'test') {
     return ':memory:'
   }
 
-  return path.join(getServiceConfig().dataDir, 'sinapsis.sqlite')
+  return path.join(dataDir, 'sinapsis.sqlite')
 }

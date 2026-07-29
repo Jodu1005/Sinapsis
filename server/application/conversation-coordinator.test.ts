@@ -148,6 +148,34 @@ describe('ConversationCoordinator', () => {
     expect(fixture.channelMessages().filter((message) => message.senderType === 'agent')).toEqual([])
   })
 
+  it('cancels only the targeted Agent conversations in one channel', async () => {
+    const fixture = await createFixture()
+    const planning = fixture.repositories.createChannel({ repositoryId: fixture.repository.id, name: 'planning' })
+    const build = fixture.createAgent('Build', 'build')
+    const review = fixture.createAgent('Review', 'review')
+    fixture.repositories.addChannelAgent(planning.id, build.id, new Date())
+    fixture.setIdle(build, '2026-07-25T08:00:00.000Z')
+    fixture.setIdle(review, '2026-07-25T08:01:00.000Z')
+
+    await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('@Build 请检查构建。'))
+    const targetedRuntimeTaskId = fixture.runtime.starts[0]!.taskId
+    fixture.setIdle(build, '2026-07-25T08:02:00.000Z')
+    await fixture.coordinator.dispatch(planning.id, fixture.postHumanIn(planning.id, '@Build 请规划发布。'))
+    const otherChannelRuntimeTaskId = fixture.runtime.starts[1]!.taskId
+    await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('@Review 请检查界面。'))
+    const otherAgentRuntimeTaskId = fixture.runtime.starts[2]!.taskId
+
+    await fixture.coordinator.cancelAgentInChannel(fixture.channel.id, build.id)
+    await fixture.coordinator.cancelAgentInChannel(fixture.channel.id, build.id)
+
+    expect(fixture.runtime.cancellations.map((session) => session.taskId)).toEqual([targetedRuntimeTaskId])
+    expect(fixture.coordinator.getTypingAgentIds(fixture.channel.id)).toEqual([review.id])
+    expect(fixture.coordinator.getTypingAgentIds(planning.id)).toEqual([build.id])
+    expect(fixture.repositories.getAgent(build.id)?.status).toBe('busy')
+    expect(otherChannelRuntimeTaskId).not.toBe(targetedRuntimeTaskId)
+    expect(otherAgentRuntimeTaskId).not.toBe(targetedRuntimeTaskId)
+  })
+
   it('keeps an Agent conversation and reply inside the triggering Thread', async () => {
     const fixture = await createFixture()
     const build = fixture.createAgent('Build', 'build')
@@ -299,9 +327,10 @@ describe('ConversationCoordinator', () => {
     }
     const setIdle = (agent: Agent, occurredAt: string) => repositories.setAgentStatus(agent.id, 'idle', new Date(occurredAt))
     const postHuman = (body: string, threadRootMessageId?: string) => messages.postHuman(channel.id, body, null, threadRootMessageId)
+    const postHumanIn = (channelId: string, body: string, threadRootMessageId?: string) => messages.postHuman(channelId, body, null, threadRootMessageId)
     const channelMessages = () => repositories.getBootstrap().workspaces[0]!.recentMessages.filter((message) => message.channelId === channel.id)
 
-    return { repositories, repository, channel, runtime, coordinator, createAgent, createRemoteAgent, setIdle, postHuman, channelMessages }
+    return { repositories, repository, channel, runtime, coordinator, createAgent, createRemoteAgent, setIdle, postHuman, postHumanIn, channelMessages }
   }
 })
 
