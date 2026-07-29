@@ -110,6 +110,7 @@ describe('SQLite workspace repositories', () => {
   it('rejects moving an accepted task back to queued', () => {
     const acceptedTask: Task = {
       id: 'task-1',
+      workspaceId: 'workspace-1',
       repositoryId: 'repository-1',
       channelId: 'channel-1',
       directAgentId: null,
