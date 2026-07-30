@@ -17,6 +17,8 @@ export function ChannelAgentMembers({ channel, agents, api, onChanged }: {
   const capabilities = getChannelCapabilities(channel.systemKey)
   const members = useMemo(() => capabilities.automaticAllAgents ? agents : agents.filter((agent) => channel.memberAgentIds.includes(agent.id)), [agents, capabilities.automaticAllAgents, channel.memberAgentIds])
   const availableAgents = useMemo(() => agents.filter((agent) => !channel.memberAgentIds.includes(agent.id)), [agents, channel.memberAgentIds])
+  const duplicateMemberIdentities = useMemo(() => findDuplicateIdentities(members), [members])
+  const duplicateAvailableIdentities = useMemo(() => findDuplicateIdentities(availableAgents), [availableAgents])
 
   const changeMembership = async (agentId: string, action: 'add' | 'remove') => {
     if (saving) return
@@ -37,13 +39,31 @@ export function ChannelAgentMembers({ channel, agents, api, onChanged }: {
 
   return <section className="context-section channel-agent-members"><div className="context-section-heading"><h2>频道 Agent</h2>{capabilities.mutableMembership && <button type="button" className="context-small-action" onClick={() => setPickerOpen(true)} disabled={saving || availableAgents.length === 0}><UserPlus size={15} /> 添加 Agent</button>}</div>
     {capabilities.automaticAllAgents && <p className="channel-management-note">自动同步所有 Agent</p>}
-    <ul className="channel-management-list">{members.map((agent) => <li key={agent.id}><div><strong>{agent.identity}</strong><small>{agentStatusLabel(agent.status)} · Runtime: {runtimeLabel(agent.runtime)}</small></div>{capabilities.mutableMembership && <button type="button" className="icon-button management-remove" aria-label={`移除 ${agent.identity}`} data-tooltip={`移除 ${agent.identity}`} disabled={saving} onClick={() => void changeMembership(agent.id, 'remove')}><UserMinus size={16} /></button>}</li>)}</ul>
+    <ul className="channel-management-list">{members.map((agent) => {
+      const removeLabel = duplicateMemberIdentities.has(normalizeIdentity(agent.identity)) ? `移除 ${agent.identity} @${agent.mentionName}` : `移除 ${agent.identity}`
+      return <li key={agent.id}><div><strong>{agent.identity}</strong><small>@{agent.mentionName} · {agentStatusLabel(agent.status)} · Runtime: {runtimeLabel(agent.runtime)}</small></div>{capabilities.mutableMembership && <button type="button" className="icon-button management-remove" aria-label={removeLabel} data-tooltip={removeLabel} disabled={saving} onClick={() => void changeMembership(agent.id, 'remove')}><UserMinus size={16} /></button>}</li>
+    })}</ul>
     {members.length === 0 && <p className="context-empty">尚未添加 Agent。</p>}
     {error && <p className="form-error" role="alert">{error}</p>}
-    {pickerOpen && <EntityPickerDialog title="添加 Agent" items={availableAgents.map((agent) => ({ id: agent.id, label: agent.identity, description: `${agentStatusLabel(agent.status)} · ${runtimeLabel(agent.runtime)}` }))} onSelect={(agentId) => void changeMembership(agentId, 'add')} onClose={() => setPickerOpen(false)} />}
+    {pickerOpen && <EntityPickerDialog title="添加 Agent" items={availableAgents.map((agent) => ({ id: agent.id, label: duplicateAvailableIdentities.has(normalizeIdentity(agent.identity)) ? `${agent.identity} @${agent.mentionName}` : agent.identity, description: `${agentStatusLabel(agent.status)} · ${runtimeLabel(agent.runtime)}` }))} onSelect={(agentId) => void changeMembership(agentId, 'add')} onClose={() => setPickerOpen(false)} />}
   </section>
 }
 
 function runtimeLabel(runtime: AgentView['runtime']): string {
   return { opencode: 'OpenCode', pi: 'Pi', 'claude-code': 'Claude Code' }[runtime]
+}
+
+function findDuplicateIdentities(agents: AgentView[]): Set<string> {
+  const seen = new Set<string>()
+  const duplicates = new Set<string>()
+  for (const agent of agents) {
+    const identity = normalizeIdentity(agent.identity)
+    if (seen.has(identity)) duplicates.add(identity)
+    seen.add(identity)
+  }
+  return duplicates
+}
+
+function normalizeIdentity(identity: string): string {
+  return identity.trim().toLocaleLowerCase()
 }
