@@ -891,10 +891,19 @@ export class SqliteRepositories implements WorkspaceRepositories {
       let candidate: Task | undefined
       while (true) {
         const candidates = (database.prepare(`
-          SELECT * FROM tasks
-          WHERE status = 'queued' AND (direct_agent_id IS NULL OR direct_agent_id = ?)
-          ORDER BY queued_at ASC, rowid ASC
-        `).all(agentId) as unknown as TaskRow[]).map(mapTask)
+          SELECT tasks.* FROM tasks
+          JOIN channels ON channels.id = tasks.channel_id
+          WHERE tasks.status = 'queued' AND (tasks.direct_agent_id IS NULL OR tasks.direct_agent_id = ?)
+          AND (
+            channels.system_key = ?
+            OR EXISTS (
+              SELECT 1 FROM channel_agent_memberships
+              WHERE channel_agent_memberships.channel_id = tasks.channel_id
+                AND channel_agent_memberships.agent_id = ?
+            )
+          )
+          ORDER BY tasks.queued_at ASC, tasks.rowid ASC
+        `).all(agentId, summitSystemKey, agentId) as unknown as TaskRow[]).map(mapTask)
         candidate = candidates.find((task) => task.directAgentId === agent.id || labelsMatch(agent.capabilityTags, task.labels))
         if (!candidate) return undefined
 

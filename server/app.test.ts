@@ -239,6 +239,7 @@ describe('local service API', () => {
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
     repositories.createChannel({ name: 'general' })
     const build = repositories.createChannel({ name: 'build' })
+    repositories.bindChannelWorkspace(build.id, workspace.id, new Date())
     const server = await startHttpTestServer(app)
     closeServer = server.close
 
@@ -255,6 +256,56 @@ describe('local service API', () => {
 
     expect(response.status).toBe(201)
     await expect(response.json()).resolves.toMatchObject({ repositoryId: repository.id, channelId: build.id })
+  })
+
+  it('creates a Channel task using an explicitly bound Workspace', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'build' })
+    repositories.bindChannelWorkspace(channel.id, workspace.id, new Date())
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/channels/${channel.id}/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        workspaceId: workspace.id,
+        title: 'Build',
+        description: 'Build',
+        acceptanceCriteria: 'Pass',
+      }),
+    })
+
+    expect(response.status).toBe(201)
+    await expect(response.json()).resolves.toMatchObject({
+      workspaceId: workspace.id,
+      repositoryId: repository.id,
+      channelId: channel.id,
+    })
+  })
+
+  it('requires a Workspace for Channel task creation and rejects unbound legacy task channels', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'build' })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+    const taskBody = { channelId: channel.id, title: 'Build', description: 'Build', acceptanceCriteria: 'Pass' }
+
+    const missingWorkspace = await fetch(`${server.baseUrl}/api/channels/${channel.id}/tasks`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(taskBody),
+    })
+    const unboundLegacy = await fetch(`${server.baseUrl}/api/repositories/${repository.id}/tasks`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(taskBody),
+    })
+
+    expect(missingWorkspace.status).toBe(400)
+    expect(unboundLegacy.status).toBe(409)
   })
 
   it('returns a conflict when concurrent agent creation races at the SQLite mention constraint', async () => {
@@ -349,6 +400,46 @@ describe('local service API', () => {
     expect(response.status).toBe(201)
     expect(dispatched).toEqual([{ channelId: channel.id, messageId: expect.any(String), body: '请介绍一下当前项目。' }])
     expect(repositories.getTasksForRepository(repository.id)).toEqual([])
+  })
+
+  it('does not inject a Channel message or foreign task reference into another Channel active task', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const delivery = repositories.createChannel({ name: 'delivery' })
+    const support = repositories.createChannel({ name: 'support' })
+    const agent = createTestAgent(repositories, 'Build', 'build')
+    repositories.addChannelAgent(delivery.id, agent.id, new Date())
+    repositories.addChannelAgent(support.id, agent.id, new Date())
+    repositories.setAgentStatus(agent.id, 'idle', new Date())
+    const task = repositories.createTask({
+      repositoryId: repository.id,
+      channelId: delivery.id,
+      directAgentId: agent.id,
+      title: 'Delivery task',
+      description: 'Keep its inputs isolated.',
+      acceptanceCriteria: 'No cross-channel input.',
+      labels: ['general'],
+    })
+    expect(repositories.claimNextTask(agent.id, new Date())).toBeDefined()
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const busyMention = await fetch(`${server.baseUrl}/api/channels/${support.id}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ body: '@Build 这条消息属于 support。' }),
+    })
+    const foreignTask = await fetch(`${server.baseUrl}/api/channels/${support.id}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ body: '错误的任务引用。', taskId: task.id }),
+    })
+
+    expect(busyMention.status).toBe(409)
+    expect(foreignTask.status).toBe(409)
+    expect(repositories.getTaskDetails(task.id)?.inputs).toEqual([])
   })
 
   it('refreshes a persisted runtime and returns a sanitized Agent payload', async () => {

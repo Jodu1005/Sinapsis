@@ -36,7 +36,7 @@ describe('task API', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ directory: '/projects/sinapsis' }),
     })
     const repository = await repositoryResponse.json() as { id: string }
-    const channelId = await firstChannelId(server.baseUrl)
+    const channelId = await firstChannelId(server.baseUrl, workspace.id)
 
     const response = await fetch(`${server.baseUrl}/api/repositories/${repository.id}/tasks`, {
       method: 'POST',
@@ -86,7 +86,7 @@ describe('task API', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ directory: '/projects/sinapsis' }),
     })
     const repository = await repositoryResponse.json() as { id: string }
-    const channelId = await firstChannelId(server.baseUrl)
+    const channelId = await firstChannelId(server.baseUrl, workspace.id)
 
     const response = await fetch(`${server.baseUrl}/api/repositories/${repository.id}/tasks`, {
       method: 'POST',
@@ -188,17 +188,24 @@ describe('task API', () => {
     return {
       server,
       repositoryId: repository.id,
-      channelId: await firstChannelId(server.baseUrl),
+      channelId: await firstChannelId(server.baseUrl, workspace.id),
       repositories: app.locals.repositories as WorkspaceRepositories,
     }
   }
 })
 
-async function firstChannelId(baseUrl: string): Promise<string> {
+async function firstChannelId(baseUrl: string, workspaceId: string): Promise<string> {
   const bootstrap = await fetch(`${baseUrl}/api/bootstrap`).then((response) => response.json()) as {
     workspaces: Array<{ repositories: Array<{ channels: Array<{ id: string }> }> }>
   }
-  return bootstrap.workspaces[0]!.repositories[0]!.channels[0]!.id
+  const channelId = bootstrap.workspaces[0]!.repositories[0]!.channels[0]!.id
+  const response = await fetch(`${baseUrl}/api/channels/${channelId}/workspaces`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ workspaceId }),
+  })
+  expect(response.status).toBe(200)
+  return channelId
 }
 
 describe('TaskService human input queue', () => {
@@ -228,7 +235,7 @@ describe('TaskService channel ownership', () => {
     closeDatabase = undefined
   })
 
-  it('creates a task Thread in an explicitly selected global channel', () => {
+  it('creates a task Thread in an explicitly selected bound Workspace and global channel', () => {
     const app = createApp()
     closeDatabase = app.locals.closeDatabase as () => void
     const repositories = app.locals.repositories as WorkspaceRepositories
@@ -236,10 +243,11 @@ describe('TaskService channel ownership', () => {
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
     const general = repositories.createChannel({ name: 'general' })
     const build = repositories.createChannel({ name: 'build' })
+    repositories.bindChannelWorkspace(build.id, workspace.id, new Date())
     const service = new TaskService(repositories)
 
     const task = service.createTask({
-      repositoryId: repository.id,
+      workspaceId: workspace.id,
       channelId: build.id,
       title: 'Build',
       description: 'Build',
@@ -247,12 +255,56 @@ describe('TaskService channel ownership', () => {
     })
     const messages = repositories.getBootstrap().workspaces[0]!.recentMessages
 
+    expect(task.workspaceId).toBe(workspace.id)
+    expect(task.repositoryId).toBe(repository.id)
     expect(task.channelId).toBe(build.id)
     expect(task.threadRootMessageId).toEqual(expect.any(String))
     expect(messages).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: task.threadRootMessageId, channelId: build.id, threadRootMessageId: null, body: '任务「Build」已创建。' }),
     ]))
     expect(general.id).not.toBe(build.id)
+  })
+
+  it('rejects a task Workspace that is not bound to the Channel', () => {
+    const app = createApp()
+    closeDatabase = app.locals.closeDatabase as () => void
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const unbound = repositories.createWorkspace({ name: 'Docs' })
+    repositories.createRepository({ workspaceId: unbound.id, name: 'docs', path: '/projects/docs' })
+    const channel = repositories.createChannel({ name: 'build' })
+    repositories.bindChannelWorkspace(channel.id, workspace.id, new Date())
+    const service = new TaskService(repositories)
+
+    expect(() => service.createTask({
+      workspaceId: unbound.id,
+      channelId: channel.id,
+      title: 'Build',
+      description: 'Build',
+      acceptanceCriteria: 'Pass',
+    })).toThrow('Workspace is not bound to this channel')
+  })
+
+  it('rejects a directly assigned Agent outside the Channel membership', () => {
+    const app = createApp()
+    closeDatabase = app.locals.closeDatabase as () => void
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'build' })
+    repositories.bindChannelWorkspace(channel.id, workspace.id, new Date())
+    const outsider = createTestAgent(repositories, 'Outsider', 'outsider')
+    const service = new TaskService(repositories)
+
+    expect(() => service.createTask({
+      workspaceId: workspace.id,
+      channelId: channel.id,
+      directAgentId: outsider.id,
+      title: 'Build',
+      description: 'Build',
+      acceptanceCriteria: 'Pass',
+    })).toThrow('Agent is not a member of this channel')
   })
 })
 
@@ -276,4 +328,18 @@ class TaskInputRepositories {
     this.createdInputs.push({ taskId, body })
     return { id: 'input-1', taskId, body, createdAt: '2026-07-25T00:00:00.000Z', consumedAt: null }
   }
+}
+
+function createTestAgent(repositories: WorkspaceRepositories, identity: string, mentionName: string) {
+  return repositories.createAgent({
+    identity,
+    mentionName,
+    runtime: 'pi',
+    capabilityTags: ['general'],
+    maxConcurrentTasks: 1,
+    command: 'pi',
+    args: [],
+    model: '',
+    env: {},
+  })
 }

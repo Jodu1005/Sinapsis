@@ -235,6 +235,7 @@ describe('SQLite workspace repositories', () => {
       title: 'Shared task', description: 'Description', acceptanceCriteria: 'Done',
     })
     repositories.setAgentStatus(agent.id, 'idle', new Date('2026-07-29T02:00:00.000Z'))
+    repositories.addChannelAgent(channel.id, agent.id, new Date('2026-07-29T02:00:00.000Z'))
     expect(repositories.hasUnfinishedTask(channel.id, workspaceId, agent.id)).toBe(false)
     expect(repositories.claimNextTask(agent.id, new Date('2026-07-29T02:01:00.000Z'))?.task.id).toBe(shared.id)
     expect(repositories.hasUnfinishedTask(channel.id, workspaceId, agent.id)).toBe(true)

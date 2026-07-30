@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto'
+import { mkdir } from 'node:fs/promises'
+import path from 'node:path'
 import type { RuntimeKind } from '../adapters/runtime/runtime-profile'
 import type { Agent } from '../domain/agent'
 import type { Message } from '../domain/message'
 import { DomainError } from '../domain/task'
+import type { Channel } from '../domain/workspace'
 import type { BootstrapWorkspace, WorkspaceRepositories } from '../ports/repositories'
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../ports/runtime'
 import { ChannelMessageService } from './channel-message-service'
@@ -10,6 +13,7 @@ import { ChannelMessageService } from './channel-message-service'
 export interface ConversationCoordinatorOptions {
   repositories: WorkspaceRepositories
   runtimes: Partial<Record<RuntimeKind, RuntimeAdapter>>
+  conversationDirectory: string
   messages?: ChannelMessageService
 }
 
@@ -25,21 +29,17 @@ interface ConversationExecution {
   active: boolean
 }
 
-interface ChannelContext {
-  workspace: BootstrapWorkspace
-  repository: BootstrapWorkspace['repositories'][number]
-  channel: BootstrapWorkspace['repositories'][number]['channels'][number]
-}
-
 export class ConversationCoordinator {
   private readonly repositories: WorkspaceRepositories
   private readonly runtimes: Partial<Record<RuntimeKind, RuntimeAdapter>>
+  private readonly conversationDirectory: string
   private readonly messages: ChannelMessageService
   private readonly executions = new Map<string, ConversationExecution>()
 
   constructor(options: ConversationCoordinatorOptions) {
     this.repositories = options.repositories
     this.runtimes = options.runtimes
+    this.conversationDirectory = options.conversationDirectory
     this.messages = options.messages ?? new ChannelMessageService(options.repositories)
   }
 
@@ -47,14 +47,13 @@ export class ConversationCoordinator {
     if (message.channelId !== channelId) throw new DomainError('Message does not belong to this channel.')
 
     const snapshot = this.repositories.getBootstrap()
-    const context = this.requireChannelContext(snapshot.workspaces, channelId)
+    const channel = this.requireChannel(channelId)
     const threadRootMessageId = message.threadRootMessageId ?? null
-    const agents = snapshot.workspaces.flatMap((workspace) => workspace.agents)
-      .filter((agent) => !context.channel.subscriberAgentIds || context.channel.subscriberAgentIds.includes(agent.id))
+    const memberAgentIds = new Set(this.repositories.getChannelAgentIds(channelId))
+    const agents = this.repositories.listAgents().filter((agent) => memberAgentIds.has(agent.id))
     const agent = this.selectAgent(agents, channelId, threadRootMessageId, message.body)
     if (!agent) return
 
-    const agentContext = this.requireAgentContext(snapshot.workspaces, agent.id)
     const key = conversationKey(channelId, agent.id, threadRootMessageId)
     const existing = this.executions.get(key)
     if (existing?.session) {
@@ -83,14 +82,16 @@ export class ConversationCoordinator {
     this.repositories.setAgentStatus(agent.id, 'busy', new Date())
 
     try {
+      const conversationPath = path.join(this.conversationDirectory, channelId, agent.id)
+      await mkdir(conversationPath, { recursive: true })
       execution.session = await adapter.start({
         taskId: execution.runtimeTaskId,
         mode: 'conversation',
-        title: `频道 #${context.channel.name} 对话`,
-        description: `${this.recentConversationContext(context.workspace, channelId, message.id, threadRootMessageId)}\n\n当前 Agent 职责：${agent.responsibilities?.join('；') || '未设置（仅处理被直接提及的消息）'}。`,
+        title: `频道 #${channel.name} 对话`,
+        description: `${this.recentConversationContext(snapshot.workspaces, channelId, message.id, threadRootMessageId)}\n\n当前 Agent 职责：${agent.responsibilities?.join('；') || '未设置（仅处理被直接提及的消息）'}。`,
         acceptanceCriteria: '在频道中给出简洁、清晰的回复。',
         initialMessage: message.body,
-        worktreePath: agentContext.repository.path,
+        worktreePath: conversationPath,
         profile: {
           runtime: agent.runtime,
           command: agent.command,
@@ -212,29 +213,18 @@ export class ConversationCoordinator {
       ?.agent
   }
 
-  private requireChannelContext(workspaces: BootstrapWorkspace[], channelId: string): ChannelContext {
-    for (const workspace of workspaces) {
-      for (const repository of workspace.repositories) {
-        const channel = repository.channels.find((candidate) => candidate.id === channelId)
-        if (channel) return { workspace, repository, channel }
-      }
-    }
+  private requireChannel(channelId: string): Channel {
+    const channel = this.repositories.getChannel(channelId)
+    if (channel) return channel
     throw new DomainError(`Channel ${channelId} does not exist.`)
   }
 
-  private requireAgentContext(workspaces: BootstrapWorkspace[], agentId: string): { workspace: BootstrapWorkspace; repository: BootstrapWorkspace['repositories'][number] } {
-    for (const workspace of workspaces) {
-      if (!workspace.agents.some((agent) => agent.id === agentId)) continue
-      const repository = workspace.repositories[0]
-      if (repository) return { workspace, repository }
-    }
-    throw new DomainError(`Agent ${agentId} does not have a workspace repository.`)
-  }
-
-  private recentConversationContext(workspace: BootstrapWorkspace, channelId: string, currentMessageId: string, threadRootMessageId: string | null): string {
-    const history = workspace.recentMessages
+  private recentConversationContext(workspaces: BootstrapWorkspace[], channelId: string, currentMessageId: string, threadRootMessageId: string | null): string {
+    const messages = new Map(workspaces.flatMap((workspace) => workspace.recentMessages).map((message) => [message.id, message]))
+    const history = [...messages.values()]
       .filter((message) => message.channelId === channelId && message.id !== currentMessageId)
       .filter((message) => !threadRootMessageId || message.id === threadRootMessageId || message.threadRootMessageId === threadRootMessageId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
       .slice(-8)
       .map((message) => `${message.authorName}: ${compactContextBody(message.body)}`)
     return history.join('\n') || '（频道尚无此前消息。）'

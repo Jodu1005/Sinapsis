@@ -60,8 +60,10 @@ export class TaskExecutionCoordinator {
   }
 
   async startClaim(claim: TaskClaim): Promise<void> {
-    const { task, agent, repository } = this.requireClaimContext(claim)
+    const task = claim.task
+    const agentId = claim.lease.agentId
     try {
+      const { agent, repository } = this.requireClaimContext(claim)
       const allocation = task.worktreePath && task.branchName
         ? { worktreePath: task.worktreePath, branchName: task.branchName }
         : await this.worktrees.create({ id: task.id, repositoryId: repository.id, repositoryRoot: repository.path, targetBranch: repository.defaultBranch })
@@ -98,13 +100,14 @@ export class TaskExecutionCoordinator {
       this.repositories.updateTaskSession(task.id, agent.id, { runtimeSessionId: session.sessionId, status: 'running' })
       this.deliverUnconsumedInputs(task.id)
     } catch (error) {
-      this.fail(task.id, agent.id, error instanceof Error ? error.message : 'Runtime 启动失败')
+      this.fail(task.id, agentId, error instanceof Error ? error.message : 'Runtime 启动失败')
     }
   }
 
-  queueInputForActiveAgent(agentId: string, body: string): void {
+  queueInputForActiveAgent(agentId: string, channelId: string, body: string): void {
     const task = this.repositories.getActiveTaskForAgent(agentId)
     if (!task) throw new DomainError('Agent does not have an active task.')
+    if (task.channelId !== channelId) throw new DomainError('Agent active task belongs to another channel.')
     const input = this.repositories.createTaskInput(task.id, body)
     this.deliverQueuedInput(task.id, input.id)
   }
@@ -413,13 +416,13 @@ export class TaskExecutionCoordinator {
   }
 
   private requireClaimContext(claim: TaskClaim): { task: Task; agent: Agent; repository: { id: string; path: string; defaultBranch: string } } {
-    for (const workspace of this.repositories.getBootstrap().workspaces) {
-      const repository = workspace.repositories.find((candidate) => candidate.id === claim.task.repositoryId)
-      if (!repository) continue
-      const agent = workspace.agents.find((candidate) => candidate.id === claim.lease.agentId)
-      if (agent) return { task: claim.task, agent, repository }
+    const agent = this.repositories.getAgent(claim.lease.agentId)
+    const repository = this.repositories.getRepository(claim.task.repositoryId)
+    if (!agent || !repository) throw new Error('Claim agent or repository does not exist.')
+    if (repository.workspaceId !== claim.task.workspaceId) {
+      throw new DomainError(`Task repository ${repository.id} does not belong to Workspace ${claim.task.workspaceId}.`)
     }
-    throw new Error('Claim agent or repository does not exist.')
+    return { task: claim.task, agent, repository }
   }
 }
 

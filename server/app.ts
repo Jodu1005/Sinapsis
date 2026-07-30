@@ -61,7 +61,12 @@ export function createApp(options: CreateAppOptions = {}): Express {
     artifactDirectory: path.join(path.dirname(databasePath), 'artifacts'),
     messages,
   })
-  const conversationCoordinator = options.conversationCoordinator ?? new ConversationCoordinator({ repositories, runtimes, messages })
+  const conversationCoordinator = options.conversationCoordinator ?? new ConversationCoordinator({
+    repositories,
+    runtimes,
+    messages,
+    conversationDirectory: path.join(path.dirname(databasePath), 'conversations'),
+  })
   const channelContextResetService = new ChannelContextResetService(repositories, {
     cancelChannel: async (channelId) => conversationCoordinator.cancelChannel?.(channelId),
   }, coordinator)
@@ -234,12 +239,34 @@ export function createApp(options: CreateAppOptions = {}): Express {
     response.json(sanitizeAgent(agent))
   }))
 
+  app.post('/api/channels/:channelId/tasks', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['workspaceId', 'title', 'description', 'acceptanceCriteria', 'labels', 'directAgentId', 'timeoutMs', 'leaseTtlMs', 'maxRetries'])
+    const task = taskService.createTask({
+      workspaceId: requiredString(body, 'workspaceId'),
+      channelId: requiredParam(request.params.channelId, 'channelId'),
+      title: requiredString(body, 'title'),
+      description: requiredString(body, 'description'),
+      acceptanceCriteria: requiredString(body, 'acceptanceCriteria'),
+      labels: body.labels === undefined ? undefined : requiredStringArray(body, 'labels'),
+      directAgentId: optionalString(body, 'directAgentId'),
+      timeoutMs: optionalPositiveInteger(body, 'timeoutMs'),
+      leaseTtlMs: optionalPositiveInteger(body, 'leaseTtlMs'),
+      maxRetries: optionalNonNegativeInteger(body, 'maxRetries'),
+    })
+    response.status(201).json(task)
+  }))
+
   app.post('/api/repositories/:repositoryId/tasks', asyncRoute((request, response) => {
     const body = objectBody(request.body)
     assertOnlyKeys(body, ['title', 'description', 'acceptanceCriteria', 'labels', 'directAgentId', 'channelId', 'timeoutMs', 'leaseTtlMs', 'maxRetries'])
+    const repositoryId = requiredParam(request.params.repositoryId, 'repositoryId')
+    const repository = repositories.getRepository(repositoryId)
+    if (!repository) throw new NotFoundError(`Repository ${repositoryId} does not exist.`)
     const task = taskService.createTask({
-      repositoryId: requiredParam(request.params.repositoryId, 'repositoryId'),
-      channelId: optionalString(body, 'channelId'),
+      workspaceId: repository.workspaceId,
+      repositoryId,
+      channelId: requiredString(body, 'channelId'),
       title: requiredString(body, 'title'),
       description: requiredString(body, 'description'),
       acceptanceCriteria: requiredString(body, 'acceptanceCriteria'),
@@ -278,15 +305,17 @@ export function createApp(options: CreateAppOptions = {}): Express {
     const channelId = requiredParam(request.params.channelId, 'channelId')
     const taskId = optionalString(body, 'taskId')
     const threadRootMessageId = optionalString(body, 'threadRootMessageId')
+    const task = taskId ? repositories.getTask(taskId) : undefined
+    if (taskId && !task) throw new NotFoundError(`Task ${taskId} does not exist.`)
+    if (task && task.channelId !== channelId) throw new DomainError('Task does not belong to this channel.')
     const message = messages.postHuman(channelId, requiredString(body, 'body'), taskId, threadRootMessageId)
     const mention = findMentionedAgent(repositories, channelId, message.body)
     let deliveredToActiveTask = false
     if (mention?.status === 'busy') {
-      coordinator.queueInputForActiveAgent(mention.id, message.body)
+      coordinator.queueInputForActiveAgent(mention.id, channelId, message.body)
       deliveredToActiveTask = true
     }
     if (mention?.status === 'idle' && taskId) {
-      const task = repositories.getTask(taskId)
       if (task?.status === 'queued' && task.directAgentId === mention.id) {
         scheduler.claimNext(mention.id)
         await coordinator.flush(taskId)

@@ -55,6 +55,34 @@ describe('TaskExecutionCoordinator', () => {
     await expect(readFile(artifact.path, 'utf8')).resolves.toContain('npm test --verbose')
   })
 
+  it('settles a claim safely when its compatibility Repository belongs to another Workspace', async () => {
+    const fixture = await createFixture()
+    fixture.repositories.transitionTask(fixture.first.id, 'cancelled', 'Use the invalid compatibility task instead.')
+    const foreignWorkspace = fixture.repositories.createWorkspace({ name: 'Foreign' })
+    const invalid = fixture.repositories.createTask({
+      workspaceId: foreignWorkspace.id,
+      repositoryId: fixture.repository.id,
+      channelId: fixture.channel.id,
+      directAgentId: fixture.agent.id,
+      title: 'Invalid compatibility task',
+      description: 'Must not run in another Workspace repository.',
+      acceptanceCriteria: 'Runtime does not start.',
+      labels: ['typescript'],
+    })
+    const claim = fixture.scheduler.claimNext(fixture.agent.id)!
+
+    await fixture.coordinator.startClaim(claim)
+
+    expect(fixture.runtime.starts).toHaveLength(0)
+    expect(fixture.repositories.getTask(invalid.id)).toMatchObject({ status: 'needs_human' })
+    expect(fixture.repositories.getTaskDetails(invalid.id)?.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'task.execution_failed',
+        payload: expect.objectContaining({ reason: expect.stringContaining('does not belong to Workspace') }),
+      }),
+    ]))
+  })
+
   it('batches token deltas and raw chunks into compact runtime records', async () => {
     const fixture = await createFixture()
     const claim = fixture.scheduler.claimNext(fixture.agent.id)!
@@ -238,7 +266,7 @@ describe('TaskExecutionCoordinator', () => {
     const claim = fixture.scheduler.claimNext(fixture.agent.id)!
     await fixture.coordinator.startClaim(claim)
 
-    fixture.coordinator.queueInputForActiveAgent(fixture.agent.id, '请优先补上边界测试')
+    fixture.coordinator.queueInputForActiveAgent(fixture.agent.id, fixture.channel.id, '请优先补上边界测试')
     await fixture.coordinator.flush(claim.task.id)
 
     expect(fixture.repositories.getTaskDetails(claim.task.id)?.inputs).toEqual([
@@ -264,7 +292,7 @@ describe('TaskExecutionCoordinator', () => {
 
     const starting = fixture.coordinator.startClaim(claim)
     await runtimeStartReached
-    fixture.coordinator.queueInputForActiveAgent(fixture.agent.id, 'Runtime 启动后请先检查测试')
+    fixture.coordinator.queueInputForActiveAgent(fixture.agent.id, fixture.channel.id, 'Runtime 启动后请先检查测试')
 
     expect(fixture.runtime.inputs).toEqual([])
     expect(fixture.repositories.getTaskDetails(claim.task.id)?.inputs).toEqual([
@@ -292,7 +320,7 @@ describe('TaskExecutionCoordinator', () => {
     expect(fixture.repositories.getTask(claim.task.id)?.status).toBe('waiting_input')
     expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('我需要你的决定：选择测试策略')
 
-    fixture.coordinator.queueInputForActiveAgent(fixture.agent.id, '优先覆盖回归测试')
+    fixture.coordinator.queueInputForActiveAgent(fixture.agent.id, fixture.channel.id, '优先覆盖回归测试')
 
     expect(fixture.repositories.getTask(claim.task.id)?.status).toBe('running')
     expect(fixture.runtime.inputs).toEqual(expect.arrayContaining([expect.objectContaining({ input: '优先覆盖回归测试' })]))
@@ -431,6 +459,8 @@ describe('TaskExecutionCoordinator', () => {
       env: {},
     })
     repositories.setAgentStatus(agent.id, 'idle', new Date())
+    repositories.bindChannelWorkspace(channel.id, workspace.id, new Date())
+    repositories.addChannelAgent(channel.id, agent.id, new Date())
     const runtime = new FakeRuntimeAdapter()
     const claudeRuntime = new FakeRuntimeAdapter()
     const coordinator = new TaskExecutionCoordinator({
@@ -447,7 +477,7 @@ describe('TaskExecutionCoordinator', () => {
     })
     const first = createTask({ title: 'First task' })
     return {
-      repositories, runtime, claudeRuntime, coordinator, scheduler, agent, first, rawArtifactWrites,
+      repositories, runtime, claudeRuntime, coordinator, scheduler, workspace, repository, channel, agent, first, rawArtifactWrites,
       createTask,
       channelMessages: () => repositories.getBootstrap().workspaces[0].recentMessages.filter((message) => message.channelId === channel.id),
     }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { FakeRuntimeAdapter } from '../adapters/runtime/fake-runtime-adapter'
@@ -36,7 +36,7 @@ describe('ConversationCoordinator', () => {
       mode: 'conversation',
       title: '频道 #general 对话',
       initialMessage: '请调整这个界面的交互。',
-      worktreePath: fixture.repository.path,
+      worktreePath: path.join(fixture.conversationDirectory, fixture.channel.id, review.id),
       profile: expect.objectContaining({ runtime: 'opencode', command: 'review-runtime' }),
     })
   })
@@ -76,7 +76,7 @@ describe('ConversationCoordinator', () => {
     expect(fixture.runtime.starts[0]?.profile.command).toBe('build-runtime')
   })
 
-  it('routes a global mentioned Agent without treating its legacy storage Workspace as ownership', async () => {
+  it('runs a global mentioned Agent in a neutral service-owned conversation directory', async () => {
     const fixture = await createFixture()
     const remote = fixture.createRemoteAgent('Release', 'release')
     fixture.setIdle(remote.agent, '2026-07-25T08:00:00.000Z')
@@ -84,9 +84,36 @@ describe('ConversationCoordinator', () => {
     await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('@Release 请检查发布配置。'))
 
     expect(fixture.runtime.starts[0]).toMatchObject({
-      worktreePath: fixture.repository.path,
+      worktreePath: path.join(fixture.conversationDirectory, fixture.channel.id, remote.agent.id),
       profile: expect.objectContaining({ command: 'release-runtime' }),
     })
+    expect((await stat(path.join(fixture.conversationDirectory, fixture.channel.id, remote.agent.id))).isDirectory()).toBe(true)
+  })
+
+  it('does not route an ordinary channel message to an Agent outside its membership', async () => {
+    const fixture = await createFixture()
+    const outsider = fixture.createOutsiderAgent('Outsider', 'outsider')
+    fixture.setIdle(outsider, '2026-07-25T08:00:00.000Z')
+
+    await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('@Outsider 请回答。'))
+
+    expect(fixture.runtime.starts).toHaveLength(0)
+  })
+
+  it('routes summit messages to every global Agent without persisted membership rows', async () => {
+    const fixture = await createFixture()
+    const summit = fixture.repositories.createChannel({ name: 'summit', systemKey: 'summit' })
+    const outsider = fixture.createOutsiderAgent('Outsider', 'outsider')
+    fixture.setIdle(outsider, '2026-07-25T08:00:00.000Z')
+
+    await fixture.coordinator.dispatch(summit.id, fixture.postHumanIn(summit.id, '@Outsider 请回答。'))
+
+    expect(fixture.runtime.starts).toEqual([
+      expect.objectContaining({
+        worktreePath: path.join(fixture.conversationDirectory, summit.id, outsider.id),
+        profile: expect.objectContaining({ command: 'outsider-runtime' }),
+      }),
+    ])
   })
 
   it('recognizes an Agent mention directly after Chinese text', async () => {
@@ -298,15 +325,17 @@ describe('ConversationCoordinator', () => {
       isClean: true,
     })
     const channel = repositories.createChannel({ name: 'general' })
+    const conversationDirectory = path.join(temporaryDirectory, 'conversations')
     const runtime = new FakeRuntimeAdapter()
     const messages = new ChannelMessageService(repositories)
     const coordinator = new ConversationCoordinator({
       repositories,
       runtimes: { opencode: runtime, pi: runtime, 'claude-code': runtime },
       messages,
+      conversationDirectory,
     })
 
-    const createAgent = (identity: string, mentionName: string, responsibilities: string[] = ['通用回复']): Agent => {
+    const createOutsiderAgent = (identity: string, mentionName: string, responsibilities: string[] = ['通用回复']): Agent => {
       const agent = repositories.createAgent({
         identity,
         mentionName,
@@ -319,6 +348,10 @@ describe('ConversationCoordinator', () => {
         model: '',
         env: {},
       })
+      return agent
+    }
+    const createAgent = (identity: string, mentionName: string, responsibilities: string[] = ['通用回复']): Agent => {
+      const agent = createOutsiderAgent(identity, mentionName, responsibilities)
       repositories.addChannelAgent(channel.id, agent.id, new Date())
       return agent
     }
@@ -352,7 +385,10 @@ describe('ConversationCoordinator', () => {
     const postHumanIn = (channelId: string, body: string, threadRootMessageId?: string) => messages.postHuman(channelId, body, null, threadRootMessageId)
     const channelMessages = () => repositories.getBootstrap().workspaces[0]!.recentMessages.filter((message) => message.channelId === channel.id)
 
-    return { repositories, repository, channel, runtime, coordinator, createAgent, createRemoteAgent, setIdle, postHuman, postHumanIn, channelMessages }
+    return {
+      repositories, repository, channel, conversationDirectory, runtime, coordinator,
+      createAgent, createOutsiderAgent, createRemoteAgent, setIdle, postHuman, postHumanIn, channelMessages,
+    }
   }
 })
 

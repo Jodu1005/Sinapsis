@@ -5,8 +5,9 @@ import { DomainError, type CreateTaskInput, type Task, type TaskDetails, type Ta
 import type { BootstrapWorkspace, WorkspaceRepositories, WorkspaceUnitOfWork } from '../ports/repositories'
 
 export interface CreateLabeledTaskInput {
-  repositoryId: string
-  channelId?: string
+  workspaceId: string
+  repositoryId?: string
+  channelId: string
   directAgentId?: string | null
   title: string
   description: string
@@ -21,27 +22,39 @@ export class TaskService {
   constructor(private readonly repositories: WorkspaceRepositories) {}
 
   createTask(input: CreateLabeledTaskInput): Task {
-    const workspace = findWorkspaceForRepository(this.repositories.getBootstrap().workspaces, input.repositoryId)
-    const repository = workspace.repositories.find((candidate) => candidate.id === input.repositoryId)
-    if (!repository) {
-      throw new NotFoundError(`Repository ${input.repositoryId} does not exist.`)
+    const workspace = this.repositories.getBootstrap().workspaces.find((candidate) => candidate.id === input.workspaceId)
+    if (!workspace) {
+      throw new NotFoundError(`Workspace ${input.workspaceId} does not exist.`)
     }
 
-    const channel = findChannel(this.repositories.getBootstrap().workspaces, input.channelId)
+    const channel = this.repositories.getChannel(input.channelId)
     if (!channel) {
-      throw new NotFoundError(`Channel ${input.channelId ?? 'general'} does not exist.`)
+      throw new NotFoundError(`Channel ${input.channelId} does not exist.`)
+    }
+    if (!this.repositories.getChannelWorkspaceIds(channel.id).includes(workspace.id)) {
+      throw new DomainError('Workspace is not bound to this channel.')
+    }
+    if (input.directAgentId && !this.repositories.getChannelAgentIds(channel.id).includes(input.directAgentId)) {
+      throw new DomainError('Agent is not a member of this channel.')
+    }
+
+    const repository = input.repositoryId
+      ? workspace.repositories.find((candidate) => candidate.id === input.repositoryId)
+      : workspace.repositories[0]
+    if (!repository) {
+      if (input.repositoryId) {
+        throw new DomainError(`Repository ${input.repositoryId} does not belong to Workspace ${workspace.id}.`)
+      }
+      throw new DomainError(`Workspace ${workspace.id} does not have a managed execution Repository.`)
     }
     if (channel.archivedAt) {
       throw new DomainError(`Channel #${channel.name} is archived and read-only.`)
     }
 
-    if (input.directAgentId && !workspace.agents.some((agent) => agent.id === input.directAgentId)) {
-      throw new NotFoundError(`Agent ${input.directAgentId} does not belong to this workspace.`)
-    }
-
     const inferredLabels = inferCapabilityTags(`${input.title}\n${input.description}\n${input.acceptanceCriteria}`)
     const labels = input.labels ?? inferredLabels
     const taskInput: CreateTaskInput = {
+      workspaceId: workspace.id,
       repositoryId: repository.id,
       channelId: channel.id,
       directAgentId: input.directAgentId,
@@ -101,11 +114,6 @@ export class TaskService {
   private requireRepository(repositoryId: string): void {
     findWorkspaceForRepository(this.repositories.getBootstrap().workspaces, repositoryId)
   }
-}
-
-function findChannel(workspaces: BootstrapWorkspace[], channelId: string | undefined) {
-  const channels = workspaces.flatMap((workspace) => workspace.repositories.flatMap((repository) => repository.channels))
-  return channelId ? channels.find((candidate) => candidate.id === channelId) : channels.find((candidate) => candidate.name === 'general' && !candidate.archivedAt)
 }
 
 function canAcceptHumanInput(status: TaskStatus): boolean {

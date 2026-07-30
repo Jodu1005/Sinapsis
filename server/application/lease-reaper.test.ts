@@ -204,6 +204,7 @@ describe('LeaseReaper', () => {
       capabilityTags: ['backend'], maxConcurrentTasks: 1, command: 'opencode', args: ['run'], model: '', env: {},
     })
     repositories.setAgentStatus(agent.id, 'idle', at(0))
+    repositories.addChannelAgent(channel.id, agent.id, at(0))
     const task = repositories.createTask({
       repositoryId: repository.id, channelId: channel.id, title: 'Repair API', description: 'Description',
       acceptanceCriteria: 'Acceptance criteria', labels: ['backend'], maxRetries: options.maxRetries,

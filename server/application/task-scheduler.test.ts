@@ -71,6 +71,38 @@ describe('TaskScheduler', () => {
     expect(scheduler.claimNext(agents.frontend.id, at(3))?.task.id).toBe(direct.id)
   })
 
+  it('does not let an Agent outside the Channel membership claim a matching task', async () => {
+    const { repositories, createTask } = await createFixture()
+    const outsider = repositories.createAgent({
+      identity: 'Outsider', mentionName: 'outsider', runtime: 'opencode',
+      capabilityTags: ['frontend'], maxConcurrentTasks: 1, command: 'opencode', args: ['run'], model: '', env: {},
+    })
+    repositories.setAgentStatus(outsider.id, 'idle', at(0))
+    createTask({ title: 'Frontend task', labels: ['frontend'], directAgentId: outsider.id })
+    const scheduler = new TaskScheduler(repositories)
+
+    expect(scheduler.claimNext(outsider.id, at(2))).toBeUndefined()
+  })
+
+  it('lets a global Agent claim a summit task without a persisted membership row', async () => {
+    const { database: sqlite, repositories, repository, agents } = await createFixture()
+    const summit = repositories.createChannel({ name: 'summit', systemKey: 'summit' })
+    const task = repositories.createTask({
+      repositoryId: repository.id,
+      channelId: summit.id,
+      title: 'Summit task',
+      description: 'Coordinate the release.',
+      acceptanceCriteria: 'Plan recorded.',
+      labels: ['frontend'],
+    })
+    const scheduler = new TaskScheduler(repositories)
+
+    expect(sqlite.database.prepare(
+      'SELECT 1 FROM channel_agent_memberships WHERE channel_id = ? AND agent_id = ?',
+    ).get(summit.id, agents.frontend.id)).toBeUndefined()
+    expect(scheduler.claimNext(agents.frontend.id, at(2))?.task.id).toBe(task.id)
+  })
+
   it('lets an explicitly addressed agent claim a task even when its labels do not match', async () => {
     const { repositories, agents, createTask } = await createFixture()
     const direct = createTask({
@@ -222,10 +254,15 @@ describe('TaskScheduler', () => {
     })
     repositories.setAgentStatus(frontend.id, 'idle', at(0))
     repositories.setAgentStatus(backend.id, 'idle', at(0))
+    repositories.bindChannelWorkspace(channel.id, workspace.id, at(0))
+    repositories.addChannelAgent(channel.id, frontend.id, at(0))
+    repositories.addChannelAgent(channel.id, backend.id, at(0))
 
     return {
       database,
       repositories,
+      repository,
+      channel,
       agents: { frontend, backend },
       createTask: (input: { title: string; labels: string[]; directAgentId?: string; timeoutMs?: number; leaseTtlMs?: number }) => repositories.createTask({
         repositoryId: repository.id, channelId: channel.id, title: input.title, description: 'Description',
