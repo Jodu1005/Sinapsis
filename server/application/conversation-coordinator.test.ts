@@ -176,6 +176,30 @@ describe('ConversationCoordinator', () => {
     expect(otherAgentRuntimeTaskId).not.toBe(targetedRuntimeTaskId)
   })
 
+  it('keeps a failed runtime cancellation tracked and busy so it can be retried', async () => {
+    const fixture = await createFixture()
+    const build = fixture.createAgent('Build', 'build')
+    fixture.setIdle(build, '2026-07-25T08:00:00.000Z')
+    await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('@Build 请检查构建。'))
+    const cancel = fixture.runtime.cancel.bind(fixture.runtime)
+    fixture.runtime.cancel = () => {
+      throw new Error('runtime cancellation failed')
+    }
+
+    await expect(fixture.coordinator.cancelAgentInChannel(fixture.channel.id, build.id))
+      .rejects.toThrow('runtime cancellation failed')
+
+    expect(fixture.coordinator.getTypingAgentIds(fixture.channel.id)).toEqual([build.id])
+    expect(fixture.repositories.getAgent(build.id)?.status).toBe('busy')
+
+    fixture.runtime.cancel = cancel
+    await fixture.coordinator.cancelAgentInChannel(fixture.channel.id, build.id)
+
+    expect(fixture.runtime.cancellations).toHaveLength(1)
+    expect(fixture.coordinator.getTypingAgentIds(fixture.channel.id)).toEqual([])
+    expect(fixture.repositories.getAgent(build.id)?.status).toBe('idle')
+  })
+
   it('keeps an Agent conversation and reply inside the triggering Thread', async () => {
     const fixture = await createFixture()
     const build = fixture.createAgent('Build', 'build')

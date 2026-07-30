@@ -123,16 +123,22 @@ export class ConversationCoordinator {
   private async cancelExecutions(matches: (execution: ConversationExecution) => boolean): Promise<void> {
     const executions = [...this.executions.values()].filter((execution) => execution.active && matches(execution))
     const affectedAgentIds = new Set(executions.map((execution) => execution.agent.id))
-    await Promise.all(executions.map(async (execution) => {
-      execution.active = false
+    const failures: unknown[] = []
+    for (const execution of executions) {
       execution.pendingText = []
-      this.executions.delete(execution.key)
-      if (execution.session) execution.adapter.cancel(execution.session)
-    }))
+      try {
+        if (execution.session) execution.adapter.cancel(execution.session)
+        execution.active = false
+        this.executions.delete(execution.key)
+      } catch (error) {
+        failures.push(error)
+      }
+    }
     for (const agentId of affectedAgentIds) {
       const stillActive = [...this.executions.values()].some((execution) => execution.active && execution.agent.id === agentId)
       this.repositories.setAgentStatus(agentId, stillActive ? 'busy' : 'idle', new Date())
     }
+    if (failures.length > 0) throw failures[0]
   }
 
   private sendToExistingSession(execution: ConversationExecution, body: string): void {
