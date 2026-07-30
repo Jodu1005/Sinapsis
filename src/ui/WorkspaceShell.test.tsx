@@ -273,6 +273,7 @@ describe('WorkspaceShell', () => {
     )
 
     await user.click(within(context).getByRole('button', { name: '添加 Agent' }))
+    expect(context).not.toHaveAttribute('inert')
     await user.click(screen.getByRole('option', { name: 'Newton' }))
 
     expect(addChannelAgent).toHaveBeenCalledWith('channel-build', 'agent-2')
