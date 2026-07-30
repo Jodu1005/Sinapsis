@@ -58,7 +58,7 @@ describe('ChannelContextResetService', () => {
     const repositories = new SqliteRepositories(database, { publish: () => undefined } satisfies DomainEventPublisher)
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'control-room', path: '/workspace/control-room' })
-    const channel = repositories.createChannel({ repositoryId: repository.id, name: channelName })
+    const channel = repositories.createChannel({ name: channelName, systemKey })
     const getChannel = repositories.getChannel.bind(repositories)
     vi.spyOn(repositories, 'getChannel').mockImplementation((channelId) => {
       const storedChannel = getChannel(channelId)

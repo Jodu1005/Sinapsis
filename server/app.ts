@@ -114,11 +114,23 @@ export function createApp(options: CreateAppOptions = {}): Express {
     response.status(201).json(repository)
   }))
 
+  app.post('/api/channels', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['name'])
+    const channel = workspaceService.createChannel({ name: requiredString(body, 'name') })
+    response.status(201).json(channel)
+  }))
+
   app.post('/api/repositories/:repositoryId/channels', asyncRoute((request, response) => {
     const body = objectBody(request.body)
-    const channel = workspaceService.createChannel({
-      repositoryId: requiredParam(request.params.repositoryId, 'repositoryId'),
-      name: requiredString(body, 'name'),
+    assertOnlyKeys(body, ['name'])
+    const repositoryId = requiredParam(request.params.repositoryId, 'repositoryId')
+    const repository = repositories.getRepository(repositoryId)
+    if (!repository) throw new NotFoundError(`Repository ${repositoryId} does not exist.`)
+    const channel = repositories.inTransaction(() => {
+      const created = workspaceService.createChannel({ name: requiredString(body, 'name') })
+      channelWorkspaceService.bind(created.id, repository.workspaceId, 'human')
+      return repositories.getChannel(created.id)!
     })
     response.status(201).json(channel)
   }))
@@ -185,14 +197,13 @@ export function createApp(options: CreateAppOptions = {}): Express {
     ))
   }))
 
-  app.post('/api/workspaces/:workspaceId/agents', asyncRoute(async (request, response) => {
+  const createAgentRoute = async (request: express.Request, response: express.Response) => {
     const body = objectBody(request.body)
     const runtime = requiredString(body, 'runtime')
     if (!runtimeKinds.includes(runtime as (typeof runtimeKinds)[number])) {
       throw new ValidationError(`Runtime must be one of: ${runtimeKinds.join(', ')}.`)
     }
     const agent = await agentService.createAgent({
-      workspaceId: requiredParam(request.params.workspaceId, 'workspaceId'),
       identity: requiredString(body, 'identity'),
       mention: requiredString(body, 'mention'),
       runtime: runtime as (typeof runtimeKinds)[number],
@@ -204,7 +215,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
       ...agent,
       profile: { ...agent.profile, env: Object.keys(agent.profile.env) },
     })
-  }))
+  }
+
+  app.post('/api/agents', asyncRoute(createAgentRoute))
+  app.post('/api/workspaces/:workspaceId/agents', asyncRoute(createAgentRoute))
 
   app.post('/api/agents/:agentId/refresh-runtime', asyncRoute(async (request, response) => {
     response.json(sanitizeAgent(await agentService.refreshAvailability(requiredParam(request.params.agentId, 'agentId'))))
@@ -350,21 +364,8 @@ class RepositoryWorkspaceCatalog implements WorkspaceCatalog {
     return this.repositories.getBootstrap().workspaces.some((workspace) => workspace.id === workspaceId)
   }
 
-  hasRepository(repositoryId: string): boolean {
-    return this.repositories.getBootstrap().workspaces.some((workspace) =>
-      workspace.repositories.some((repository) => repository.id === repositoryId),
-    )
-  }
-
-  hasActiveChannelNamed(name: string): boolean {
-    const normalizedName = name.trim().toLocaleLowerCase()
-    return this.repositories.getBootstrap().workspaces.some((workspace) =>
-      workspace.repositories.some((repository) => repository.channels.some((channel) => !channel.archivedAt && channel.name.trim().toLocaleLowerCase() === normalizedName)),
-    )
-  }
-
-  hasAgentMention(workspaceId: string, mention: string): boolean {
-    return this.repositories.hasAgentMention(workspaceId, mention)
+  hasAgentMention(mention: string): boolean {
+    return this.repositories.hasAgentMention(mention)
   }
 
   getAgent(agentId: string) {
@@ -383,7 +384,7 @@ class RepositoryWorkspaceCatalog implements WorkspaceCatalog {
     return this.repositories.createRepository(input)
   }
 
-  createChannel(input: { repositoryId: string; name: string }) {
+  createChannel(input: { name: string }) {
     return this.repositories.createChannel(input)
   }
 
@@ -401,6 +402,7 @@ class TransactionWorkspaceCatalog {
 
   createRepository: WorkspaceCatalog['createRepository'] = (input) => this.unitOfWork.createRepository(input)
   createChannel: WorkspaceCatalog['createChannel'] = (input) => this.unitOfWork.createChannel(input)
+  ensureSystemChannel: WorkspaceMutationCatalog['ensureSystemChannel'] = (input) => this.unitOfWork.ensureSystemChannel(input)
 }
 
 function asyncRoute(handler: (request: express.Request, response: express.Response) => void | Promise<void>): RequestHandler {

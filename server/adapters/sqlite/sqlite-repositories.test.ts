@@ -176,8 +176,8 @@ describe('SQLite workspace repositories', () => {
     const { repositories } = await createRepositories()
     const channel = createChannel(repositories)
     const workspaceId = repositories.getBootstrap().workspaces[0]!.id
-    const summit = repositories.createChannel({ name: 'summit' })
-    const agent = repositories.createAgent({ workspaceId, identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: [], maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {} })
+    const summit = repositories.createChannel({ name: 'summit', systemKey: 'summit' })
+    const agent = repositories.createAgent({ identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: [], maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {} })
 
     expect(repositories.getChannelAgentIds(channel.id)).toEqual([])
     expect(repositories.getChannelAgentIds(summit.id)).toEqual([agent.id])
@@ -201,12 +201,27 @@ describe('SQLite workspace repositories', () => {
     expect(() => repositories.removeChannelAgent(summit.id, agent.id)).toThrow('Summit membership is managed dynamically.')
   })
 
+  it('does not infer system capabilities from the summit display name', async () => {
+    const { repositories } = await createRepositories()
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'control-room', path: '/projects/control-room' })
+
+    const ordinarySummit = repositories.createChannel({ name: 'summit' })
+    const systemSummit = repositories.inTransaction((unitOfWork) =>
+      unitOfWork.ensureSystemChannel({ name: 'system-summit', systemKey: summitSystemKey }))
+
+    expect(ordinarySummit).toMatchObject({ name: 'summit', systemKey: null })
+    expect(systemSummit).toMatchObject({ name: 'system-summit', systemKey: summitSystemKey })
+    expect(repositories.inTransaction((unitOfWork) =>
+      unitOfWork.ensureSystemChannel({ name: 'ignored', systemKey: summitSystemKey })).id).toBe(systemSummit.id)
+  })
+
   it('treats direct assignment and active leases as unfinished Agent work', async () => {
     const { repositories } = await createRepositories()
     const channel = createChannel(repositories)
     const workspaceId = repositories.getBootstrap().workspaces[0]!.id
     const repositoryId = repositories.getBootstrap().workspaces[0]!.repositories[0]!.id
-    const agent = repositories.createAgent({ workspaceId, identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: [], maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {} })
+    const agent = repositories.createAgent({ identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: [], maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {} })
     const direct = repositories.createTask({
       repositoryId, channelId: channel.id, directAgentId: agent.id,
       title: 'Direct task', description: 'Description', acceptanceCriteria: 'Done',
@@ -289,9 +304,7 @@ describe('SQLite workspace repositories', () => {
   it('releases a busy Agent without a task lease during service recovery', async () => {
     const { repositories } = await createRepositories()
     createChannel(repositories)
-    const workspaceId = repositories.getBootstrap().workspaces[0]!.id
     const agent = repositories.createAgent({
-      workspaceId,
       identity: 'newton',
       mentionName: 'dev',
       runtime: 'pi',
@@ -401,16 +414,13 @@ describe('SQLite workspace repositories', () => {
 
   function createChannel(repositories: SqliteRepositories) {
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
-    const repository = repositories.createRepository({
+    repositories.createRepository({
       workspaceId: workspace.id,
       name: 'control-room',
       path: '/projects/control-room',
     })
 
-    return repositories.createChannel({
-      repositoryId: repository.id,
-      name: 'engineering',
-    })
+    return repositories.createChannel({ name: 'engineering' })
   }
 
   function createVersion13Fixture(databasePath: string, options: { duplicateNormalizedMention?: boolean } = {}) {

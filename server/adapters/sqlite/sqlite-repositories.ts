@@ -29,8 +29,6 @@ import type { DomainEventPublisher } from '../../ports/domain-event-publisher'
 import type {
   BootstrapSnapshot,
   ExpiredLease,
-  LegacyChannel,
-  LegacyCreateChannelInput,
   LeaseRecovery,
   TaskClaim,
   WorkspaceRepositories,
@@ -218,14 +216,13 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     return repository
   }
 
-  createChannel(input: LegacyCreateChannelInput): LegacyChannel
   createChannel(input: CreateChannelInput): Channel
-  createChannel(input: CreateChannelInput): Channel | LegacyChannel {
+  createChannel(input: CreateChannelInput): Channel {
     const createdAt = now()
     const repositoryId = oldestRepositoryId(this.database)
     if (!repositoryId) throw new DomainError('A global Channel requires an existing Repository.')
     const normalizedName = requireText(input.name, 'Channel name')
-    const systemKey = input.systemKey ?? (normalizedName.toLocaleLowerCase() === summitSystemKey ? summitSystemKey : null)
+    const systemKey = input.systemKey ?? null
     const channel = {
       id: randomUUID(),
       name: normalizedName,
@@ -238,6 +235,11 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
       channel.id, repositoryId, channel.name, channel.systemKey, null, channel.createdAt,
     )
     return readChannel(this.database, channel.id)!
+  }
+
+  ensureSystemChannel(input: CreateChannelInput & { systemKey: string }): Channel {
+    const row = this.database.prepare('SELECT * FROM channels WHERE system_key = ? LIMIT 1').get(input.systemKey) as ChannelRow | undefined
+    return row ? mapChannel(this.database, row) : this.createChannel(input)
   }
 
   archiveChannel(channelId: string, occurredAt: Date): Channel {
@@ -587,9 +589,8 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return this.inTransaction((unitOfWork) => unitOfWork.createRepository(input))
   }
 
-  createChannel(input: LegacyCreateChannelInput): LegacyChannel
   createChannel(input: CreateChannelInput): Channel
-  createChannel(input: CreateChannelInput): Channel | LegacyChannel {
+  createChannel(input: CreateChannelInput): Channel {
     return this.inTransaction((unitOfWork) => unitOfWork.createChannel(input))
   }
 
@@ -720,6 +721,11 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return readAgent(this.sqlite.database, agentId)
   }
 
+  getRepository(repositoryId: string): Repository | undefined {
+    const row = this.sqlite.database.prepare('SELECT * FROM repositories WHERE id = ?').get(repositoryId) as RepositoryRow | undefined
+    return row ? mapRepository(row) : undefined
+  }
+
   getTasksForRepository(repositoryId: string): Task[] {
     return (this.sqlite.database.prepare('SELECT * FROM tasks WHERE repository_id = ? ORDER BY queued_at').all(repositoryId) as unknown as TaskRow[])
       .map(mapTask)
@@ -833,8 +839,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return row !== undefined
   }
 
-  hasAgentMention(workspaceIdOrMention: string, mentionName?: string): boolean {
-    const mention = mentionName ?? workspaceIdOrMention
+  hasAgentMention(mention: string): boolean {
     const row = this.sqlite.database.prepare(
       'SELECT 1 FROM agents WHERE lower(trim(mention_name)) = lower(trim(?)) LIMIT 1',
     ).get(mention)

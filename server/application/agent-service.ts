@@ -10,12 +10,10 @@ import { NotFoundError, ValidationError } from './workspace-service'
 import { DomainError } from '../domain/task'
 import type { Agent, AgentStatus } from '../domain/agent'
 
-export interface AgentWorkspaceReader {
-  hasWorkspace(workspaceId: string): boolean
-  hasAgentMention(workspaceId: string, mention: string): boolean
+export interface AgentCatalog {
+  hasAgentMention(mention: string): boolean
   getAgent(agentId: string): Agent | undefined
   createAgent(input: {
-    workspaceId: string
     identity: string
     mentionName: string
     runtime: RuntimeKind
@@ -32,7 +30,6 @@ export interface AgentWorkspaceReader {
 
 export interface AgentConfiguration {
   id: string
-  workspaceId: string
   identity: string
   mention: string
   runtime: RuntimeKind
@@ -45,7 +42,6 @@ export interface AgentConfiguration {
 }
 
 export interface CreateAgentInput {
-  workspaceId: string
   identity: string
   mention: string
   runtime: RuntimeKind
@@ -58,17 +54,13 @@ export class AgentService {
   private readonly profiles = new RuntimeProfileService()
 
   constructor(
-    private readonly workspaces: AgentWorkspaceReader,
+    private readonly agents: AgentCatalog,
     private readonly availabilityDetector: RuntimeAvailabilityDetector,
   ) {}
 
   async createAgent(input: CreateAgentInput): Promise<AgentConfiguration> {
-    if (!this.workspaces.hasWorkspace(input.workspaceId)) {
-      throw new NotFoundError(`Workspace ${input.workspaceId} does not exist.`)
-    }
-
     const mention = requiredMention(input.mention)
-    if (this.workspaces.hasAgentMention(input.workspaceId, mention)) {
+    if (this.agents.hasAgentMention(mention)) {
       throw new DomainError(`Agent mention @${mention} already exists globally.`)
     }
 
@@ -76,8 +68,7 @@ export class AgentService {
     const availability = await this.availabilityDetector.detect(profile)
     let storedAgent: { id: string; createdAt: string }
     try {
-      storedAgent = this.workspaces.createAgent({
-        workspaceId: input.workspaceId,
+      storedAgent = this.agents.createAgent({
         identity: requiredText(input.identity, 'Agent identity'),
         mentionName: mention,
         runtime: input.runtime,
@@ -96,11 +87,10 @@ export class AgentService {
       throw error
     }
     if (availability.executable === 'available' && availability.taskExecution === 'unverified') {
-      this.workspaces.setAgentStatus?.(storedAgent.id, 'idle', new Date())
+      this.agents.setAgentStatus?.(storedAgent.id, 'idle', new Date())
     }
     return {
       id: storedAgent.id,
-      workspaceId: input.workspaceId,
       identity: requiredText(input.identity, 'Agent identity'),
       mention,
       runtime: input.runtime,
@@ -114,7 +104,7 @@ export class AgentService {
   }
 
   async refreshAvailability(agentId: string): Promise<Agent> {
-    const agent = this.workspaces.getAgent(agentId)
+    const agent = this.agents.getAgent(agentId)
     if (!agent) throw new NotFoundError(`Agent ${agentId} does not exist.`)
 
     const availability = await this.availabilityDetector.detect(profileFromAgent(agent))
@@ -125,7 +115,7 @@ export class AgentService {
       : 'offline'
     if (nextStatus === agent.status) return agent
 
-    const updated = this.workspaces.setAgentStatus?.(agent.id, nextStatus, new Date()) as Agent | undefined
+    const updated = this.agents.setAgentStatus?.(agent.id, nextStatus, new Date()) as Agent | undefined
     return updated ?? {
       ...agent,
       status: nextStatus,

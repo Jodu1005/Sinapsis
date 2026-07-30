@@ -48,7 +48,7 @@ describe('local service API', () => {
     expect(response.status).toBe(400)
   })
 
-  it('persists Agent configuration without returning environment variable values', async () => {
+  it('creates a global Agent without returning a Workspace locator or environment variable values', async () => {
     const server = await startHttpTestServer(createApp({
       runtimeAvailabilityDetector: {
         detect: async () => ({ executable: 'available', taskExecution: 'unverified' }),
@@ -63,7 +63,7 @@ describe('local service API', () => {
     })
     const workspace = await workspaceResponse.json() as { id: string }
 
-    const agentResponse = await fetch(`${server.baseUrl}/api/workspaces/${workspace.id}/agents`, {
+    const agentResponse = await fetch(`${server.baseUrl}/api/agents`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -73,14 +73,41 @@ describe('local service API', () => {
     })
 
     expect(agentResponse.status).toBe(201)
-    await expect(agentResponse.json()).resolves.toMatchObject({ profile: { env: ['API_TOKEN'] } })
+    const agent = await agentResponse.json() as Record<string, unknown>
+    expect(agent).toMatchObject({ profile: { env: ['API_TOKEN'] } })
+    expect(agent).not.toHaveProperty('workspaceId')
 
     const bootstrapResponse = await fetch(`${server.baseUrl}/api/bootstrap`)
     const bootstrap = await bootstrapResponse.json() as { workspaces: Array<{ agents: Array<{ env: unknown }> }> }
     expect(bootstrap.workspaces[0].agents[0].env).toEqual(['API_TOKEN'])
   })
 
-  it('persists normalized Git repository metadata and its general channel', async () => {
+  it('keeps the workspace-scoped Agent route as a locator-free compatibility wrapper', async () => {
+    const app = createApp({
+      runtimeAvailabilityDetector: {
+        detect: async () => ({ executable: 'available', taskExecution: 'unverified' }),
+      },
+    })
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    repositories.createWorkspace({ name: 'Sinapsis' })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/workspaces/not-a-real-workspace/agents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        identity: 'Newton', mention: 'newton', runtime: 'pi', capabilityTags: ['general'],
+      }),
+    })
+
+    expect(response.status).toBe(201)
+    const agent = await response.json() as Record<string, unknown>
+    expect(agent).toMatchObject({ identity: 'Newton', mention: 'newton' })
+    expect(agent).not.toHaveProperty('workspaceId')
+  })
+
+  it('persists normalized Git repository metadata and ensures the singleton summit channel', async () => {
     const server = await startHttpTestServer(createApp({
       gitClient: {
         inspectRepository: async () => ({
@@ -108,8 +135,95 @@ describe('local service API', () => {
       workspaces: Array<{ repositories: Array<{ currentBranch: string; defaultBranch: string; isClean: boolean; channels: Array<{ name: string }> }> }>
     }
     expect(bootstrap.workspaces[0].repositories[0]).toMatchObject({
-      currentBranch: 'feature/local-service', defaultBranch: 'main', isClean: false, channels: [{ name: 'general' }],
+      currentBranch: 'feature/local-service', defaultBranch: 'main', isClean: false,
+      channels: [{ name: 'summit', systemKey: 'summit', boundWorkspaceIds: [] }],
     })
+  })
+
+  it('creates an unbound global Channel without returning a Repository locator', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/channels`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'release' }),
+    })
+
+    expect(response.status).toBe(201)
+    const channel = await response.json() as Record<string, unknown>
+    expect(channel).toMatchObject({ name: 'release', systemKey: null, boundWorkspaceIds: [] })
+    expect(channel).not.toHaveProperty('repositoryId')
+  })
+
+  it('binds the Repository Workspace only in the legacy Channel compatibility route', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/repositories/${repository.id}/channels`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'engineering' }),
+    })
+
+    expect(response.status).toBe(201)
+    const channel = await response.json() as Record<string, unknown>
+    expect(channel).toMatchObject({ name: 'engineering', boundWorkspaceIds: [workspace.id] })
+    expect(channel).not.toHaveProperty('repositoryId')
+  })
+
+  it('rejects a missing Repository before the legacy Channel route creates an orphan', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const countChannels = () => repositories.getBootstrap().workspaces
+      .flatMap((item) => item.repositories)
+      .flatMap((repository) => repository.channels)
+      .length
+    const before = countChannels()
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/repositories/missing/channels`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'orphan' }),
+    })
+
+    expect(response.status).toBe(404)
+    expect(countChannels()).toBe(before)
+  })
+
+  it('rolls back legacy Channel creation when its Workspace binding fails', async () => {
+    const app = createApp({ maxWorkspaceBindingsPerChannel: 0 })
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const countChannels = () => repositories.getBootstrap().workspaces
+      .flatMap((item) => item.repositories)
+      .flatMap((item) => item.channels)
+      .length
+    const before = countChannels()
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/repositories/${repository.id}/channels`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'must-roll-back' }),
+    })
+
+    expect(response.status).toBe(409)
+    expect(countChannels()).toBe(before)
   })
 
   it('creates a task in the explicitly requested repository channel', async () => {
@@ -123,8 +237,8 @@ describe('local service API', () => {
     const repositories = app.locals.repositories as WorkspaceRepositories
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
-    repositories.createChannel({ repositoryId: repository.id, name: 'general' })
-    const build = repositories.createChannel({ repositoryId: repository.id, name: 'build' })
+    repositories.createChannel({ name: 'general' })
+    const build = repositories.createChannel({ name: 'build' })
     const server = await startHttpTestServer(app)
     closeServer = server.close
 
@@ -186,9 +300,9 @@ describe('local service API', () => {
     const repositories = app.locals.repositories as WorkspaceRepositories
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
-    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
+    const channel = repositories.createChannel({ name: 'general' })
     const agent = repositories.createAgent({
-      workspaceId: workspace.id, identity: 'Build', mentionName: 'build', runtime: 'opencode', capabilityTags: ['typescript'],
+      identity: 'Build', mentionName: 'build', runtime: 'opencode', capabilityTags: ['typescript'],
       maxConcurrentTasks: 1, command: 'opencode', args: ['run'], model: '', env: {},
     })
     const task = repositories.createTask({
@@ -222,7 +336,7 @@ describe('local service API', () => {
     const repositories = app.locals.repositories as WorkspaceRepositories
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
-    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
+    const channel = repositories.createChannel({ name: 'general' })
     const server = await startHttpTestServer(app)
     closeServer = server.close
 
@@ -246,7 +360,6 @@ describe('local service API', () => {
     const repositories = app.locals.repositories as WorkspaceRepositories
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const agent = repositories.createAgent({
-      workspaceId: workspace.id,
       identity: 'Claude builder',
       mentionName: 'claude-builder',
       runtime: 'claude-code',
@@ -279,7 +392,7 @@ describe('local service API', () => {
     const repositories = app.locals.repositories as WorkspaceRepositories
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const agent = repositories.createAgent({
-      workspaceId: workspace.id, identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: ['typescript'],
+      identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: ['typescript'],
       maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: { API_TOKEN: 'secret' },
     })
     const server = await startHttpTestServer(app)
@@ -299,7 +412,7 @@ describe('local service API', () => {
     const repositories = app.locals.repositories as WorkspaceRepositories
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
-    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'legacy' })
+    const channel = repositories.createChannel({ name: 'legacy' })
     const server = await startHttpTestServer(app)
     closeServer = server.close
 
@@ -319,7 +432,7 @@ describe('local service API', () => {
     expect(messageResponse.status).toBe(409)
     expect(taskResponse.status).toBe(409)
 
-    const replacement = repositories.createChannel({ repositoryId: repository.id, name: 'legacy' })
+    const replacement = repositories.createChannel({ name: 'legacy' })
     expect(replacement.id).not.toBe(channel.id)
     const restoreConflict = await fetch(`${server.baseUrl}/api/channels/${channel.id}/restore`, { method: 'POST' })
     expect(restoreConflict.status).toBe(409)
@@ -330,7 +443,7 @@ describe('local service API', () => {
     const repositories = app.locals.repositories as WorkspaceRepositories
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
-    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'delivery' })
+    const channel = repositories.createChannel({ name: 'delivery' })
     repositories.createTask({ repositoryId: repository.id, channelId: channel.id, title: '运行中任务', description: '保持频道可写', acceptanceCriteria: '完成', labels: [] })
     const server = await startHttpTestServer(app)
     closeServer = server.close
@@ -345,8 +458,8 @@ describe('local service API', () => {
     const repositories = app.locals.repositories as WorkspaceRepositories
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
-    const summit = repositories.createChannel({ repositoryId: repository.id, name: 'summit' })
-    const engineering = repositories.createChannel({ repositoryId: repository.id, name: 'engineering' })
+    const summit = repositories.createChannel({ name: 'summit', systemKey: 'summit' })
+    const engineering = repositories.createChannel({ name: 'engineering' })
     const task = repositories.createTask({
       repositoryId: repository.id,
       channelId: summit.id,
@@ -381,7 +494,7 @@ describe('local service API', () => {
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
     const channel = repositories.createChannel({ name: 'engineering' })
-    const summit = repositories.createChannel({ name: 'summit' })
+    const summit = repositories.createChannel({ name: 'summit', systemKey: 'summit' })
     const newton = createTestAgent(repositories, 'Newton', 'newton')
     const clawd = createTestAgent(repositories, 'Clawd', 'clawd')
     repositories.bindChannelWorkspace(channel.id, workspace.id, new Date())

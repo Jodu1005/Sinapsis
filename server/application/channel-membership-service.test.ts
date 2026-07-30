@@ -28,7 +28,7 @@ describe('ChannelMembershipService', () => {
 
   it('keeps summit membership automatic and immutable', async () => {
     const fixture = createFixture()
-    const summit = fixture.repositories.createChannel({ name: 'summit' })
+    const summit = fixture.repositories.createChannel({ name: 'summit', systemKey: 'summit' })
     const service = new ChannelMembershipService(fixture.repositories, { cancelAgentInChannel: async () => undefined })
 
     expect(service.list(summit.id)).toEqual([expect.objectContaining({ id: fixture.agent.id })])

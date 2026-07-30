@@ -198,9 +198,9 @@ describe('LeaseReaper', () => {
     const repositories = new SqliteRepositories(database, new RecordingPublisher())
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
-    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
+    const channel = repositories.createChannel({ name: 'general' })
     const agent = repositories.createAgent({
-      workspaceId: workspace.id, identity: 'Backend agent', mentionName: 'backend', runtime: 'opencode',
+      identity: 'Backend agent', mentionName: 'backend', runtime: 'opencode',
       capabilityTags: ['backend'], maxConcurrentTasks: 1, command: 'opencode', args: ['run'], model: '', env: {},
     })
     repositories.setAgentStatus(agent.id, 'idle', at(0))

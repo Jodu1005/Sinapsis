@@ -211,13 +211,13 @@ describe('TaskScheduler', () => {
     const repositories = new SqliteRepositories(database, new RecordingPublisher())
     const workspace = repositories.createWorkspace({ name: 'Sinapsis', leaseTtlMs: options.workspaceLeaseTtlMs })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
-    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
+    const channel = repositories.createChannel({ name: 'general' })
     const frontend = repositories.createAgent({
-      workspaceId: workspace.id, identity: 'Frontend agent', mentionName: 'frontend', runtime: 'opencode',
+      identity: 'Frontend agent', mentionName: 'frontend', runtime: 'opencode',
       capabilityTags: ['frontend'], maxConcurrentTasks: 1, command: 'opencode', args: ['run'], model: '', env: {},
     })
     const backend = repositories.createAgent({
-      workspaceId: workspace.id, identity: 'Backend agent', mentionName: 'backend', runtime: 'pi',
+      identity: 'Backend agent', mentionName: 'backend', runtime: 'pi',
       capabilityTags: ['backend'], maxConcurrentTasks: 1, command: 'pi', args: ['--mode', 'rpc'], model: '', env: {},
     })
     repositories.setAgentStatus(frontend.id, 'idle', at(0))

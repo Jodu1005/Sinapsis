@@ -4,12 +4,11 @@ import { resolveRuntimeProfile, type RuntimeAvailabilityDetector } from '../adap
 import type { Agent, AgentStatus } from '../domain/agent'
 
 describe('AgentService', () => {
-  it('requires an existing workspace and fixes agent concurrency to one', async () => {
-    const repository = new RecordingAgentRepository(['workspace-1'])
+  it('creates a global Agent without a Workspace locator and fixes concurrency to one', async () => {
+    const repository = new RecordingAgentRepository()
     const service = new AgentService(repository, availableDetector())
 
     const agent = await service.createAgent({
-      workspaceId: 'workspace-1',
       identity: 'Build engineer',
       mention: 'build',
       runtime: 'opencode',
@@ -17,7 +16,6 @@ describe('AgentService', () => {
     })
 
     expect(agent).toMatchObject({
-      workspaceId: 'workspace-1',
       identity: 'Build engineer',
       mention: 'build',
       maxConcurrentTasks: 1,
@@ -25,28 +23,21 @@ describe('AgentService', () => {
       capabilityTags: ['typescript'],
       availability: { executable: 'available', taskExecution: 'unverified' },
     })
+    expect(agent).not.toHaveProperty('workspaceId')
     expect(repository.createdAgents).toContainEqual(expect.objectContaining({
-      workspaceId: 'workspace-1',
       identity: 'Build engineer',
       mentionName: 'build',
       maxConcurrentTasks: 1,
     }))
+    expect(repository.createdAgents[0]).not.toHaveProperty('workspaceId')
     expect(repository.statusUpdates).toEqual([
       expect.objectContaining({ agentId: 'agent-1', status: 'idle' }),
     ])
   })
 
-  it('rejects an Agent whose workspace does not exist', async () => {
-    const service = new AgentService(new RecordingAgentRepository([]), availableDetector())
-
-    await expect(service.createAgent({
-      workspaceId: 'missing-workspace', identity: 'Build engineer', mention: 'build', runtime: 'opencode', capabilityTags: [],
-    })).rejects.toThrow('Workspace missing-workspace does not exist.')
-  })
-
   it('rejects a duplicate mention globally', async () => {
-    const service = new AgentService(new RecordingAgentRepository(['workspace-1']), availableDetector())
-    const input = { workspaceId: 'workspace-1', identity: 'Build engineer', mention: 'build', runtime: 'opencode' as const, capabilityTags: [] }
+    const service = new AgentService(new RecordingAgentRepository(), availableDetector())
+    const input = { identity: 'Build engineer', mention: 'build', runtime: 'opencode' as const, capabilityTags: [] }
 
     await service.createAgent(input)
 
@@ -80,10 +71,10 @@ describe('AgentService', () => {
 
   it('probes the resolved runtime profile before storing the Agent configuration', async () => {
     const detector = availableDetector()
-    const service = new AgentService(new RecordingAgentRepository(['workspace-1']), detector)
+    const service = new AgentService(new RecordingAgentRepository(), detector)
 
     await service.createAgent({
-      workspaceId: 'workspace-1', identity: 'Pi engineer', mention: 'pi', runtime: 'pi', capabilityTags: [],
+      identity: 'Pi engineer', mention: 'pi', runtime: 'pi', capabilityTags: [],
       runtimeOverrides: { command: 'pi-local' },
     })
 
@@ -91,26 +82,26 @@ describe('AgentService', () => {
   })
 
   it('normalizes one optional at prefix and rejects ambiguous or invalid mention names', async () => {
-    const repository = new RecordingAgentRepository(['workspace-1'])
+    const repository = new RecordingAgentRepository()
     const service = new AgentService(repository, availableDetector())
 
     const agent = await service.createAgent({
-      workspaceId: 'workspace-1', identity: 'Build engineer', mention: ' @Build ', runtime: 'opencode', capabilityTags: [],
+      identity: 'Build engineer', mention: ' @Build ', runtime: 'opencode', capabilityTags: [],
     })
 
     expect(agent.mention).toBe('build')
     expect(repository.createdAgents[0]).toMatchObject({ mentionName: 'build' })
     await expect(service.createAgent({
-      workspaceId: 'workspace-1', identity: 'Second engineer', mention: '@@build', runtime: 'opencode', capabilityTags: [],
+      identity: 'Second engineer', mention: '@@build', runtime: 'opencode', capabilityTags: [],
     })).rejects.toThrow('Agent mention must contain only letters, numbers, hyphens, or underscores.')
     await expect(service.createAgent({
-      workspaceId: 'workspace-1', identity: 'Third engineer', mention: 'build/name', runtime: 'opencode', capabilityTags: [],
+      identity: 'Third engineer', mention: 'build/name', runtime: 'opencode', capabilityTags: [],
     })).rejects.toThrow('Agent mention must contain only letters, numbers, hyphens, or underscores.')
   })
 
   it('refreshes an offline Agent back to idle when its persisted runtime is available', async () => {
     const detector = availableDetector()
-    const repository = new RecordingAgentRepository(['workspace-1'])
+    const repository = new RecordingAgentRepository()
     const stored = repository.seedAgent({ id: 'agent-refresh', status: 'offline' })
     const service = new AgentService(repository, detector)
 
@@ -132,7 +123,7 @@ describe('AgentService', () => {
     [{ executable: 'missing', taskExecution: 'unavailable' }, 'idle'],
     [{ executable: 'available', taskExecution: 'unhealthy' }, 'error'],
   ] as const)('refreshes a non-busy Agent to offline when runtime health is %j', async (availability, initialStatus) => {
-    const repository = new RecordingAgentRepository(['workspace-1'])
+    const repository = new RecordingAgentRepository()
     const stored = repository.seedAgent({ id: `agent-${initialStatus}`, status: initialStatus })
     const service = new AgentService(repository, detectorWith(availability))
 
@@ -145,7 +136,7 @@ describe('AgentService', () => {
   })
 
   it('never changes a busy Agent status during runtime refresh', async () => {
-    const repository = new RecordingAgentRepository(['workspace-1'])
+    const repository = new RecordingAgentRepository()
     const stored = repository.seedAgent({ id: 'agent-busy', status: 'busy' })
     const service = new AgentService(repository, detectorWith({ executable: 'missing', taskExecution: 'unavailable' }))
 
@@ -171,14 +162,8 @@ class RecordingAgentRepository {
   readonly statusUpdates: Array<{ agentId: string; status: string }> = []
   readonly agents = new Map<string, Agent>()
 
-  constructor(private readonly workspaceIds: string[]) {}
-
-  hasWorkspace(workspaceId: string): boolean {
-    return this.workspaceIds.includes(workspaceId)
-  }
-
-  hasAgentMention(workspaceId: string, mention: string): boolean {
-    return this.createdAgents.some((agent) => agent.workspaceId === workspaceId && agent.mentionName === mention)
+  hasAgentMention(mention: string): boolean {
+    return this.createdAgents.some((agent) => agent.mentionName === mention)
   }
 
   createAgent(input: Record<string, unknown>) {
@@ -187,7 +172,6 @@ class RecordingAgentRepository {
     const createdAt = '2026-07-25T00:00:00.000Z'
     this.agents.set(id, {
       id,
-      workspaceId: input.workspaceId as string,
       identity: input.identity as string,
       mentionName: input.mentionName as string,
       runtime: input.runtime as Agent['runtime'],
@@ -219,7 +203,6 @@ class RecordingAgentRepository {
   seedAgent(overrides: { id: string; status: AgentStatus }) {
     const agent: Agent = {
       id: overrides.id,
-      workspaceId: 'workspace-1',
       identity: 'Build engineer',
       mentionName: 'build',
       runtime: 'opencode',

@@ -417,10 +417,9 @@ describe('TaskExecutionCoordinator', () => {
     const repository = repositories.createRepository({
       workspaceId: workspace.id, name: 'demo', path: source.repositoryRoot, currentBranch: 'main', defaultBranch: 'main', isClean: true,
     })
-    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
+    const channel = repositories.createChannel({ name: 'general' })
     const agentRuntime = options.agentRuntime ?? 'opencode'
     const agent = repositories.createAgent({
-      workspaceId: workspace.id,
       identity: 'Build',
       mentionName: 'build',
       runtime: agentRuntime,

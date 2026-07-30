@@ -76,7 +76,7 @@ describe('ConversationCoordinator', () => {
     expect(fixture.runtime.starts[0]?.profile.command).toBe('build-runtime')
   })
 
-  it('routes a mentioned Agent from another workspace while using that Agent workspace directory', async () => {
+  it('routes a global mentioned Agent without treating its legacy storage Workspace as ownership', async () => {
     const fixture = await createFixture()
     const remote = fixture.createRemoteAgent('Release', 'release')
     fixture.setIdle(remote.agent, '2026-07-25T08:00:00.000Z')
@@ -84,7 +84,7 @@ describe('ConversationCoordinator', () => {
     await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('@Release 请检查发布配置。'))
 
     expect(fixture.runtime.starts[0]).toMatchObject({
-      worktreePath: remote.repository.path,
+      worktreePath: fixture.repository.path,
       profile: expect.objectContaining({ command: 'release-runtime' }),
     })
   })
@@ -150,7 +150,7 @@ describe('ConversationCoordinator', () => {
 
   it('cancels only the targeted Agent conversations in one channel', async () => {
     const fixture = await createFixture()
-    const planning = fixture.repositories.createChannel({ repositoryId: fixture.repository.id, name: 'planning' })
+    const planning = fixture.repositories.createChannel({ name: 'planning' })
     const build = fixture.createAgent('Build', 'build')
     const review = fixture.createAgent('Review', 'review')
     fixture.repositories.addChannelAgent(planning.id, build.id, new Date())
@@ -297,7 +297,7 @@ describe('ConversationCoordinator', () => {
       defaultBranch: 'main',
       isClean: true,
     })
-    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
+    const channel = repositories.createChannel({ name: 'general' })
     const runtime = new FakeRuntimeAdapter()
     const messages = new ChannelMessageService(repositories)
     const coordinator = new ConversationCoordinator({
@@ -308,7 +308,6 @@ describe('ConversationCoordinator', () => {
 
     const createAgent = (identity: string, mentionName: string, responsibilities: string[] = ['通用回复']): Agent => {
       const agent = repositories.createAgent({
-        workspaceId: workspace.id,
         identity,
         mentionName,
         runtime: 'opencode',
@@ -334,7 +333,6 @@ describe('ConversationCoordinator', () => {
         isClean: true,
       })
       const agent = repositories.createAgent({
-        workspaceId: remoteWorkspace.id,
         identity,
         mentionName,
         runtime: 'opencode',

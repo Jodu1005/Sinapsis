@@ -36,11 +36,13 @@ describe('task API', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ directory: '/projects/sinapsis' }),
     })
     const repository = await repositoryResponse.json() as { id: string }
+    const channelId = await firstChannelId(server.baseUrl)
 
     const response = await fetch(`${server.baseUrl}/api/repositories/${repository.id}/tasks`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        channelId,
         title: '完善 React 界面的 Vitest 测试',
         description: '为任务面板补充 CSS 状态覆盖。',
         acceptanceCriteria: 'Vitest 测试通过。',
@@ -84,11 +86,13 @@ describe('task API', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ directory: '/projects/sinapsis' }),
     })
     const repository = await repositoryResponse.json() as { id: string }
+    const channelId = await firstChannelId(server.baseUrl)
 
     const response = await fetch(`${server.baseUrl}/api/repositories/${repository.id}/tasks`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        channelId,
         title: '审查 API',
         description: '检查接口。',
         acceptanceCriteria: '结论已记录。',
@@ -103,10 +107,10 @@ describe('task API', () => {
   })
 
   it('lists a repository task and rejects human input before an agent claims it', async () => {
-    const { server, repositoryId } = await createRepositoryServer()
+    const { server, repositoryId, channelId } = await createRepositoryServer()
     const createResponse = await fetch(`${server.baseUrl}/api/repositories/${repositoryId}/tasks`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
-        title: '检查 API schema', description: '确认数据库字段。', acceptanceCriteria: '结果已记录。',
+        channelId, title: '检查 API schema', description: '确认数据库字段。', acceptanceCriteria: '结果已记录。',
       }),
     })
     const task = await createResponse.json() as { id: string }
@@ -123,10 +127,10 @@ describe('task API', () => {
   })
 
   it('cancels a queued task through its explicit task action API', async () => {
-    const { server, repositoryId } = await createRepositoryServer()
+    const { server, repositoryId, channelId } = await createRepositoryServer()
     const createResponse = await fetch(`${server.baseUrl}/api/repositories/${repositoryId}/tasks`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
-        title: '审查 API', description: '检查接口。', acceptanceCriteria: '结论已记录。',
+        channelId, title: '审查 API', description: '检查接口。', acceptanceCriteria: '结论已记录。',
       }),
     })
     const task = await createResponse.json() as { id: string }
@@ -140,10 +144,10 @@ describe('task API', () => {
   })
 
   it('requeues a task that needs human handling so it can be claimed again', async () => {
-    const { server, repositoryId, repositories } = await createRepositoryServer()
+    const { server, repositoryId, channelId, repositories } = await createRepositoryServer()
     const createResponse = await fetch(`${server.baseUrl}/api/repositories/${repositoryId}/tasks`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
-        title: '恢复未提交的任务', description: '继续完成已有改动。', acceptanceCriteria: '提交任务分支。',
+        channelId, title: '恢复未提交的任务', description: '继续完成已有改动。', acceptanceCriteria: '提交任务分支。',
       }),
     })
     const task = await createResponse.json() as { id: string }
@@ -157,7 +161,12 @@ describe('task API', () => {
     await expect(response.json()).resolves.toMatchObject({ id: task.id, status: 'queued' })
   })
 
-  async function createRepositoryServer(): Promise<{ server: { baseUrl: string }; repositoryId: string; repositories: WorkspaceRepositories }> {
+  async function createRepositoryServer(): Promise<{
+    server: { baseUrl: string }
+    repositoryId: string
+    channelId: string
+    repositories: WorkspaceRepositories
+  }> {
     const app = createApp({
       gitClient: {
         inspectRepository: async () => ({
@@ -176,9 +185,21 @@ describe('task API', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ directory: '/projects/sinapsis' }),
     })
     const repository = await repositoryResponse.json() as { id: string }
-    return { server, repositoryId: repository.id, repositories: app.locals.repositories as WorkspaceRepositories }
+    return {
+      server,
+      repositoryId: repository.id,
+      channelId: await firstChannelId(server.baseUrl),
+      repositories: app.locals.repositories as WorkspaceRepositories,
+    }
   }
 })
+
+async function firstChannelId(baseUrl: string): Promise<string> {
+  const bootstrap = await fetch(`${baseUrl}/api/bootstrap`).then((response) => response.json()) as {
+    workspaces: Array<{ repositories: Array<{ channels: Array<{ id: string }> }> }>
+  }
+  return bootstrap.workspaces[0]!.repositories[0]!.channels[0]!.id
+}
 
 describe('TaskService human input queue', () => {
   it.each<TaskStatus>(['claimed', 'running', 'waiting_input'])('accepts input for a %s task', (status) => {
@@ -213,8 +234,8 @@ describe('TaskService channel ownership', () => {
     const repositories = app.locals.repositories as WorkspaceRepositories
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
-    const general = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
-    const build = repositories.createChannel({ repositoryId: repository.id, name: 'build' })
+    const general = repositories.createChannel({ name: 'general' })
+    const build = repositories.createChannel({ name: 'build' })
     const service = new TaskService(repositories)
 
     const task = service.createTask({

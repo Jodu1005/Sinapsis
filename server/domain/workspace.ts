@@ -46,6 +46,4 @@ export interface CreateRepositoryInput {
 export interface CreateChannelInput {
   name: string
   systemKey?: string | null
-  /** @deprecated SQLite compatibility locator; ignored for global Channels. */
-  repositoryId?: string
 }

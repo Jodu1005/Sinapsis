@@ -51,9 +51,8 @@ describe('local workspace flow', () => {
       defaultBranch: 'main',
       isClean: true,
     })
-    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
+    const channel = repositories.createChannel({ name: 'general' })
     const firstAgent = repositories.createAgent({
-      workspaceId: workspace.id,
       identity: 'First builder',
       mentionName: 'first-builder',
       runtime: 'opencode',
@@ -65,7 +64,6 @@ describe('local workspace flow', () => {
       env: {},
     })
     const secondAgent = repositories.createAgent({
-      workspaceId: workspace.id,
       identity: 'Second builder',
       mentionName: 'second-builder',
       runtime: 'opencode',

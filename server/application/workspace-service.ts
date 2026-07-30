@@ -1,6 +1,8 @@
 import type { GitClient, RepositoryInspection } from '../ports/git-client'
 import path from 'node:path'
 import { DomainError } from '../domain/task'
+import type { Channel } from '../domain/workspace'
+import { summitSystemKey } from '../../shared/channel-policy'
 
 export class NotFoundError extends Error {}
 export class ValidationError extends Error {}
@@ -14,13 +16,12 @@ export interface WorkspaceMutationCatalog {
     defaultBranch: string
     isClean: boolean
   }): { id: string; workspaceId: string; name: string; path: string; currentBranch: string; defaultBranch: string; isClean: boolean; createdAt: string }
-  createChannel(input: { repositoryId: string; name: string }): { id: string; repositoryId: string; name: string; createdAt: string }
+  createChannel(input: { name: string }): Channel
+  ensureSystemChannel(input: { name: string; systemKey: string }): Channel
 }
 
 export interface WorkspaceCatalog {
   hasWorkspace(workspaceId: string): boolean
-  hasRepository(repositoryId: string): boolean
-  hasActiveChannelNamed(name: string): boolean
   createWorkspace(input: { name: string; leaseTtlMs?: number }): { id: string; name: string; leaseTtlMs: number; createdAt: string }
   inTransaction<T>(work: (catalog: WorkspaceMutationCatalog) => T): T
   createRepository: WorkspaceMutationCatalog['createRepository']
@@ -62,7 +63,6 @@ export class WorkspaceService {
     } catch (error) {
       throw new ValidationError(error instanceof Error ? error.message : 'Repository directory is not a Git repository.')
     }
-    const shouldCreateGeneral = !this.catalog.hasActiveChannelNamed('general')
     const repository = this.catalog.inTransaction((catalog) => {
       const repository = catalog.createRepository({
         workspaceId: input.workspaceId,
@@ -72,20 +72,16 @@ export class WorkspaceService {
         defaultBranch: inspection.defaultBranch,
         isClean: inspection.isClean,
       })
-      if (shouldCreateGeneral) catalog.createChannel({ repositoryId: repository.id, name: 'general' })
+      catalog.ensureSystemChannel({ name: summitSystemKey, systemKey: summitSystemKey })
       return repository
     })
     return toManagedRepository(repository, inspection)
   }
 
-  createChannel(input: { repositoryId: string; name: string }) {
-    if (!this.catalog.hasRepository(input.repositoryId)) {
-      throw new NotFoundError(`Repository ${input.repositoryId} does not exist.`)
-    }
-
+  createChannel(input: { name: string }) {
     const name = requiredText(input.name, 'Channel name')
     try {
-      return this.catalog.createChannel({ repositoryId: input.repositoryId, name })
+      return this.catalog.createChannel({ name })
     } catch (error) {
       if (isChannelUniqueConstraint(error)) {
         throw new DomainError(`Channel #${name} already exists.`)

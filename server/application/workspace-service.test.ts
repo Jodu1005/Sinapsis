@@ -1,20 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import { WorkspaceService } from './workspace-service'
 import type { GitClient } from '../ports/git-client'
 import { DomainError } from '../domain/task'
+import type { Channel } from '../domain/workspace'
+import { WorkspaceService } from './workspace-service'
 
 describe('WorkspaceService', () => {
-  it('inspects a directory as a Git repository and creates the first global general channel', async () => {
-    const gitClient: GitClient = {
-      inspectRepository: vi.fn().mockResolvedValue({
-        rootPath: '/projects/sinapsis',
-        currentBranch: 'main',
-        defaultBranch: 'main',
-        isClean: true,
-      }),
-    }
-    const repositories = new RecordingWorkspaceRepository('workspace-1')
-    const service = new WorkspaceService(repositories, gitClient)
+  it('inspects a repository and atomically ensures the global summit channel', async () => {
+    const gitClient = inspectingGitClient('/projects/sinapsis')
+    const catalog = new RecordingWorkspaceCatalog('workspace-1')
+    const service = new WorkspaceService(catalog, gitClient)
 
     const repository = await service.addRepository({
       workspaceId: 'workspace-1',
@@ -30,74 +24,96 @@ describe('WorkspaceService', () => {
       currentBranch: 'main',
       defaultBranch: 'main',
     })
-    expect(repositories.createdChannels).toEqual([{ repositoryId: repository.id, name: 'general' }])
+    expect(catalog.createdChannels).toEqual([{ name: 'summit', systemKey: 'summit' }])
+    expect(catalog.systemChannels.get('summit')).toMatchObject({
+      name: 'summit',
+      systemKey: 'summit',
+      memberAgentIds: [],
+      boundWorkspaceIds: [],
+    })
   })
 
-  it('does not create a second general channel when adding another workspace repository', async () => {
-    const gitClient: GitClient = {
-      inspectRepository: vi.fn().mockResolvedValue({ rootPath: '/projects/workcode', currentBranch: 'main', defaultBranch: 'main', isClean: true }),
-    }
-    const repositories = new RecordingWorkspaceRepository('workspace-2', true)
-    const service = new WorkspaceService(repositories, gitClient)
+  it('does not create a second summit channel for later repositories', async () => {
+    const catalog = new RecordingWorkspaceCatalog('workspace-2', true)
+    const service = new WorkspaceService(catalog, inspectingGitClient('/projects/workcode'))
 
     await service.addRepository({ workspaceId: 'workspace-2', directory: '/projects/workcode', name: 'WorkCode' })
 
-    expect(repositories.createdChannels).toEqual([])
+    expect(catalog.createdChannels).toEqual([])
+    expect(catalog.systemChannels.size).toBe(1)
   })
 
   it('rejects a directory that Git cannot inspect', async () => {
     const gitClient: GitClient = {
       inspectRepository: vi.fn().mockRejectedValue(new Error('Not a Git repository.')),
     }
-    const service = new WorkspaceService(new RecordingWorkspaceRepository('workspace-1'), gitClient)
+    const service = new WorkspaceService(new RecordingWorkspaceCatalog('workspace-1'), gitClient)
 
     await expect(service.addRepository({ workspaceId: 'workspace-1', directory: '/tmp/not-a-repository', name: 'Scratch' }))
       .rejects.toThrow('Not a Git repository.')
   })
 
-  it('rolls back repository creation when creating its general channel fails', async () => {
-    const gitClient: GitClient = {
-      inspectRepository: vi.fn().mockResolvedValue({
-        rootPath: '/projects/sinapsis', currentBranch: 'feature/task-3', defaultBranch: 'main', isClean: true,
-      }),
-    }
-    const repositories = new TransactionalWorkspaceRepository('workspace-1', true)
-    const service = new WorkspaceService(repositories, gitClient)
+  it('rolls back repository creation when ensuring summit fails', async () => {
+    const catalog = new TransactionalWorkspaceCatalog('workspace-1', true)
+    const service = new WorkspaceService(catalog, inspectingGitClient('/projects/sinapsis'))
 
     await expect(service.addRepository({
-      workspaceId: 'workspace-1', directory: '/projects/sinapsis', name: 'Sinapsis',
+      workspaceId: 'workspace-1',
+      directory: '/projects/sinapsis',
+      name: 'Sinapsis',
     })).rejects.toThrow('Channel insert failed.')
 
-    expect(repositories.persistedRepositories).toEqual([])
-    expect(repositories.persistedChannels).toEqual([])
+    expect(catalog.persistedRepositories).toEqual([])
+    expect(catalog.persistedChannels).toEqual([])
+  })
+
+  it('creates a global ordinary channel without a repository locator', () => {
+    const catalog = new RecordingWorkspaceCatalog('workspace-1')
+    const service = new WorkspaceService(catalog, { inspectRepository: vi.fn() })
+
+    const channel = service.createChannel({ name: 'release' })
+
+    expect(channel).toMatchObject({
+      name: 'release',
+      systemKey: null,
+      memberAgentIds: [],
+      boundWorkspaceIds: [],
+    })
+    expect(channel).not.toHaveProperty('repositoryId')
   })
 
   it('maps a global channel uniqueness constraint to a domain conflict', () => {
-    const gitClient: GitClient = { inspectRepository: vi.fn() }
-    const repositories = new DuplicateChannelWorkspaceRepository('workspace-1')
-    const service = new WorkspaceService(repositories, gitClient)
+    const service = new WorkspaceService(new DuplicateChannelCatalog('workspace-1'), { inspectRepository: vi.fn() })
 
-    expect(() => service.createChannel({ repositoryId: 'repository-1', name: 'general' }))
+    expect(() => service.createChannel({ name: 'general' }))
       .toThrow(new DomainError('Channel #general already exists.'))
   })
 })
 
-class RecordingWorkspaceRepository {
-  readonly createdChannels: Array<{ repositoryId: string; name: string }> = []
+function inspectingGitClient(rootPath: string): GitClient & { inspectRepository: ReturnType<typeof vi.fn> } {
+  return {
+    inspectRepository: vi.fn().mockResolvedValue({
+      rootPath,
+      currentBranch: 'main',
+      defaultBranch: 'main',
+      isClean: true,
+    }),
+  }
+}
+
+class RecordingWorkspaceCatalog {
+  readonly createdChannels: Array<{ name: string; systemKey?: string }> = []
+  readonly systemChannels = new Map<string, Channel>()
   private repositoryNumber = 0
 
-  constructor(private readonly workspaceId: string, private readonly hasGeneral = false) {}
+  constructor(private readonly workspaceId: string, hasSummit = false) {
+    if (hasSummit) {
+      this.systemChannels.set('summit', channel('channel-summit', 'summit', 'summit'))
+    }
+  }
 
   hasWorkspace(workspaceId: string): boolean {
     return workspaceId === this.workspaceId
-  }
-
-  hasRepository(_repositoryId: string): boolean {
-    return false
-  }
-
-  hasActiveChannelNamed(name: string): boolean {
-    return this.hasGeneral && name === 'general'
   }
 
   createWorkspace(input: { name: string; leaseTtlMs?: number }) {
@@ -120,21 +136,30 @@ class RecordingWorkspaceRepository {
     return { id: `repository-${this.repositoryNumber}`, ...input, createdAt: '2026-07-25T00:00:00.000Z' }
   }
 
-  createChannel(input: { repositoryId: string; name: string }) {
+  createChannel(input: { name: string }) {
     this.createdChannels.push(input)
-    return { id: `channel-${this.createdChannels.length}`, ...input, createdAt: '2026-07-25T00:00:00.000Z' }
+    return channel(`channel-${this.createdChannels.length}`, input.name, null)
+  }
+
+  ensureSystemChannel(input: { name: string; systemKey: string }) {
+    const existing = this.systemChannels.get(input.systemKey)
+    if (existing) return existing
+    this.createdChannels.push(input)
+    const created = channel(`channel-${this.createdChannels.length}`, input.name, input.systemKey)
+    this.systemChannels.set(input.systemKey, created)
+    return created
   }
 }
 
-class TransactionalWorkspaceRepository extends RecordingWorkspaceRepository {
+class TransactionalWorkspaceCatalog extends RecordingWorkspaceCatalog {
   readonly persistedRepositories: Array<{ id: string; workspaceId: string; name: string }> = []
-  readonly persistedChannels: Array<{ repositoryId: string; name: string }> = []
+  readonly persistedChannels: Channel[] = []
 
-  constructor(workspaceId: string, private readonly failGeneralChannel: boolean) {
+  constructor(workspaceId: string, private readonly failSystemChannel: boolean) {
     super(workspaceId)
   }
 
-  inTransaction<T>(work: (catalog: this) => T): T {
+  override inTransaction<T>(work: (catalog: this) => T): T {
     const repositorySnapshot = [...this.persistedRepositories]
     const channelSnapshot = [...this.persistedChannels]
     try {
@@ -146,35 +171,33 @@ class TransactionalWorkspaceRepository extends RecordingWorkspaceRepository {
     }
   }
 
-  override createRepository(input: {
-    workspaceId: string
-    name: string
-    path: string
-    currentBranch: string
-    defaultBranch: string
-    isClean: boolean
-  }) {
+  override createRepository(input: Parameters<RecordingWorkspaceCatalog['createRepository']>[0]) {
     const repository = super.createRepository(input)
     this.persistedRepositories.push(repository)
     return repository
   }
 
-  override createChannel(input: { repositoryId: string; name: string }) {
-    if (this.failGeneralChannel && input.name === 'general') {
-      throw new Error('Channel insert failed.')
-    }
-    const channel = super.createChannel(input)
-    this.persistedChannels.push(channel)
-    return channel
+  override ensureSystemChannel(input: { name: string; systemKey: string }) {
+    if (this.failSystemChannel) throw new Error('Channel insert failed.')
+    const created = super.ensureSystemChannel(input)
+    this.persistedChannels.push(created)
+    return created
   }
 }
 
-class DuplicateChannelWorkspaceRepository extends RecordingWorkspaceRepository {
-  override hasRepository(repositoryId: string): boolean {
-    return repositoryId === 'repository-1'
+class DuplicateChannelCatalog extends RecordingWorkspaceCatalog {
+  override createChannel(_input: { name: string }): never {
+    throw new Error('UNIQUE constraint failed: channels.name')
   }
+}
 
-  override createChannel(_input: { repositoryId: string; name: string }): never {
-    throw new Error('UNIQUE constraint failed: channels.repository_id, channels.name')
+function channel(id: string, name: string, systemKey: string | null): Channel {
+  return {
+    id,
+    name,
+    systemKey,
+    memberAgentIds: [],
+    boundWorkspaceIds: [],
+    createdAt: '2026-07-25T00:00:00.000Z',
   }
 }
