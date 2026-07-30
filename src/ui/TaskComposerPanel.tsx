@@ -13,7 +13,11 @@ export function TaskComposerPanel({ workspaces, agents, initialWorkspaceId, init
   onCreate(input: CreateTaskRequest): Promise<TaskView>
   onClose(): void
 }) {
-  const [workspaceId, setWorkspaceId] = useState(initialWorkspaceId ?? (workspaces.length === 1 ? workspaces[0].id : ''))
+  const [workspaceId, setWorkspaceId] = useState(
+    workspaces.length === 1
+      ? (workspaces.some((workspace) => workspace.id === initialWorkspaceId) ? initialWorkspaceId! : workspaces[0].id)
+      : '',
+  )
   const [title, setTitle] = useState(initialTitle)
   const [description, setDescription] = useState('')
   const [acceptanceCriteria, setAcceptanceCriteria] = useState('')

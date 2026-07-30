@@ -67,6 +67,19 @@ describe('TaskComposerPanel', () => {
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: secondWorkspace.id }))
   })
 
+  it('does not preselect a workspace from a task entry when multiple bindings exist', () => {
+    render(<TaskComposerPanel
+      workspaces={[workspace, secondWorkspace]}
+      agents={[agent]}
+      initialWorkspaceId={workspace.id}
+      onCreate={vi.fn()}
+      onClose={vi.fn()}
+    />)
+
+    expect(screen.getByLabelText('工作空间')).toHaveValue('')
+    expect(screen.getByLabelText('当前工作目录')).toHaveValue('')
+  })
+
   it('blocks task creation when the channel has no bound workspace', async () => {
     const user = userEvent.setup()
     const onCreate = vi.fn()

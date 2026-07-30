@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiClient, type WorkspaceApi } from '../api/client'
@@ -627,6 +627,86 @@ describe('WorkspaceShell', () => {
 
     expect(await screen.findByRole('heading', { name: '概览' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '# build' })).toBeInTheDocument()
+  })
+
+  it('keeps the context task list scoped to the selected channel after opening a task', async () => {
+    const scopedSnapshot = structuredClone(snapshot)
+    scopedSnapshot.tasks.push({
+      ...scopedSnapshot.tasks[0],
+      id: 'task-general',
+      channelId: 'channel-general',
+      title: '仅属于 general 的任务',
+      status: 'queued',
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={makeApi({ getBootstrap: vi.fn().mockResolvedValue(scopedSnapshot) })} />)
+
+    await user.click(await screen.findByRole('button', { name: '# build' }))
+    await user.click(screen.getByRole('button', { name: '修复频道界面' }))
+
+    const context = screen.getByRole('complementary', { name: '任务与上下文' })
+    expect(within(context).queryByRole('button', { name: /仅属于 general 的任务/ })).not.toBeInTheDocument()
+  })
+
+  it('hides selected task details after its workspace is unbound', async () => {
+    const initialSnapshot = structuredClone(snapshot)
+    const releaseWorkspace = structuredClone(initialSnapshot.workspaces[0])
+    releaseWorkspace.id = 'workspace-2'
+    releaseWorkspace.name = 'Release'
+    releaseWorkspace.repositories[0] = {
+      ...releaseWorkspace.repositories[0],
+      id: 'repository-2',
+      workspaceId: 'workspace-2',
+      path: '/code/release',
+    }
+    initialSnapshot.workspaces.push(releaseWorkspace)
+    initialSnapshot.channels[1].boundWorkspaceIds = ['workspace-1', 'workspace-2']
+    const updatedSnapshot = structuredClone(initialSnapshot)
+    updatedSnapshot.channels[1].boundWorkspaceIds = ['workspace-2']
+    const api = makeApi({
+      unbindChannelWorkspace: vi.fn().mockResolvedValue([releaseWorkspace]),
+      getBootstrap: vi.fn().mockResolvedValueOnce(initialSnapshot).mockResolvedValueOnce(updatedSnapshot),
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await user.click(await screen.findByRole('button', { name: '# build' }))
+    await user.click(screen.getByRole('button', { name: '修复频道界面' }))
+    expect(await screen.findByRole('heading', { name: '概览' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '解绑 Sinapsis' }))
+    await user.click(within(screen.getByRole('dialog', { name: '解绑 Sinapsis' })).getByRole('button', { name: '解绑工作空间' }))
+
+    expect(api.unbindChannelWorkspace).toHaveBeenCalledWith('channel-build', 'workspace-1')
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '概览' })).not.toBeInTheDocument())
+    const workspaceGroup = screen.getByRole('group', { name: 'build 的工作空间' })
+    expect(within(workspaceGroup).getByRole('button', { name: /Release/ })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('resets a still-valid workspace selection when changing channels', async () => {
+    const multiWorkspaceSnapshot = structuredClone(snapshot)
+    const releaseWorkspace = structuredClone(multiWorkspaceSnapshot.workspaces[0])
+    releaseWorkspace.id = 'workspace-2'
+    releaseWorkspace.name = 'Release'
+    releaseWorkspace.repositories[0] = {
+      ...releaseWorkspace.repositories[0],
+      id: 'repository-2',
+      workspaceId: 'workspace-2',
+      path: '/code/release',
+    }
+    multiWorkspaceSnapshot.workspaces.push(releaseWorkspace)
+    multiWorkspaceSnapshot.channels[0].boundWorkspaceIds = ['workspace-1', 'workspace-2']
+    multiWorkspaceSnapshot.channels[1].boundWorkspaceIds = ['workspace-1', 'workspace-2']
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={makeApi({ getBootstrap: vi.fn().mockResolvedValue(multiWorkspaceSnapshot) })} />)
+
+    const generalWorkspaces = await screen.findByRole('group', { name: 'general 的工作空间' })
+    await user.click(within(generalWorkspaces).getByRole('button', { name: /Release/ }))
+    expect(within(generalWorkspaces).getByRole('button', { name: /Release/ })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(screen.getByRole('button', { name: '# build' }))
+
+    const buildWorkspaces = screen.getByRole('group', { name: 'build 的工作空间' })
+    expect(within(buildWorkspaces).getByRole('button', { name: /Sinapsis/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(buildWorkspaces).getByRole('button', { name: /Release/ })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('resets the selected task when changing channels', async () => {

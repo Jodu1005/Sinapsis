@@ -81,8 +81,11 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const taskScopeTasks = useMemo(() => snapshot?.tasks.filter((task) =>
     task.workspaceId === workspace?.id
     && task.repositoryId === taskScope?.id
-    && (Boolean(taskRepository) || task.channelId === selection.channel?.id)) ?? [], [snapshot, workspace, taskScope, taskRepository, selection.channel])
-  const selectedTask = useMemo(() => findTask(snapshot, selectedTaskId, selection.channel?.id), [snapshot, selectedTaskId, selection.channel])
+    && task.channelId === selection.channel?.id) ?? [], [snapshot, workspace, taskScope, selection.channel])
+  const selectedTask = useMemo(
+    () => findTask(snapshot, selectedTaskId, selection.channel?.id, selection.channel?.boundWorkspaceIds ?? []),
+    [snapshot, selectedTaskId, selection.channel],
+  )
   const messages = useMemo(() => snapshot && selection.channel ? snapshotChannelMessages(snapshot, selection.channel.id) : [], [snapshot, selection.channel])
   const agents = useMemo(() => {
     const allAgents = snapshot ? snapshotAgents(snapshot) : []
@@ -307,9 +310,13 @@ function findSelection(snapshot: WorkspaceSnapshot | null, selectedChannelId: st
   return { boundWorkspaces, workspace, repository: workspace?.repositories[0], channel }
 }
 
-function findTask(snapshot: WorkspaceSnapshot | null, taskId: string | null, channelId: string | undefined): TaskView | undefined {
+function findTask(snapshot: WorkspaceSnapshot | null, taskId: string | null, channelId: string | undefined, boundWorkspaceIds: string[]): TaskView | undefined {
   if (!taskId || !channelId) return undefined
-  return snapshot?.tasks.find((task) => task.id === taskId && task.channelId === channelId)
+  return snapshot?.tasks.find((task) =>
+    task.id === taskId
+    && task.channelId === channelId
+    && boundWorkspaceIds.includes(task.workspaceId),
+  )
 }
 
 function findRepository(workspace: WorkspaceView | undefined, repositoryId: string | null): RepositoryView | undefined {
