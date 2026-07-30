@@ -392,9 +392,11 @@ describe('SQLite workspace repositories', () => {
       env: {},
     })
 
-    const snapshotSummit = repositories.getBootstrap().channels.find((channel) => channel.id === summit.id)
+    const snapshot = repositories.getBootstrap()
+    const snapshotSummit = snapshot.channels.find((channel) => channel.id === summit.id)
 
-    expect(snapshotSummit?.memberAgentIds).toEqual([newton.id, clawd.id])
+    expect(snapshotSummit?.memberAgentIds).toEqual(snapshot.agents.map((agent) => agent.id))
+    expect(snapshotSummit?.memberAgentIds).toEqual(expect.arrayContaining([newton.id, clawd.id]))
   })
 
   it('returns an empty bootstrap snapshot for a new database', async () => {

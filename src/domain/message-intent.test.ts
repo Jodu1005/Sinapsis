@@ -15,7 +15,7 @@ describe('parseMessageIntent', () => {
   it('parses a task command without a direct agent', () => {
     expect(parseMessageIntent('/task 修复按钮', agents)).toMatchObject({
       kind: 'task',
-      body: '修复按钮',
+      title: '修复按钮',
       directAgentId: undefined,
     })
   })
@@ -23,7 +23,7 @@ describe('parseMessageIntent', () => {
   it('resolves an agent mention at the beginning of task content', () => {
     expect(parseMessageIntent('/task @newton 修复按钮', agents)).toMatchObject({
       kind: 'task',
-      body: '修复按钮',
+      title: '修复按钮',
       directAgentId: 'agent-pi',
     })
   })

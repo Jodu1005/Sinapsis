@@ -2,7 +2,7 @@ import { distinctAgentsByIdentity, type AgentView } from './workspace-view'
 
 export type MessageIntent =
   | { kind: 'message'; body: string }
-  | { kind: 'task'; body: string; directAgentId?: string }
+  | { kind: 'task'; title: string; directAgentId?: string }
   | { kind: 'error'; message: string }
 
 export function parseMessageIntent(body: string, agents: AgentView[]): MessageIntent {
@@ -19,7 +19,7 @@ export function parseMessageIntent(body: string, agents: AgentView[]): MessageIn
 
   const mentionMatch = /(^|\s)(@[^\s]+)/.exec(taskContent)
   if (!mentionMatch) {
-    return { kind: 'task', body: taskContent, directAgentId: undefined }
+    return { kind: 'task', title: taskContent, directAgentId: undefined }
   }
 
   const mention = mentionMatch[2]
@@ -34,7 +34,7 @@ export function parseMessageIntent(body: string, agents: AgentView[]): MessageIn
     return { kind: 'error', message: '请补充任务内容。' }
   }
 
-  return { kind: 'task', body: taskBody, directAgentId: agent.id }
+  return { kind: 'task', title: taskBody, directAgentId: agent.id }
 }
 
 function matchesAgentMention(agent: AgentView, mention: string): boolean {

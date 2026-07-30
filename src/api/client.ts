@@ -16,7 +16,7 @@ export interface WorkspaceApi {
   removeChannelAgent(channelId: string, agentId: string): Promise<AgentView[]>
   bindChannelWorkspace(channelId: string, workspaceId: string): Promise<WorkspaceView[]>
   unbindChannelWorkspace(channelId: string, workspaceId: string): Promise<WorkspaceView[]>
-  createTask(channelId: string, input: CreateTaskRequest & { workspaceId: string }): Promise<TaskView>
+  createTask(channelId: string, input: CreateTaskRequest): Promise<TaskView>
   getTaskDetails(taskId: string): Promise<TaskDetailView>
   queueTaskInput(taskId: string, body: string): Promise<TaskInputView>
   reviewTask(taskId: string, action: 'accept' | 'return', message: string): Promise<TaskView>
@@ -25,12 +25,12 @@ export interface WorkspaceApi {
 }
 
 export interface CreateTaskRequest {
+  workspaceId: string
   title: string
   description: string
   acceptanceCriteria: string
   labels: string[]
   directAgentId?: string
-  channelId?: string
 }
 
 export interface CreateAgentRequest {
@@ -85,7 +85,7 @@ export class ApiClient implements WorkspaceApi {
   async unbindChannelWorkspace(channelId: string, workspaceId: string): Promise<WorkspaceView[]> {
     return this.request(`/api/channels/${channelId}/workspaces/${workspaceId}`, { method: 'DELETE' })
   }
-  async createTask(channelId: string, input: CreateTaskRequest & { workspaceId: string }): Promise<TaskView> {
+  async createTask(channelId: string, input: CreateTaskRequest): Promise<TaskView> {
     return this.request(`/api/channels/${channelId}/tasks`, { method: 'POST', body: JSON.stringify(input) })
   }
   async getTaskDetails(taskId: string): Promise<TaskDetailView> { return this.request(`/api/tasks/${taskId}`) }
