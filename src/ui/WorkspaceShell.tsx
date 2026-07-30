@@ -86,6 +86,11 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     () => findTask(snapshot, selectedTaskId, selection.channel?.id, selection.channel?.boundWorkspaceIds ?? []),
     [snapshot, selectedTaskId, selection.channel],
   )
+  useEffect(() => {
+    if (!snapshot || !selectedTaskId || selectedTask) return
+    setSelectedTaskId(null)
+    setSelectedTaskRepositoryId(null)
+  }, [snapshot, selectedTaskId, selectedTask])
   const messages = useMemo(() => snapshot && selection.channel ? snapshotChannelMessages(snapshot, selection.channel.id) : [], [snapshot, selection.channel])
   const agents = useMemo(() => {
     const allAgents = snapshot ? snapshotAgents(snapshot) : []

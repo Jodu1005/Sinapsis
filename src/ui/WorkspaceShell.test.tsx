@@ -648,7 +648,7 @@ describe('WorkspaceShell', () => {
     expect(within(context).queryByRole('button', { name: /仅属于 general 的任务/ })).not.toBeInTheDocument()
   })
 
-  it('hides selected task details after its workspace is unbound', async () => {
+  it('clears selected task details when its workspace is unbound and later rebound', async () => {
     const initialSnapshot = structuredClone(snapshot)
     const releaseWorkspace = structuredClone(initialSnapshot.workspaces[0])
     releaseWorkspace.id = 'workspace-2'
@@ -663,9 +663,14 @@ describe('WorkspaceShell', () => {
     initialSnapshot.channels[1].boundWorkspaceIds = ['workspace-1', 'workspace-2']
     const updatedSnapshot = structuredClone(initialSnapshot)
     updatedSnapshot.channels[1].boundWorkspaceIds = ['workspace-2']
+    const reboundSnapshot = structuredClone(initialSnapshot)
     const api = makeApi({
+      bindChannelWorkspace: vi.fn().mockResolvedValue([releaseWorkspace, initialSnapshot.workspaces[0]]),
       unbindChannelWorkspace: vi.fn().mockResolvedValue([releaseWorkspace]),
-      getBootstrap: vi.fn().mockResolvedValueOnce(initialSnapshot).mockResolvedValueOnce(updatedSnapshot),
+      getBootstrap: vi.fn()
+        .mockResolvedValueOnce(initialSnapshot)
+        .mockResolvedValueOnce(updatedSnapshot)
+        .mockResolvedValueOnce(reboundSnapshot),
     })
     const user = userEvent.setup()
     render(<WorkspaceShell api={api} />)
@@ -680,6 +685,13 @@ describe('WorkspaceShell', () => {
     await waitFor(() => expect(screen.queryByRole('heading', { name: '概览' })).not.toBeInTheDocument())
     const workspaceGroup = screen.getByRole('group', { name: 'build 的工作空间' })
     expect(within(workspaceGroup).getByRole('button', { name: /Release/ })).toHaveAttribute('aria-pressed', 'true')
+    const context = screen.getByRole('complementary', { name: '任务与上下文' })
+    await user.click(within(context).getByRole('button', { name: '添加工作空间' }))
+    await user.click(screen.getByRole('option', { name: 'Sinapsis' }))
+
+    expect(api.bindChannelWorkspace).toHaveBeenCalledWith('channel-build', 'workspace-1')
+    await waitFor(() => expect(api.getBootstrap).toHaveBeenCalledTimes(3))
+    expect(screen.queryByRole('heading', { name: '概览' })).not.toBeInTheDocument()
   })
 
   it('resets a still-valid workspace selection when changing channels', async () => {
