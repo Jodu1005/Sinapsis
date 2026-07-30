@@ -12,6 +12,10 @@ export interface WorkspaceApi {
   archiveChannel(channelId: string): Promise<ChannelView>
   restoreChannel(channelId: string): Promise<ChannelView>
   resetChannelContext(channelId: string): Promise<ChannelView>
+  addChannelAgent(channelId: string, agentId: string): Promise<AgentView[]>
+  removeChannelAgent(channelId: string, agentId: string): Promise<AgentView[]>
+  bindChannelWorkspace(channelId: string, workspaceId: string): Promise<WorkspaceView[]>
+  unbindChannelWorkspace(channelId: string, workspaceId: string): Promise<WorkspaceView[]>
   createTask(channelId: string, input: CreateTaskRequest & { workspaceId: string }): Promise<TaskView>
   getTaskDetails(taskId: string): Promise<TaskDetailView>
   queueTaskInput(taskId: string, body: string): Promise<TaskInputView>
@@ -68,6 +72,18 @@ export class ApiClient implements WorkspaceApi {
   }
   async resetChannelContext(channelId: string): Promise<ChannelView> {
     return this.request(`/api/channels/${channelId}/context-reset`, { method: 'POST' })
+  }
+  async addChannelAgent(channelId: string, agentId: string): Promise<AgentView[]> {
+    return this.request(`/api/channels/${channelId}/agents`, { method: 'POST', body: JSON.stringify({ agentId }) })
+  }
+  async removeChannelAgent(channelId: string, agentId: string): Promise<AgentView[]> {
+    return this.request(`/api/channels/${channelId}/agents/${agentId}`, { method: 'DELETE' })
+  }
+  async bindChannelWorkspace(channelId: string, workspaceId: string): Promise<WorkspaceView[]> {
+    return this.request(`/api/channels/${channelId}/workspaces`, { method: 'POST', body: JSON.stringify({ workspaceId }) })
+  }
+  async unbindChannelWorkspace(channelId: string, workspaceId: string): Promise<WorkspaceView[]> {
+    return this.request(`/api/channels/${channelId}/workspaces/${workspaceId}`, { method: 'DELETE' })
   }
   async createTask(channelId: string, input: CreateTaskRequest & { workspaceId: string }): Promise<TaskView> {
     return this.request(`/api/channels/${channelId}/tasks`, { method: 'POST', body: JSON.stringify(input) })

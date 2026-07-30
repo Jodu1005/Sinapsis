@@ -63,6 +63,10 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     archiveChannel: vi.fn(),
     restoreChannel: vi.fn(),
     resetChannelContext: vi.fn(),
+    addChannelAgent: vi.fn(),
+    removeChannelAgent: vi.fn(),
+    bindChannelWorkspace: vi.fn(),
+    unbindChannelWorkspace: vi.fn(),
     createTask: vi.fn(),
     getTaskDetails: vi.fn().mockResolvedValue(createdTaskDetails),
     queueTaskInput: vi.fn(),
@@ -239,6 +243,34 @@ describe('WorkspaceShell', () => {
     expect(screen.queryByText('先看一下任务队列。')).not.toBeInTheDocument()
   })
 
+  it('refreshes channel management while preserving the selected channel', async () => {
+    const initialSnapshot = structuredClone(snapshot)
+    initialSnapshot.agents.push({ ...initialSnapshot.agents[0], id: 'agent-2', identity: 'Newton', mentionName: 'newton', runtime: 'pi' })
+    const refreshedSnapshot = structuredClone(initialSnapshot)
+    refreshedSnapshot.channels.find((channel) => channel.id === 'channel-build')!.memberAgentIds.push('agent-2')
+    const addChannelAgent = vi.fn().mockResolvedValue([initialSnapshot.agents[0], initialSnapshot.agents[1]])
+    const getBootstrap = vi.fn().mockResolvedValueOnce(initialSnapshot).mockResolvedValueOnce(refreshedSnapshot)
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={makeApi({ addChannelAgent, getBootstrap })} />)
+
+    await user.click(await screen.findByRole('button', { name: '# build' }))
+    const context = screen.getByRole('complementary', { name: '任务与上下文' })
+    const sections = Array.from(context.querySelectorAll(':scope > section'))
+    expect(sections.findIndex((section) => section.classList.contains('channel-agent-members'))).toBeLessThan(
+      sections.findIndex((section) => section.textContent?.includes('频道操作')),
+    )
+    expect(sections.findIndex((section) => section.classList.contains('channel-workspace-bindings'))).toBeLessThan(
+      sections.findIndex((section) => section.textContent?.includes('频道操作')),
+    )
+
+    await user.click(within(context).getByRole('button', { name: '添加 Agent' }))
+    await user.click(screen.getByRole('option', { name: 'Newton' }))
+
+    expect(addChannelAgent).toHaveBeenCalledWith('channel-build', 'agent-2')
+    expect(await screen.findByRole('heading', { name: '# build' })).toBeInTheDocument()
+    expect(getBootstrap).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps the workspace dialog open when its bootstrap refresh fails', async () => {
     const createdWorkspace = { id: 'workspace-2', name: 'Release', leaseTtlMs: 30_000, createdAt: '2026-07-25T10:00:00.000Z' }
     const api = makeApi({
@@ -249,7 +281,8 @@ describe('WorkspaceShell', () => {
     const user = userEvent.setup()
     render(<WorkspaceShell api={api} />)
 
-    await user.click(await screen.findByRole('button', { name: '添加工作空间' }))
+    const navigation = await screen.findByRole('navigation', { name: '工作空间' })
+    await user.click(within(navigation).getByRole('button', { name: '添加工作空间' }))
     const dialog = screen.getByRole('dialog', { name: '添加本地工作目录' })
     await user.type(within(dialog).getByLabelText('工作空间名称'), 'Release')
     await user.type(within(dialog).getByLabelText('工作目录'), '/code/release')
@@ -389,8 +422,8 @@ describe('WorkspaceShell', () => {
     const user = userEvent.setup()
     render(<WorkspaceShell api={api} />)
 
-    await screen.findByRole('button', { name: '添加 Agent' })
-    await user.click(screen.getByRole('button', { name: '添加 Agent' }))
+    const navigation = await screen.findByRole('navigation', { name: '工作空间' })
+    await user.click(within(navigation).getByRole('button', { name: '添加 Agent' }))
     const dialog = screen.getByRole('dialog', { name: '添加 Agent' })
     await user.type(within(dialog).getByLabelText('Agent 名称'), '验证 Agent')
     await user.type(within(dialog).getByLabelText('能力标签'), 'typescript, test')
@@ -406,8 +439,8 @@ describe('WorkspaceShell', () => {
     const user = userEvent.setup()
     render(<WorkspaceShell api={api} />)
 
-    await screen.findByRole('button', { name: '添加 Agent' })
-    await user.click(screen.getByRole('button', { name: '添加 Agent' }))
+    const navigation = await screen.findByRole('navigation', { name: '工作空间' })
+    await user.click(within(navigation).getByRole('button', { name: '添加 Agent' }))
     const dialog = screen.getByRole('dialog', { name: '添加 Agent' })
 
     await user.type(within(dialog).getByLabelText('Agent 名称'), 'Claude Agent')
@@ -632,6 +665,38 @@ describe('WorkspaceShell', () => {
 })
 
 describe('ApiClient', () => {
+  it('uses channel-scoped membership and workspace binding routes', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('[]', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const api = new ApiClient()
+
+    try {
+      await api.addChannelAgent('channel-build', 'agent-2')
+      await api.removeChannelAgent('channel-build', 'agent-2')
+      await api.bindChannelWorkspace('channel-build', 'workspace-2')
+      await api.unbindChannelWorkspace('channel-build', 'workspace-2')
+
+      expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/channels/channel-build/agents', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ agentId: 'agent-2' }),
+      }))
+      expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/channels/channel-build/agents/agent-2', expect.objectContaining({
+        method: 'DELETE',
+      }))
+      expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/channels/channel-build/workspaces', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ workspaceId: 'workspace-2' }),
+      }))
+      expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/channels/channel-build/workspaces/workspace-2', expect.objectContaining({
+        method: 'DELETE',
+      }))
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
+
   it('uses the global agent and channel routes and channel-scoped task route', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', {
       status: 200,

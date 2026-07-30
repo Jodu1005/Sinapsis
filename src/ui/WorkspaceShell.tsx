@@ -18,6 +18,8 @@ import { WorkspaceCreateDialog } from './WorkspaceCreateDialog'
 import { ChannelCreateDialog } from './ChannelCreateDialog'
 import { ThreadPanel } from './ThreadPanel'
 import { ChannelContextResetDialog } from './ChannelContextResetDialog'
+import { ChannelAgentMembers } from './ChannelAgentMembers'
+import { ChannelWorkspaceBindings } from './ChannelWorkspaceBindings'
 import { canResetChannelContext } from '../../shared/channel-policy'
 
 export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
@@ -271,6 +273,8 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
       {threadRoot && <ThreadPanel root={threadRoot} replies={threadReplies} agents={agents} readOnly={Boolean(selection.channel.archivedAt)} onSend={sendThreadMessage} onClose={() => setSelectedThreadRootId(null)} />}
       {taskScope && <section className="context-section"><div className="context-section-heading"><h2>{taskRepository ? `${taskRepository.name} 任务` : `${workspace.name} 任务`}</h2>{!selection.channel.archivedAt && <button type="button" className="icon-button" aria-label="新建当前上下文任务" data-tooltip="新建任务" onClick={() => setComposerRepositoryId(taskScope.id)}>+</button>}</div><TaskList tasks={taskScopeTasks} selectedTaskId={selectedTask?.id ?? null} onSelect={setSelectedTaskId} /></section>}
       {selectedTask && <section className="context-section task-details-context">{taskDetails ? <TaskDetailPanel details={taskDetails} onQueueInput={(body) => queueTaskInput(taskDetails.task.id, body)} onReview={(action) => reviewTask(taskDetails.task.id, action)} onRequeue={() => requeueTask(taskDetails.task.id)} onReadArtifact={(artifactId) => api.readArtifact(taskDetails.task.id, artifactId)} /> : <p className="context-empty">{taskDetailsError ?? '正在读取任务详情...'}</p>}</section>}
+      <ChannelAgentMembers channel={selection.channel} agents={snapshotAgents(snapshot)} api={api} onChanged={refresh} />
+      <ChannelWorkspaceBindings channel={selection.channel} workspaces={snapshot.workspaces} limit={snapshot.maxWorkspaceBindingsPerChannel} api={api} onChanged={refresh} />
       <section className="context-section"><h2>频道操作</h2>{!selection.channel.archivedAt && canResetChannelContext(selection.channel.name) && <button type="button" className="context-action context-danger" onClick={() => setContextResetDialogOpen(true)}><Trash2 size={16} /> 清空频道上下文</button>}<button type="button" className="context-action" onClick={() => setContextOpen(false)}><PanelRightClose size={16} /> 收起上下文</button></section>
     </aside>
     {composerRepository && <TaskComposerPanel repository={composerRepository} agents={agents} onCreate={createTask} onClose={() => setComposerRepositoryId(null)} />}
