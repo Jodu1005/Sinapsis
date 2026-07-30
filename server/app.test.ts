@@ -78,8 +78,21 @@ describe('local service API', () => {
     expect(agent).not.toHaveProperty('workspaceId')
 
     const bootstrapResponse = await fetch(`${server.baseUrl}/api/bootstrap`)
-    const bootstrap = await bootstrapResponse.json() as { workspaces: Array<{ agents: Array<{ env: unknown }> }> }
-    expect(bootstrap.workspaces[0].agents[0].env).toEqual(['API_TOKEN'])
+    const bootstrap = await bootstrapResponse.json() as { agents: Array<{ env: unknown }>; workspaces: Array<Record<string, unknown>> }
+    expect(bootstrap.agents[0].env).toEqual(['API_TOKEN'])
+    expect(bootstrap.workspaces[0]).not.toHaveProperty('agents')
+  })
+
+  it('publishes the configured workspace binding limit in the bootstrap snapshot', async () => {
+    const server = await startHttpTestServer(createApp({ maxWorkspaceBindingsPerChannel: 3 }))
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/bootstrap`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      maxWorkspaceBindingsPerChannel: 3,
+    })
   })
 
   it('keeps the workspace-scoped Agent route as a locator-free compatibility wrapper', async () => {
@@ -132,12 +145,13 @@ describe('local service API', () => {
 
     const bootstrapResponse = await fetch(`${server.baseUrl}/api/bootstrap`)
     const bootstrap = await bootstrapResponse.json() as {
-      workspaces: Array<{ repositories: Array<{ currentBranch: string; defaultBranch: string; isClean: boolean; channels: Array<{ name: string }> }> }>
+      channels: Array<{ name: string; systemKey: string | null; boundWorkspaceIds: string[] }>
+      workspaces: Array<{ repositories: Array<{ currentBranch: string; defaultBranch: string; isClean: boolean }> }>
     }
     expect(bootstrap.workspaces[0].repositories[0]).toMatchObject({
       currentBranch: 'feature/local-service', defaultBranch: 'main', isClean: false,
-      channels: [{ name: 'summit', systemKey: 'summit', boundWorkspaceIds: [] }],
     })
+    expect(bootstrap.channels).toEqual([expect.objectContaining({ name: 'summit', systemKey: 'summit', boundWorkspaceIds: [] })])
   })
 
   it('creates an unbound global Channel without returning a Repository locator', async () => {
@@ -185,10 +199,7 @@ describe('local service API', () => {
     const repositories = app.locals.repositories as WorkspaceRepositories
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
-    const countChannels = () => repositories.getBootstrap().workspaces
-      .flatMap((item) => item.repositories)
-      .flatMap((repository) => repository.channels)
-      .length
+    const countChannels = () => repositories.getBootstrap().channels.length
     const before = countChannels()
     const server = await startHttpTestServer(app)
     closeServer = server.close
@@ -208,10 +219,7 @@ describe('local service API', () => {
     const repositories = app.locals.repositories as WorkspaceRepositories
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
-    const countChannels = () => repositories.getBootstrap().workspaces
-      .flatMap((item) => item.repositories)
-      .flatMap((item) => item.channels)
-      .length
+    const countChannels = () => repositories.getBootstrap().channels.length
     const before = countChannels()
     const server = await startHttpTestServer(app)
     closeServer = server.close
@@ -370,7 +378,7 @@ describe('local service API', () => {
 
     expect(messageResponse.status).toBe(201)
     expect(repositories.getTaskDetails(task.id)?.inputs).toEqual([])
-    expect(repositories.getBootstrap().workspaces[0].agents[0].status).toBe('offline')
+    expect(repositories.getBootstrap().agents[0].status).toBe('offline')
     expect(mergeResponse.status).toBe(501)
     await expect(mergeResponse.json()).resolves.toEqual({ error: '第一版只记录验收，合并需要独立人工流程。' })
   })
@@ -475,7 +483,7 @@ describe('local service API', () => {
       status: 'idle',
       env: ['CLAUDE_TOKEN'],
     })
-    expect(repositories.getBootstrap().workspaces[0].agents[0].status).toBe('idle')
+    expect(repositories.getBootstrap().agents[0].status).toBe('idle')
   })
 
   it('persists editable Agent responsibilities without exposing runtime secrets', async () => {
@@ -508,7 +516,7 @@ describe('local service API', () => {
     closeServer = server.close
 
     const archiveResponse = await fetch(`${server.baseUrl}/api/channels/${channel.id}/archive`, { method: 'POST' })
-    const archivedBootstrap = await fetch(`${server.baseUrl}/api/bootstrap`).then((response) => response.json()) as { workspaces: Array<{ repositories: Array<{ channels: Array<{ id: string; archivedAt: string | null }> }> }> }
+    const archivedBootstrap = await fetch(`${server.baseUrl}/api/bootstrap`).then((response) => response.json()) as { channels: Array<{ id: string; archivedAt: string | null }> }
     const messageResponse = await fetch(`${server.baseUrl}/api/channels/${channel.id}/messages`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ body: '不应发送' }),
     })
@@ -519,7 +527,7 @@ describe('local service API', () => {
     })
 
     expect(archiveResponse.status).toBe(200)
-    expect(archivedBootstrap.workspaces[0]!.repositories[0]!.channels).toContainEqual(expect.objectContaining({ id: channel.id, archivedAt: expect.any(String) }))
+    expect(archivedBootstrap.channels).toContainEqual(expect.objectContaining({ id: channel.id, archivedAt: expect.any(String) }))
     expect(messageResponse.status).toBe(409)
     expect(taskResponse.status).toBe(409)
 

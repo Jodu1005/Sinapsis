@@ -571,6 +571,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
   constructor(
     private readonly sqlite: SqliteDatabase,
     private readonly publisher: DomainEventPublisher,
+    private readonly maxWorkspaceBindingsPerChannel = 5,
   ) {}
 
   inTransaction<T>(work: (unitOfWork: SqliteUnitOfWork) => T): T {
@@ -1072,42 +1073,95 @@ export class SqliteRepositories implements WorkspaceRepositories {
   }
 
   getBootstrap(): BootstrapSnapshot {
-    const workspaces = this.sqlite.database.prepare('SELECT id, name, lease_ttl_ms, created_at FROM workspaces ORDER BY created_at').all() as unknown as WorkspaceRow[]
+    const database = this.sqlite.database
+    const workspaceRows = database.prepare('SELECT id, name, lease_ttl_ms, created_at FROM workspaces ORDER BY created_at').all() as unknown as WorkspaceRow[]
+    const repositoryRows = database.prepare(
+      'SELECT id, workspace_id, name, path, current_branch, default_branch, is_clean, created_at FROM repositories ORDER BY created_at, id',
+    ).all() as unknown as RepositoryRow[]
+    const agents = this.listAgents()
+    const channelRows = database.prepare(`
+      SELECT id, repository_id, name, system_key, archived_at, context_reset_at, created_at
+      FROM channels ORDER BY archived_at IS NOT NULL, created_at, id
+    `).all() as unknown as ChannelRow[]
+    const membershipRows = database.prepare(
+      'SELECT channel_id, agent_id FROM channel_agent_memberships ORDER BY channel_id, agent_id',
+    ).all() as Array<{ channel_id: string; agent_id: string }>
+    const bindingRows = database.prepare(
+      'SELECT channel_id, workspace_id FROM channel_workspace_bindings ORDER BY channel_id, workspace_id',
+    ).all() as Array<{ channel_id: string; workspace_id: string }>
+    const memberships = groupRelationshipRows(membershipRows, 'agent_id')
+    const bindings = groupRelationshipRows(bindingRows, 'workspace_id')
+    const globalAgentIds = agents.map((agent) => agent.id)
+    const channels = channelRows.map((row): Channel => {
+      const memberAgentIds = row.system_key === summitSystemKey
+        ? globalAgentIds
+        : memberships.get(row.id) ?? []
+      return {
+        id: row.id,
+        name: row.name,
+        systemKey: row.system_key,
+        memberAgentIds,
+        boundWorkspaceIds: bindings.get(row.id) ?? [],
+        subscriberAgentIds: memberAgentIds,
+        archivedAt: row.archived_at,
+        contextResetAt: row.context_reset_at,
+        createdAt: row.created_at,
+      }
+    })
+    const tasks = (database.prepare(`
+      SELECT tasks.* FROM tasks
+      JOIN channels ON channels.id = tasks.channel_id
+      WHERE channels.context_reset_at IS NULL OR tasks.created_at > channels.context_reset_at
+      ORDER BY tasks.queued_at, tasks.rowid
+    `).all() as unknown as TaskRow[]).map(mapTask)
+    const recentMessages = (database.prepare(`
+      SELECT ranked.* FROM (
+        SELECT
+          messages.*,
+          messages.rowid AS message_rowid,
+          ROW_NUMBER() OVER (
+            PARTITION BY messages.channel_id
+            ORDER BY messages.created_at DESC, messages.rowid DESC
+          ) AS channel_rank
+        FROM messages
+        JOIN channels ON channels.id = messages.channel_id
+        WHERE messages.deleted_at IS NULL
+          AND (channels.context_reset_at IS NULL OR messages.created_at > channels.context_reset_at)
+      ) AS ranked
+      WHERE ranked.channel_rank <= 50
+      ORDER BY ranked.created_at, ranked.message_rowid
+    `).all() as unknown as MessageRow[]).map(mapMessage)
+    const repositoriesByWorkspace = new Map<string, Repository[]>()
+    for (const row of repositoryRows) {
+      const repositories = repositoriesByWorkspace.get(row.workspace_id) ?? []
+      repositories.push(mapRepository(row))
+      repositoriesByWorkspace.set(row.workspace_id, repositories)
+    }
     return {
-      workspaces: workspaces.map((workspaceRow) => {
-        const workspace = mapWorkspace(workspaceRow)
-        const repositories = (this.sqlite.database.prepare('SELECT id, workspace_id, name, path, current_branch, default_branch, is_clean, created_at FROM repositories WHERE workspace_id = ? ORDER BY created_at').all(workspace.id) as unknown as RepositoryRow[])
-          .map((repositoryRow) => {
-            const repository = mapRepository(repositoryRow)
-            const channels = (this.sqlite.database.prepare('SELECT id, repository_id, name, system_key, archived_at, context_reset_at, created_at FROM channels WHERE repository_id = ? ORDER BY archived_at IS NOT NULL, created_at').all(repository.id) as unknown as ChannelRow[])
-              .map((channel) => mapChannel(this.sqlite.database, channel))
-            const tasks = (this.sqlite.database.prepare(`
-              SELECT tasks.* FROM tasks
-              JOIN channels ON channels.id = tasks.channel_id
-              WHERE tasks.repository_id = ?
-                AND (channels.context_reset_at IS NULL OR tasks.created_at > channels.context_reset_at)
-              ORDER BY tasks.queued_at
-            `).all(repository.id) as unknown as TaskRow[])
-              .map(mapTask)
-            return { ...repository, channels, tasks }
-          })
-        const agents = (this.sqlite.database.prepare('SELECT * FROM agents WHERE workspace_id = ? ORDER BY created_at').all(workspace.id) as unknown as AgentRow[])
-          .map(mapAgent)
-        const recentMessages = (this.sqlite.database.prepare(`
-          SELECT messages.* FROM messages
-          JOIN channels ON channels.id = messages.channel_id
-          JOIN repositories ON repositories.id = channels.repository_id
-          WHERE repositories.workspace_id = ?
-            AND messages.deleted_at IS NULL
-            AND (channels.context_reset_at IS NULL OR messages.created_at > channels.context_reset_at)
-          ORDER BY messages.created_at DESC, messages.rowid DESC LIMIT 50
-        `).all(workspace.id) as unknown as MessageRow[])
-          .map(mapMessage)
-          .reverse()
-        return { ...workspace, agents, repositories, recentMessages }
+      agents,
+      channels,
+      workspaces: workspaceRows.map((row) => {
+        const workspace = mapWorkspace(row)
+        return { ...workspace, repositories: repositoriesByWorkspace.get(workspace.id) ?? [] }
       }),
+      tasks,
+      recentMessages,
+      maxWorkspaceBindingsPerChannel: this.maxWorkspaceBindingsPerChannel,
     }
   }
+}
+
+function groupRelationshipRows<Key extends 'agent_id' | 'workspace_id'>(
+  rows: Array<{ channel_id: string } & Record<Key, string>>,
+  key: Key,
+): Map<string, string[]> {
+  const grouped = new Map<string, string[]>()
+  for (const row of rows) {
+    const values = grouped.get(row.channel_id) ?? []
+    values.push(row[key])
+    grouped.set(row.channel_id, values)
+  }
+  return grouped
 }
 
 function canRecoverExpiredTask(status: TaskStatus): boolean {

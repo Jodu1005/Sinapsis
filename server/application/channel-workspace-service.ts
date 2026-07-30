@@ -14,7 +14,7 @@ export class ChannelWorkspaceService {
     const workspaceIds = new Set(this.repositories.getChannelWorkspaceIds(channelId))
     return this.repositories.getBootstrap().workspaces
       .filter((workspace) => workspaceIds.has(workspace.id))
-      .map(({ agents: _agents, repositories: _repositories, recentMessages: _recentMessages, ...workspace }) => workspace)
+      .map(({ repositories: _repositories, ...workspace }) => workspace)
   }
 
   bind(channelId: string, workspaceId: string, actor: 'human'): Workspace[] {
@@ -49,7 +49,7 @@ export class ChannelWorkspaceService {
   private requireWorkspace(workspaceId: string): Workspace {
     const workspace = this.repositories.getBootstrap().workspaces.find((candidate) => candidate.id === workspaceId)
     if (!workspace) throw new NotFoundError(`Workspace ${workspaceId} does not exist.`)
-    const { agents: _agents, repositories: _repositories, recentMessages: _recentMessages, ...result } = workspace
+    const { repositories: _repositories, ...result } = workspace
     return result
   }
 

@@ -60,7 +60,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const reconnecting = useWorkspaceEvents(refreshInBackground)
   useEffect(() => { refreshInBackground() }, [refreshInBackground])
 
-  const selection = useMemo(() => findSelection(snapshot, selectedChannelId), [snapshot, selectedChannelId])
+  const selection = useMemo(() => findSelection(snapshot, selectedChannelId, selectedWorkspaceId), [snapshot, selectedChannelId, selectedWorkspaceId])
   const workspace = selection.workspace ?? snapshot?.workspaces.find((candidate) => candidate.id === selectedWorkspaceId) ?? snapshot?.workspaces[0]
   useEffect(() => { if (selection.workspace && selectedWorkspaceId !== selection.workspace.id) setSelectedWorkspaceId(selection.workspace.id) }, [selection.workspace, selectedWorkspaceId])
   useEffect(() => { if (workspace && selectedWorkspaceId !== workspace.id) setSelectedWorkspaceId(workspace.id) }, [workspace, selectedWorkspaceId])
@@ -76,12 +76,16 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   }, [snapshot, selectedAgent])
   const taskRepository = useMemo(() => findRepository(workspace, selectedTaskRepositoryId), [workspace, selectedTaskRepositoryId])
   const taskScope = taskRepository ?? workspace?.repositories[0]
-  const selectedTask = useMemo(() => findTask(workspace, selectedTaskId) ?? (!taskRepository ? taskScope?.tasks.find((task) => task.channelId === selection.channel?.id) : null), [workspace, selectedTaskId, taskRepository, taskScope, selection])
+  const taskScopeTasks = useMemo(() => snapshot?.tasks.filter((task) =>
+    task.workspaceId === workspace?.id
+    && task.repositoryId === taskScope?.id
+    && (Boolean(taskRepository) || task.channelId === selection.channel?.id)) ?? [], [snapshot, workspace, taskScope, taskRepository, selection.channel])
+  const selectedTask = useMemo(() => findTask(snapshot, selectedTaskId) ?? (!taskRepository ? taskScopeTasks[0] : undefined), [snapshot, selectedTaskId, taskRepository, taskScopeTasks])
   const composerRepository = useMemo(() => findRepository(workspace, composerRepositoryId), [workspace, composerRepositoryId])
   const messages = useMemo(() => snapshot && selection.channel ? snapshotChannelMessages(snapshot, selection.channel.id) : [], [snapshot, selection.channel])
   const agents = useMemo(() => {
     const allAgents = snapshot ? snapshotAgents(snapshot) : []
-    return !selection.channel?.subscriberAgentIds ? allAgents : allAgents.filter((agent) => selection.channel!.subscriberAgentIds!.includes(agent.id))
+    return selection.channel ? allAgents.filter((agent) => selection.channel!.memberAgentIds.includes(agent.id)) : allAgents
   }, [snapshot, selection.channel])
   const typingAgents = useMemo(() => {
     const typingIds = selection.channel ? snapshot?.typingAgentIdsByChannel?.[selection.channel.id] ?? [] : []
@@ -108,7 +112,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
 
   const sendMessage = async (body: string) => {
     if (selection.channel?.archivedAt) throw new Error('此频道已归档，只能查看历史记录。')
-    const intent = parseMessageIntent(body, workspace.agents)
+    const intent = parseMessageIntent(body, agents)
     if (intent.kind === 'error') throw new Error(intent.message)
     if (intent.kind === 'message') {
       await api.postMessage(selection.channel!.id, { body: intent.body })
@@ -118,13 +122,13 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
 
     const repository = workspace.repositories[0]
     if (!repository) throw new Error('当前工作空间没有可用的代码仓。')
-    const task = await api.createTask(repository.id, {
+    const task = await api.createTask(selection.channel.id, {
+      workspaceId: workspace.id,
       title: intent.body,
       description: intent.body,
       acceptanceCriteria: '任务完成后在当前频道说明结果。',
       labels: [],
       directAgentId: intent.directAgentId,
-      channelId: selection.channel!.id,
     })
     await refresh()
     setSelectedTaskRepositoryId(repository.id)
@@ -141,7 +145,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     return undefined
   }
   const selectChannel = (channelId: string) => {
-    const nextSelection = findSelection(snapshot, channelId)
+    const nextSelection = findSelection(snapshot, channelId, selectedWorkspaceId)
     if (nextSelection.workspace) setSelectedWorkspaceId(nextSelection.workspace.id)
     setSelectedChannelId(channelId)
     setSelectedThreadRootId(null)
@@ -155,7 +159,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const createTask = async (input: CreateTaskRequest) => {
     if (!composerRepository) throw new Error('没有可用的代码仓上下文。')
     if (selection.channel?.archivedAt) throw new Error('此频道已归档，不能创建任务。')
-    const task = await api.createTask(composerRepository.id, { ...input, channelId: selection.channel!.id })
+    const task = await api.createTask(selection.channel!.id, { ...input, workspaceId: workspace.id })
     await refresh()
     setComposerRepositoryId(null)
     setSelectedTaskRepositoryId(composerRepository.id)
@@ -179,7 +183,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     await refresh()
   }
   const createAgent = async (input: CreateAgentRequest) => {
-    await api.createAgent(workspace.id, input)
+    await api.createAgent(input)
     await refresh()
     setCreatingAgent(false)
   }
@@ -193,7 +197,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const createChannel = async (input: { name: string }) => {
     const repository = findRepository(workspace, creatingChannelRepositoryId)
     if (!repository) throw new Error('没有可用的工作目录。')
-    const channel = await api.createChannel(repository.id, input)
+    const channel = await api.createChannel(input)
     await refresh()
     setSelectedChannelId(channel.id)
     setSelectedTaskId(null)
@@ -255,7 +259,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     await refresh()
   }
   return <div className="workspace-shell">
-    <RepositorySidebar workspace={workspace} workspaces={snapshot.workspaces} selectedChannelId={selection.channel.id} selectedTaskId={selectedTask?.id ?? null} onSelectChannel={selectChannel} onSelectTask={selectTask} onCreateTask={setComposerRepositoryId} onCreateChannel={setCreatingChannelRepositoryId} onArchiveChannel={archiveChannel} onRestoreChannel={restoreChannel} channelReadOnly={Boolean(selection.channel.archivedAt)} onCreateWorkspace={() => setCreatingWorkspace(true)} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
+    <RepositorySidebar workspace={workspace} agents={agents} channels={snapshot.channels} tasks={snapshot.tasks} selectedChannelId={selection.channel.id} selectedTaskId={selectedTask?.id ?? null} onSelectChannel={selectChannel} onSelectTask={selectTask} onCreateTask={setComposerRepositoryId} onCreateChannel={setCreatingChannelRepositoryId} onArchiveChannel={archiveChannel} onRestoreChannel={restoreChannel} channelReadOnly={Boolean(selection.channel.archivedAt)} onCreateWorkspace={() => setCreatingWorkspace(true)} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
     <main className="conversation-panel">
       <header className="channel-header"><NavigationToggle onClick={() => setNavOpen(true)} /><div className="channel-heading"><h1># {selection.channel.name}</h1><p>{selection.channel.archivedAt ? '已归档频道 · 只读' : '全局频道'}</p></div><div className="header-actions"><span className="connection-state" data-reconnecting={reconnecting}>{reconnecting ? '正在重新连接' : '已连接'}</span><button type="button" className="icon-button" aria-label="打开上下文" data-tooltip="打开上下文" onClick={() => setContextOpen(true)}><PanelRightOpen size={18} /></button></div></header>
       {channelActionError && <p className="channel-action-error" role="alert">{channelActionError}</p>}
@@ -265,11 +269,11 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     <aside className="context-panel" aria-label="任务与上下文" aria-hidden={narrowContext && !contextOpen || undefined} inert={narrowContext && !contextOpen} data-mobile-open={contextOpen}>
       <header className="context-header"><strong>上下文</strong><button type="button" className="icon-button context-close" aria-label="关闭上下文" data-tooltip="关闭上下文" onClick={() => setContextOpen(false)}><X size={17} /></button></header>
       {threadRoot && <ThreadPanel root={threadRoot} replies={threadReplies} agents={agents} readOnly={Boolean(selection.channel.archivedAt)} onSend={sendThreadMessage} onClose={() => setSelectedThreadRootId(null)} />}
-      {taskScope && <section className="context-section"><div className="context-section-heading"><h2>{taskRepository ? `${taskRepository.name} 任务` : `${workspace.name} 任务`}</h2>{!selection.channel.archivedAt && <button type="button" className="icon-button" aria-label="新建当前上下文任务" data-tooltip="新建任务" onClick={() => setComposerRepositoryId(taskScope.id)}>+</button>}</div><TaskList tasks={taskScope.tasks.filter((task) => taskRepository || task.channelId === selection.channel!.id)} selectedTaskId={selectedTask?.id ?? null} onSelect={setSelectedTaskId} /></section>}
+      {taskScope && <section className="context-section"><div className="context-section-heading"><h2>{taskRepository ? `${taskRepository.name} 任务` : `${workspace.name} 任务`}</h2>{!selection.channel.archivedAt && <button type="button" className="icon-button" aria-label="新建当前上下文任务" data-tooltip="新建任务" onClick={() => setComposerRepositoryId(taskScope.id)}>+</button>}</div><TaskList tasks={taskScopeTasks} selectedTaskId={selectedTask?.id ?? null} onSelect={setSelectedTaskId} /></section>}
       {selectedTask && <section className="context-section task-details-context">{taskDetails ? <TaskDetailPanel details={taskDetails} onQueueInput={(body) => queueTaskInput(taskDetails.task.id, body)} onReview={(action) => reviewTask(taskDetails.task.id, action)} onRequeue={() => requeueTask(taskDetails.task.id)} onReadArtifact={(artifactId) => api.readArtifact(taskDetails.task.id, artifactId)} /> : <p className="context-empty">{taskDetailsError ?? '正在读取任务详情...'}</p>}</section>}
       <section className="context-section"><h2>频道操作</h2>{!selection.channel.archivedAt && canResetChannelContext(selection.channel.name) && <button type="button" className="context-action context-danger" onClick={() => setContextResetDialogOpen(true)}><Trash2 size={16} /> 清空频道上下文</button>}<button type="button" className="context-action" onClick={() => setContextOpen(false)}><PanelRightClose size={16} /> 收起上下文</button></section>
     </aside>
-    {composerRepository && <TaskComposerPanel repository={composerRepository} agents={workspace.agents} onCreate={createTask} onClose={() => setComposerRepositoryId(null)} />}
+    {composerRepository && <TaskComposerPanel repository={composerRepository} agents={agents} onCreate={createTask} onClose={() => setComposerRepositoryId(null)} />}
     {creatingWorkspace && <WorkspaceCreateDialog onCreate={createWorkspace} onClose={() => setCreatingWorkspace(false)} />}
     {creatingChannelRepositoryId && <ChannelCreateDialog onCreate={createChannel} onClose={() => setCreatingChannelRepositoryId(null)} />}
     {creatingAgent && <AgentCreateDialog onCreate={createAgent} onClose={() => setCreatingAgent(false)} />}
@@ -278,14 +282,21 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   </div>
 }
 
-function findSelection(snapshot: WorkspaceSnapshot | null, selectedChannelId: string | null) {
-  const all = snapshot?.workspaces.flatMap((workspace) => workspace.repositories.flatMap((repository) => repository.channels.map((channel) => ({ workspace, repository, channel })))) ?? []
-  return all.find((candidate) => candidate.channel.id === selectedChannelId) ?? all[0] ?? { workspace: undefined, repository: undefined, channel: undefined }
+function findSelection(snapshot: WorkspaceSnapshot | null, selectedChannelId: string | null, selectedWorkspaceId: string | null) {
+  const channel = snapshot?.channels.find((candidate) => candidate.id === selectedChannelId) ?? snapshot?.channels[0]
+  if (!snapshot || !channel) return { workspace: undefined, repository: undefined, channel: undefined }
+  const workspace = snapshot.workspaces.find((candidate) =>
+    candidate.id === selectedWorkspaceId
+    && (channel.boundWorkspaceIds.length === 0 || channel.boundWorkspaceIds.includes(candidate.id)))
+    ?? snapshot.workspaces.find((candidate) => channel.boundWorkspaceIds.includes(candidate.id))
+    ?? snapshot.workspaces.find((candidate) => candidate.id === selectedWorkspaceId)
+    ?? snapshot.workspaces[0]
+  return { workspace, repository: workspace?.repositories[0], channel }
 }
 
-function findTask(workspace: WorkspaceView | undefined, taskId: string | null): TaskView | undefined {
+function findTask(snapshot: WorkspaceSnapshot | null, taskId: string | null): TaskView | undefined {
   if (!taskId) return undefined
-  return workspace?.repositories.flatMap((repository) => repository.tasks).find((task) => task.id === taskId)
+  return snapshot?.tasks.find((task) => task.id === taskId)
 }
 
 function findRepository(workspace: WorkspaceView | undefined, repositoryId: string | null): RepositoryView | undefined {

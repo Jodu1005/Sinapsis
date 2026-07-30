@@ -4,15 +4,15 @@ export interface WorkspaceApi {
   getBootstrap(): Promise<WorkspaceSnapshot>
   createWorkspace(input: { name: string }): Promise<WorkspaceView>
   addRepository(workspaceId: string, input: { directory: string; name?: string }): Promise<RepositoryView>
-  createAgent(workspaceId: string, input: CreateAgentRequest): Promise<AgentView>
+  createAgent(input: CreateAgentRequest): Promise<AgentView>
   updateAgentResponsibilities(agentId: string, responsibilities: string[]): Promise<AgentView>
   refreshAgentRuntime(agentId: string): Promise<void>
   postMessage(channelId: string, input: { body: string; taskId?: string; threadRootMessageId?: string }): Promise<ChannelMessage>
-  createChannel(repositoryId: string, input: { name: string }): Promise<ChannelView>
+  createChannel(input: { name: string }): Promise<ChannelView>
   archiveChannel(channelId: string): Promise<ChannelView>
   restoreChannel(channelId: string): Promise<ChannelView>
   resetChannelContext(channelId: string): Promise<ChannelView>
-  createTask(repositoryId: string, input: CreateTaskRequest): Promise<TaskView>
+  createTask(channelId: string, input: CreateTaskRequest & { workspaceId: string }): Promise<TaskView>
   getTaskDetails(taskId: string): Promise<TaskDetailView>
   queueTaskInput(taskId: string, body: string): Promise<TaskInputView>
   reviewTask(taskId: string, action: 'accept' | 'return', message: string): Promise<TaskView>
@@ -45,20 +45,20 @@ export class ApiClient implements WorkspaceApi {
   async addRepository(workspaceId: string, input: { directory: string; name?: string }): Promise<RepositoryView> {
     return this.request(`/api/workspaces/${workspaceId}/repositories`, { method: 'POST', body: JSON.stringify(input) })
   }
-  async createAgent(workspaceId: string, input: CreateAgentRequest): Promise<AgentView> {
-    return this.request(`/api/workspaces/${workspaceId}/agents`, { method: 'POST', body: JSON.stringify(input) })
+  async createAgent(input: CreateAgentRequest): Promise<AgentView> {
+    return this.request('/api/agents', { method: 'POST', body: JSON.stringify(input) })
   }
   async updateAgentResponsibilities(agentId: string, responsibilities: string[]): Promise<AgentView> {
     return this.request(`/api/agents/${agentId}/responsibilities`, { method: 'PUT', body: JSON.stringify({ responsibilities }) })
   }
   async refreshAgentRuntime(agentId: string): Promise<void> {
-    await this.request(`/api/agents/${agentId}/runtime/refresh`, { method: 'POST' })
+    await this.request(`/api/agents/${agentId}/refresh-runtime`, { method: 'POST' })
   }
   async postMessage(channelId: string, input: { body: string; taskId?: string; threadRootMessageId?: string }): Promise<ChannelMessage> {
     return this.request(`/api/channels/${channelId}/messages`, { method: 'POST', body: JSON.stringify(input) })
   }
-  async createChannel(repositoryId: string, input: { name: string }): Promise<ChannelView> {
-    return this.request(`/api/repositories/${repositoryId}/channels`, { method: 'POST', body: JSON.stringify(input) })
+  async createChannel(input: { name: string }): Promise<ChannelView> {
+    return this.request('/api/channels', { method: 'POST', body: JSON.stringify(input) })
   }
   async archiveChannel(channelId: string): Promise<ChannelView> {
     return this.request(`/api/channels/${channelId}/archive`, { method: 'POST' })
@@ -69,8 +69,8 @@ export class ApiClient implements WorkspaceApi {
   async resetChannelContext(channelId: string): Promise<ChannelView> {
     return this.request(`/api/channels/${channelId}/context-reset`, { method: 'POST' })
   }
-  async createTask(repositoryId: string, input: CreateTaskRequest): Promise<TaskView> {
-    return this.request(`/api/repositories/${repositoryId}/tasks`, { method: 'POST', body: JSON.stringify(input) })
+  async createTask(channelId: string, input: CreateTaskRequest & { workspaceId: string }): Promise<TaskView> {
+    return this.request(`/api/channels/${channelId}/tasks`, { method: 'POST', body: JSON.stringify(input) })
   }
   async getTaskDetails(taskId: string): Promise<TaskDetailView> { return this.request(`/api/tasks/${taskId}`) }
   async queueTaskInput(taskId: string, body: string): Promise<TaskInputView> {

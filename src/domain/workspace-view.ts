@@ -1,16 +1,22 @@
 export type AgentStatus = 'offline' | 'idle' | 'busy' | 'error'
 export type TaskStatus = 'queued' | 'claimed' | 'running' | 'waiting_input' | 'in_review' | 'accepted' | 'returned' | 'needs_human' | 'merged' | 'cancelled'
 
-export interface WorkspaceSnapshot { workspaces: WorkspaceView[]; typingAgentIdsByChannel?: Record<string, string[]> }
+export interface WorkspaceSnapshot {
+  agents: AgentView[]
+  channels: ChannelView[]
+  workspaces: WorkspaceView[]
+  tasks: TaskView[]
+  recentMessages: ChannelMessage[]
+  maxWorkspaceBindingsPerChannel: number
+  typingAgentIdsByChannel?: Record<string, string[]>
+}
 
 export interface WorkspaceView {
   id: string
   name: string
   leaseTtlMs: number
   createdAt: string
-  agents: AgentView[]
   repositories: RepositoryView[]
-  recentMessages: ChannelMessage[]
 }
 
 export interface RepositoryView {
@@ -22,15 +28,21 @@ export interface RepositoryView {
   defaultBranch: string
   isClean: boolean
   createdAt: string
-  channels: ChannelView[]
-  tasks: TaskView[]
 }
 
-export interface ChannelView { id: string; repositoryId: string; name: string; archivedAt?: string | null; contextResetAt?: string | null; subscriberAgentIds?: string[]; createdAt: string }
+export interface ChannelView {
+  id: string
+  name: string
+  systemKey: string | null
+  memberAgentIds: string[]
+  boundWorkspaceIds: string[]
+  archivedAt?: string | null
+  contextResetAt?: string | null
+  createdAt: string
+}
 
 export interface AgentView {
   id: string
-  workspaceId: string
   identity: string
   mentionName: string
   runtime: 'opencode' | 'pi' | 'claude-code'
@@ -48,6 +60,7 @@ export interface AgentView {
 
 export interface TaskView {
   id: string
+  workspaceId: string
   repositoryId: string
   channelId: string
   threadRootMessageId?: string | null
@@ -99,16 +112,12 @@ export interface ReviewDecisionView { id: string; taskId: string; decision: stri
 export interface TaskArtifactView { id: string; taskId: string; kind: string; createdAt: string }
 export interface TaskEventView { id: string; taskId: string; type: string; payload: Record<string, unknown>; createdAt: string }
 
-export function channelMessages(workspace: WorkspaceView, channelId: string): ChannelMessage[] {
-  return workspace.recentMessages.filter((message) => message.channelId === channelId)
-}
-
 export function snapshotChannelMessages(snapshot: WorkspaceSnapshot, channelId: string): ChannelMessage[] {
-  return snapshot.workspaces.flatMap((workspace) => workspace.recentMessages).filter((message) => message.channelId === channelId)
+  return snapshot.recentMessages.filter((message) => message.channelId === channelId)
 }
 
 export function snapshotAgents(snapshot: WorkspaceSnapshot): AgentView[] {
-  return snapshot.workspaces.flatMap((workspace) => workspace.agents)
+  return snapshot.agents
 }
 
 export function distinctAgentsByIdentity(agents: AgentView[]): AgentView[] {

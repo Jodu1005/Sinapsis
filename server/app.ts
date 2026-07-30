@@ -41,9 +41,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
   const app = express()
   const serviceConfig = getServiceConfig()
   const databasePath = options.databasePath ?? defaultDatabasePath(serviceConfig.dataDir)
+  const maxWorkspaceBindingsPerChannel = options.maxWorkspaceBindingsPerChannel ?? serviceConfig.maxWorkspaceBindingsPerChannel
   const database = createSqliteDatabase(databasePath)
   const eventPublisher = new SseDomainEventPublisher()
-  const repositories = new SqliteRepositories(database, eventPublisher)
+  const repositories = new SqliteRepositories(database, eventPublisher, maxWorkspaceBindingsPerChannel)
   const catalog = new RepositoryWorkspaceCatalog(repositories)
   const workspaceService = new WorkspaceService(catalog, options.gitClient ?? new CommandGitClient())
   const agentService = new AgentService(catalog, options.runtimeAvailabilityDetector ?? new CommandRuntimeAvailabilityDetector())
@@ -75,7 +76,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
   })
   const channelWorkspaceService = new ChannelWorkspaceService(
     repositories,
-    options.maxWorkspaceBindingsPerChannel ?? serviceConfig.maxWorkspaceBindingsPerChannel,
+    maxWorkspaceBindingsPerChannel,
   )
   const scheduler = options.scheduler ?? new TaskScheduler(repositories, coordinator)
   const reviewService = options.reviewService ?? new TaskReviewService(repositories, coordinator, messages)
@@ -94,8 +95,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   app.get('/api/bootstrap', (_request, response) => {
     const snapshot = repositories.getBootstrap()
-    const typingAgentIdsByChannel = Object.fromEntries(snapshot.workspaces
-      .flatMap((workspace) => workspace.repositories.flatMap((repository) => repository.channels))
+    const typingAgentIdsByChannel = Object.fromEntries(snapshot.channels
       .map((channel) => [channel.id, conversationCoordinator.getTypingAgentIds?.(channel.id) ?? []]))
     response.json(sanitizeBootstrap(snapshot, typingAgentIdsByChannel))
   })
@@ -370,11 +370,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
 }
 
 function findMentionedAgent(repositories: WorkspaceRepositories, channelId: string, body: string) {
-  const workspaces = repositories.getBootstrap().workspaces
-  const channel = workspaces.flatMap((workspace) => workspace.repositories.flatMap((repository) => repository.channels)).find((candidate) => candidate.id === channelId)
+  const snapshot = repositories.getBootstrap()
+  const channel = snapshot.channels.find((candidate) => candidate.id === channelId)
   if (!channel) return undefined
-  const agents = workspaces.flatMap((workspace) => workspace.agents)
-    .filter((agent) => !channel.subscriberAgentIds || channel.subscriberAgentIds.includes(agent.id))
+  const agents = snapshot.agents.filter((agent) => channel.memberAgentIds.includes(agent.id))
   return agents
     .filter((agent) => exactMention(body, agent.identity))
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))[0]
@@ -518,15 +517,12 @@ function requiredParam(value: unknown, name: string): string {
 function sanitizeBootstrap(snapshot: ReturnType<WorkspaceRepositories['getBootstrap']>, typingAgentIdsByChannel: Record<string, string[]>) {
   return {
     ...snapshot,
+    agents: snapshot.agents.map(sanitizeAgent),
     typingAgentIdsByChannel,
-    workspaces: snapshot.workspaces.map((workspace) => ({
-      ...workspace,
-      agents: workspace.agents.map(sanitizeAgent),
-    })),
   }
 }
 
-function sanitizeAgent(agent: ReturnType<WorkspaceRepositories['getBootstrap']>['workspaces'][number]['agents'][number]) {
+function sanitizeAgent(agent: ReturnType<WorkspaceRepositories['getBootstrap']>['agents'][number]) {
   return { ...agent, env: Object.keys(agent.env) }
 }
 

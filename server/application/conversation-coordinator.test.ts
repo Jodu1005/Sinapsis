@@ -383,7 +383,7 @@ describe('ConversationCoordinator', () => {
     const setIdle = (agent: Agent, occurredAt: string) => repositories.setAgentStatus(agent.id, 'idle', new Date(occurredAt))
     const postHuman = (body: string, threadRootMessageId?: string) => messages.postHuman(channel.id, body, null, threadRootMessageId)
     const postHumanIn = (channelId: string, body: string, threadRootMessageId?: string) => messages.postHuman(channelId, body, null, threadRootMessageId)
-    const channelMessages = () => repositories.getBootstrap().workspaces[0]!.recentMessages.filter((message) => message.channelId === channel.id)
+    const channelMessages = () => repositories.getBootstrap().recentMessages.filter((message) => message.channelId === channel.id)
 
     return {
       repositories, repository, channel, conversationDirectory, runtime, coordinator,

@@ -1,37 +1,38 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { WorkspaceApi } from '../api/client'
+import { ApiClient, type WorkspaceApi } from '../api/client'
 import type { TaskDetailView, TaskView, WorkspaceSnapshot } from '../domain/workspace-view'
 import { WorkspaceShell } from './WorkspaceShell'
 
 const snapshot: WorkspaceSnapshot = {
+  agents: [{
+    id: 'agent-1', identity: '实现 Agent', mentionName: 'builder', runtime: 'opencode',
+    status: 'idle', capabilityTags: ['frontend'], maxConcurrentTasks: 1, command: 'opencode', args: [], model: 'claude', env: [],
+    createdAt: '2026-07-25T08:00:00.000Z', updatedAt: '2026-07-25T08:00:00.000Z',
+  }],
+  channels: [
+    { id: 'channel-general', name: 'general', systemKey: null, memberAgentIds: ['agent-1'], boundWorkspaceIds: ['workspace-1'], createdAt: '2026-07-25T08:00:00.000Z' },
+    { id: 'channel-build', name: 'build', systemKey: null, memberAgentIds: ['agent-1'], boundWorkspaceIds: ['workspace-1'], createdAt: '2026-07-25T08:00:00.000Z' },
+  ],
   workspaces: [{
     id: 'workspace-1', name: 'Sinapsis', leaseTtlMs: 30_000, createdAt: '2026-07-25T08:00:00.000Z',
-    agents: [{
-      id: 'agent-1', workspaceId: 'workspace-1', identity: '实现 Agent', mentionName: 'builder', runtime: 'opencode',
-      status: 'idle', capabilityTags: ['frontend'], maxConcurrentTasks: 1, command: 'opencode', args: [], model: 'claude', env: [],
-      createdAt: '2026-07-25T08:00:00.000Z', updatedAt: '2026-07-25T08:00:00.000Z',
-    }],
     repositories: [{
       id: 'repository-1', workspaceId: 'workspace-1', name: 'sinapsis', path: '/code/sinapsis', currentBranch: 'main', defaultBranch: 'main', isClean: true,
       createdAt: '2026-07-25T08:00:00.000Z',
-      channels: [
-        { id: 'channel-general', repositoryId: 'repository-1', name: 'general', createdAt: '2026-07-25T08:00:00.000Z' },
-        { id: 'channel-build', repositoryId: 'repository-1', name: 'build', createdAt: '2026-07-25T08:00:00.000Z' },
-      ],
-      tasks: [{
-        id: 'task-1', repositoryId: 'repository-1', channelId: 'channel-build', directAgentId: null, title: '修复频道界面', description: '描述',
-        acceptanceCriteria: '通过测试', labels: ['frontend'], status: 'running', queuedAt: '2026-07-25T08:00:00.000Z', attemptCount: 1,
-        maxRetries: 2, timeoutMs: 3_600_000, leaseTtlMs: null, branchName: 'task/task-1', worktreePath: '/tmp/task-1',
-        createdAt: '2026-07-25T08:00:00.000Z', updatedAt: '2026-07-25T08:00:00.000Z',
-      }],
     }],
-    recentMessages: [
-      { id: 'message-1', channelId: 'channel-general', taskId: null, senderType: 'human', senderId: null, authorName: '你', body: '先看一下任务队列。', createdAt: '2026-07-25T08:01:00.000Z', updatedAt: '2026-07-25T08:01:00.000Z', deletedAt: null },
-      { id: 'message-2', channelId: 'channel-build', taskId: 'task-1', senderType: 'agent', senderId: 'agent-1', authorName: '实现 Agent', body: '正在处理频道界面。', createdAt: '2026-07-25T08:02:00.000Z', updatedAt: '2026-07-25T08:02:00.000Z', deletedAt: null },
-    ],
   }],
+  tasks: [{
+    id: 'task-1', workspaceId: 'workspace-1', repositoryId: 'repository-1', channelId: 'channel-build', directAgentId: null, title: '修复频道界面', description: '描述',
+    acceptanceCriteria: '通过测试', labels: ['frontend'], status: 'running', queuedAt: '2026-07-25T08:00:00.000Z', attemptCount: 1,
+    maxRetries: 2, timeoutMs: 3_600_000, leaseTtlMs: null, branchName: 'task/task-1', worktreePath: '/tmp/task-1',
+    createdAt: '2026-07-25T08:00:00.000Z', updatedAt: '2026-07-25T08:00:00.000Z',
+  }],
+  recentMessages: [
+    { id: 'message-1', channelId: 'channel-general', taskId: null, senderType: 'human', senderId: null, authorName: '你', body: '先看一下任务队列。', createdAt: '2026-07-25T08:01:00.000Z', updatedAt: '2026-07-25T08:01:00.000Z', deletedAt: null },
+    { id: 'message-2', channelId: 'channel-build', taskId: 'task-1', senderType: 'agent', senderId: 'agent-1', authorName: '实现 Agent', body: '正在处理频道界面。', createdAt: '2026-07-25T08:02:00.000Z', updatedAt: '2026-07-25T08:02:00.000Z', deletedAt: null },
+  ],
+  maxWorkspaceBindingsPerChannel: 5,
 }
 
 class FakeEventSource {
@@ -56,7 +57,7 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     addRepository: vi.fn(),
     createAgent: vi.fn(),
     refreshAgentRuntime: vi.fn(),
-    updateAgentResponsibilities: vi.fn().mockResolvedValue(snapshot.workspaces[0]!.agents[0]!),
+    updateAgentResponsibilities: vi.fn().mockResolvedValue(snapshot.agents[0]!),
     postMessage: vi.fn().mockResolvedValue(undefined),
     createChannel: vi.fn(),
     archiveChannel: vi.fn(),
@@ -73,7 +74,7 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
 }
 
 const createdTask: TaskView = {
-  id: 'task-new', repositoryId: 'repository-1', channelId: 'channel-general', directAgentId: 'agent-1', title: '补齐任务详情', description: '将任务面板接入工作台。',
+  id: 'task-new', workspaceId: 'workspace-1', repositoryId: 'repository-1', channelId: 'channel-general', directAgentId: 'agent-1', title: '补齐任务详情', description: '将任务面板接入工作台。',
   acceptanceCriteria: '可以查看证据并人工验收。', labels: ['frontend'], status: 'in_review', queuedAt: '2026-07-25T09:00:00.000Z', attemptCount: 1,
   maxRetries: 2, timeoutMs: 3_600_000, leaseTtlMs: null, branchName: 'task/task-new', worktreePath: '/tmp/task-new',
   createdAt: '2026-07-25T09:00:00.000Z', updatedAt: '2026-07-25T09:00:00.000Z',
@@ -97,7 +98,7 @@ describe('WorkspaceShell', () => {
   })
 
   it('shows workspace creation when no workspace exists', async () => {
-    const api = makeApi({ getBootstrap: vi.fn().mockResolvedValue({ workspaces: [] }) })
+    const api = makeApi({ getBootstrap: vi.fn().mockResolvedValue({ ...snapshot, workspaces: [] }) })
     render(<WorkspaceShell api={api} />)
 
     expect(await screen.findByRole('heading', { name: '创建工作空间' })).toBeInTheDocument()
@@ -122,14 +123,13 @@ describe('WorkspaceShell', () => {
     const releaseWorkspace = structuredClone(snapshot.workspaces[0])
     releaseWorkspace.id = 'workspace-2'
     releaseWorkspace.name = 'Release'
-    releaseWorkspace.agents = [{ ...releaseWorkspace.agents[0], id: 'agent-2', workspaceId: 'workspace-2', identity: '发布 Agent' }]
     releaseWorkspace.repositories[0].id = 'repository-2'
     releaseWorkspace.repositories[0].workspaceId = 'workspace-2'
     releaseWorkspace.repositories[0].name = 'release'
-    releaseWorkspace.repositories[0].channels = [{ ...releaseWorkspace.repositories[0].channels[0], id: 'channel-release', repositoryId: 'repository-2', name: 'release' }]
-    releaseWorkspace.repositories[0].tasks = []
-    releaseWorkspace.recentMessages = [{ ...releaseWorkspace.recentMessages[0], id: 'message-release', channelId: 'channel-release', body: '这是 Release 工作空间的频道。' }]
     multiWorkspaceSnapshot.workspaces.push(releaseWorkspace)
+    multiWorkspaceSnapshot.agents.push({ ...multiWorkspaceSnapshot.agents[0], id: 'agent-2', identity: '发布 Agent' })
+    multiWorkspaceSnapshot.channels.push({ ...multiWorkspaceSnapshot.channels[0], id: 'channel-release', name: 'release', memberAgentIds: ['agent-2'], boundWorkspaceIds: ['workspace-2'] })
+    multiWorkspaceSnapshot.recentMessages.push({ ...multiWorkspaceSnapshot.recentMessages[0], id: 'message-release', channelId: 'channel-release', body: '这是 Release 工作空间的频道。' })
     const user = userEvent.setup()
 
     render(<WorkspaceShell api={makeApi({ getBootstrap: vi.fn().mockResolvedValue(multiWorkspaceSnapshot) })} />)
@@ -144,7 +144,7 @@ describe('WorkspaceShell', () => {
 
   it('moves archived channels into a collapsible read-only folder', async () => {
     const archivedSnapshot = structuredClone(snapshot)
-    archivedSnapshot.workspaces[0].repositories[0].channels[1].archivedAt = '2026-07-28T08:00:00.000Z'
+    archivedSnapshot.channels[1].archivedAt = '2026-07-28T08:00:00.000Z'
     const user = userEvent.setup()
     render(<WorkspaceShell api={makeApi({ getBootstrap: vi.fn().mockResolvedValue(archivedSnapshot) })} />)
 
@@ -159,10 +159,10 @@ describe('WorkspaceShell', () => {
 
   it('archives and restores channels from their sidebar controls', async () => {
     const archivedSnapshot = structuredClone(snapshot)
-    archivedSnapshot.workspaces[0].repositories[0].channels[1].archivedAt = '2026-07-28T08:00:00.000Z'
+    archivedSnapshot.channels[1].archivedAt = '2026-07-28T08:00:00.000Z'
     const api = makeApi({
-      archiveChannel: vi.fn().mockResolvedValue(archivedSnapshot.workspaces[0].repositories[0].channels[1]),
-      restoreChannel: vi.fn().mockResolvedValue(snapshot.workspaces[0].repositories[0].channels[1]),
+      archiveChannel: vi.fn().mockResolvedValue(archivedSnapshot.channels[1]),
+      restoreChannel: vi.fn().mockResolvedValue(snapshot.channels[1]),
       getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockResolvedValueOnce(archivedSnapshot).mockResolvedValueOnce(snapshot),
     })
     const user = userEvent.setup()
@@ -178,12 +178,13 @@ describe('WorkspaceShell', () => {
 
   it('only presents and confirms context reset for the summit channel', async () => {
     const summitSnapshot = structuredClone(snapshot)
-    summitSnapshot.workspaces[0].repositories[0].channels[0].name = 'summit'
+    summitSnapshot.channels[0].name = 'summit'
+    summitSnapshot.channels[0].systemKey = 'summit'
     const clearedSnapshot = structuredClone(summitSnapshot)
-    clearedSnapshot.workspaces[0].repositories[0].tasks = []
-    clearedSnapshot.workspaces[0].recentMessages = []
+    clearedSnapshot.tasks = []
+    clearedSnapshot.recentMessages = []
     const resetChannelContext = vi.fn().mockResolvedValue({
-      ...summitSnapshot.workspaces[0].repositories[0].channels[0],
+      ...summitSnapshot.channels[0],
       contextResetAt: '2026-07-29T08:00:00.000Z',
     })
     const api = makeApi({
@@ -272,7 +273,7 @@ describe('WorkspaceShell', () => {
 
   it('opens a Thread and sends replies under its root message', async () => {
     const threadedSnapshot = structuredClone(snapshot)
-    threadedSnapshot.workspaces[0].recentMessages.push({
+    threadedSnapshot.recentMessages.push({
       id: 'message-reply', channelId: 'channel-general', threadRootMessageId: 'message-1', taskId: null, senderType: 'agent', senderId: 'agent-1', authorName: '实现 Agent', body: '我会跟进。',
       createdAt: '2026-07-25T08:03:00.000Z', updatedAt: '2026-07-25T08:03:00.000Z', deletedAt: null,
     })
@@ -290,9 +291,9 @@ describe('WorkspaceShell', () => {
   })
 
   it('creates a channel from the sidebar and selects it', async () => {
-    const createdChannel = { id: 'channel-release', repositoryId: 'repository-1', name: 'release', createdAt: '2026-07-25T10:00:00.000Z' }
+    const createdChannel = { id: 'channel-release', name: 'release', systemKey: null, memberAgentIds: [], boundWorkspaceIds: [], createdAt: '2026-07-25T10:00:00.000Z' }
     const updated = structuredClone(snapshot)
-    updated.workspaces[0].repositories[0].channels.push(createdChannel)
+    updated.channels.push(createdChannel)
     const api = makeApi({
       createChannel: vi.fn().mockResolvedValue(createdChannel),
       getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockResolvedValueOnce(updated),
@@ -305,12 +306,12 @@ describe('WorkspaceShell', () => {
     await user.type(screen.getByLabelText('频道名称'), 'release')
     await user.click(screen.getByRole('button', { name: '创建频道' }))
 
-    expect(api.createChannel).toHaveBeenCalledWith('repository-1', { name: 'release' })
+    expect(api.createChannel).toHaveBeenCalledWith({ name: 'release' })
     expect(await screen.findByRole('heading', { name: '# release' })).toBeInTheDocument()
   })
 
   it('keeps the channel dialog open when its post-create refresh fails', async () => {
-    const createdChannel = { id: 'channel-release', repositoryId: 'repository-1', name: 'release', createdAt: '2026-07-25T10:00:00.000Z' }
+    const createdChannel = { id: 'channel-release', name: 'release', systemKey: null, memberAgentIds: [], boundWorkspaceIds: [], createdAt: '2026-07-25T10:00:00.000Z' }
     const api = makeApi({
       createChannel: vi.fn().mockResolvedValue(createdChannel),
       getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockRejectedValueOnce(new Error('刷新失败')),
@@ -337,13 +338,13 @@ describe('WorkspaceShell', () => {
     await user.type(screen.getByRole('textbox', { name: '发送消息' }), '/task @builder 修复导航')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    expect(api.createTask).toHaveBeenCalledWith('repository-1', {
+    expect(api.createTask).toHaveBeenCalledWith('channel-build', {
+      workspaceId: 'workspace-1',
       title: '修复导航',
       description: '修复导航',
       acceptanceCriteria: '任务完成后在当前频道说明结果。',
       labels: [],
       directAgentId: 'agent-1',
-      channelId: 'channel-build',
     })
     expect(api.postMessage).not.toHaveBeenCalled()
     expect(await screen.findByRole('status')).toHaveTextContent('任务已派发。')
@@ -370,7 +371,7 @@ describe('WorkspaceShell', () => {
     const initialTask = { ...createdTask, channelId: 'channel-general', status: 'queued' as const }
     const initialDetails = { ...createdTaskDetails, task: initialTask }
     const initialSnapshot = structuredClone(snapshot)
-    initialSnapshot.workspaces[0].repositories[0].tasks = [initialTask]
+    initialSnapshot.tasks = [initialTask]
     const refreshedSnapshot = structuredClone(initialSnapshot)
     const api = makeApi({
       getBootstrap: vi.fn().mockResolvedValueOnce(initialSnapshot).mockResolvedValueOnce(refreshedSnapshot),
@@ -384,7 +385,7 @@ describe('WorkspaceShell', () => {
   })
 
   it('creates an Agent from the workspace sidebar', async () => {
-    const api = makeApi({ createAgent: vi.fn().mockResolvedValue(snapshot.workspaces[0].agents[0]) })
+    const api = makeApi({ createAgent: vi.fn().mockResolvedValue(snapshot.agents[0]) })
     const user = userEvent.setup()
     render(<WorkspaceShell api={api} />)
 
@@ -395,13 +396,13 @@ describe('WorkspaceShell', () => {
     await user.type(within(dialog).getByLabelText('能力标签'), 'typescript, test')
     await user.click(within(dialog).getByRole('button', { name: '添加 Agent' }))
 
-    expect(api.createAgent).toHaveBeenCalledWith('workspace-1', {
+    expect(api.createAgent).toHaveBeenCalledWith({
       identity: '验证 Agent', mention: '验证-agent', runtime: 'opencode', capabilityTags: ['typescript', 'test'], responsibilities: [],
     })
   })
 
   it('allows selecting Claude Code when creating an Agent', async () => {
-    const api = makeApi({ createAgent: vi.fn().mockResolvedValue(snapshot.workspaces[0].agents[0]) })
+    const api = makeApi({ createAgent: vi.fn().mockResolvedValue(snapshot.agents[0]) })
     const user = userEvent.setup()
     render(<WorkspaceShell api={api} />)
 
@@ -414,15 +415,15 @@ describe('WorkspaceShell', () => {
     await user.type(within(dialog).getByLabelText('能力标签'), 'review')
     await user.click(within(dialog).getByRole('button', { name: '添加 Agent' }))
 
-    expect(api.createAgent).toHaveBeenCalledWith('workspace-1', {
+    expect(api.createAgent).toHaveBeenCalledWith({
       identity: 'Claude Agent', mention: 'claude-agent', runtime: 'claude-code', capabilityTags: ['review'], responsibilities: [],
     })
   })
 
   it('shows Claude Code runtime copy in the agent config dialog', async () => {
     const claudeSnapshot = structuredClone(snapshot)
-    claudeSnapshot.workspaces[0].agents[0].runtime = 'claude-code'
-    claudeSnapshot.workspaces[0].agents[0].model = ''
+    claudeSnapshot.agents[0].runtime = 'claude-code'
+    claudeSnapshot.agents[0].model = ''
 
     render(<WorkspaceShell api={makeApi({ getBootstrap: vi.fn().mockResolvedValue(claudeSnapshot) })} />)
     const user = userEvent.setup()
@@ -479,7 +480,7 @@ describe('WorkspaceShell', () => {
 
   it('refreshes the snapshot and agent status after a task.status_changed event', async () => {
     const updated = structuredClone(snapshot)
-    updated.workspaces[0].agents[0].status = 'busy'
+    updated.agents[0].status = 'busy'
     const api = makeApi({ getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockResolvedValueOnce(updated) })
     render(<WorkspaceShell api={api} />)
 
@@ -493,7 +494,7 @@ describe('WorkspaceShell', () => {
   it('refreshes the opened task detail after a runtime artifact event', async () => {
     const initialTask = { ...createdTask, channelId: 'channel-general', status: 'running' as const }
     const initialSnapshot = structuredClone(snapshot)
-    initialSnapshot.workspaces[0].repositories[0].tasks = [initialTask]
+    initialSnapshot.tasks = [initialTask]
     const updatedDetails = {
       ...createdTaskDetails,
       task: initialTask,
@@ -593,7 +594,7 @@ describe('WorkspaceShell', () => {
 
   it('creates a repository-bound task and opens its evidence and review details', async () => {
     const updated = structuredClone(snapshot)
-    updated.workspaces[0].repositories[0].tasks.push(createdTask)
+    updated.tasks.push(createdTask)
     const api = makeApi({
       getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockResolvedValue(updated),
       createTask: vi.fn().mockResolvedValue(createdTask),
@@ -613,13 +614,13 @@ describe('WorkspaceShell', () => {
     await user.selectOptions(screen.getByLabelText('指定 Agent'), 'agent-1')
     await user.click(screen.getByRole('button', { name: '创建任务' }))
 
-    expect(api.createTask).toHaveBeenCalledWith('repository-1', {
+    expect(api.createTask).toHaveBeenCalledWith('channel-general', {
+      workspaceId: 'workspace-1',
       title: createdTask.title,
       description: createdTask.description,
       acceptanceCriteria: createdTask.acceptanceCriteria,
       labels: ['frontend'],
       directAgentId: 'agent-1',
-      channelId: 'channel-general',
     })
     expect(await screen.findByRole('heading', { name: '概览' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'test-results' }))
@@ -627,5 +628,64 @@ describe('WorkspaceShell', () => {
     await user.click(screen.getByRole('button', { name: '接受验收' }))
     expect(api.reviewTask).toHaveBeenCalledWith('task-new', 'accept', expect.any(String))
     expect(await screen.findByText('验收已通过，尚未合并')).toBeInTheDocument()
+  })
+})
+
+describe('ApiClient', () => {
+  it('uses the global agent and channel routes and channel-scoped task route', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const api = new ApiClient()
+
+    try {
+      await api.createAgent({
+        identity: '实现 Agent',
+        mention: 'builder',
+        runtime: 'opencode',
+        capabilityTags: ['frontend'],
+      })
+      await api.createChannel({ name: 'build' })
+      await api.createTask('channel-build', {
+        workspaceId: 'workspace-1',
+        title: '修复导航',
+        description: '修复导航',
+        acceptanceCriteria: '通过测试',
+        labels: ['frontend'],
+        directAgentId: 'agent-1',
+      })
+      await api.refreshAgentRuntime('agent-1')
+
+      expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/agents', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          identity: '实现 Agent',
+          mention: 'builder',
+          runtime: 'opencode',
+          capabilityTags: ['frontend'],
+        }),
+      }))
+      expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/channels', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ name: 'build' }),
+      }))
+      expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/channels/channel-build/tasks', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          workspaceId: 'workspace-1',
+          title: '修复导航',
+          description: '修复导航',
+          acceptanceCriteria: '通过测试',
+          labels: ['frontend'],
+          directAgentId: 'agent-1',
+        }),
+      }))
+      expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/agents/agent-1/refresh-runtime', expect.objectContaining({
+        method: 'POST',
+      }))
+    } finally {
+      fetchMock.mockRestore()
+    }
   })
 })

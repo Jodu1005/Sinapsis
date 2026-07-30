@@ -104,7 +104,7 @@ describe('SQLite workspace repositories', () => {
     }).toThrow('roll back database transaction')
 
     expect(publisher.events).toEqual([])
-    expect(repositories.getBootstrap().workspaces[0]?.recentMessages).toEqual([])
+    expect(repositories.getBootstrap().recentMessages).toEqual([])
   })
 
   it('rejects moving an accepted task back to queued', () => {
@@ -165,7 +165,7 @@ describe('SQLite workspace repositories', () => {
     const reply = repositories.createMessage({ channelId: channel.id, threadRootMessageId: root.id, senderType: 'agent', authorName: 'Newton', body: '我会先检查队列。' })
     const otherChannel = repositories.createChannel({ name: 'release' })
 
-    expect(repositories.getBootstrap().workspaces[0]!.recentMessages).toEqual(expect.arrayContaining([
+    expect(repositories.getBootstrap().recentMessages).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: reply.id, threadRootMessageId: root.id }),
     ]))
     expect(() => repositories.createMessage({ channelId: otherChannel.id, threadRootMessageId: root.id, senderType: 'human', authorName: 'Jodu', body: '不能跨频道回复。' }))
@@ -278,12 +278,123 @@ describe('SQLite workspace repositories', () => {
       body: '这条消息属于新的上下文。',
     })
 
-    const snapshot = repositories.getBootstrap().workspaces[0]!
+    const snapshot = repositories.getBootstrap()
     expect(repositories.getTask(beforeReset.id)).toBeDefined()
     expect(repositories.getMessage(beforeMessage.id)).toBeDefined()
-    expect(snapshot.repositories[0]!.tasks.map((task) => task.id)).toEqual([afterReset.id])
+    expect(snapshot.tasks.map((task) => task.id)).toEqual([afterReset.id])
     expect(snapshot.recentMessages.map((message) => message.id)).toEqual([afterMessage.id])
-    expect(snapshot.repositories[0]!.channels[0]).toMatchObject({ contextResetAt: resetAt.toISOString() })
+    expect(snapshot.channels[0]).toMatchObject({ contextResetAt: resetAt.toISOString() })
+  })
+
+  it('returns global control-room entities without nesting channel state under workspaces', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const workspace = repositories.getBootstrap().workspaces[0]!
+    const repository = workspace.repositories[0]!
+    const agent = repositories.createAgent({
+      identity: 'Newton',
+      mentionName: 'newton',
+      runtime: 'pi',
+      capabilityTags: ['general'],
+      maxConcurrentTasks: 1,
+      command: 'pi',
+      args: [],
+      model: '',
+      env: {},
+    })
+    repositories.addChannelAgent(channel.id, agent.id, new Date('2026-07-29T03:00:00.000Z'))
+    repositories.bindChannelWorkspace(channel.id, workspace.id, new Date('2026-07-29T03:00:00.000Z'))
+    const task = repositories.createTask({
+      workspaceId: workspace.id,
+      repositoryId: repository.id,
+      channelId: channel.id,
+      title: 'Global snapshot',
+      description: 'Expose control-room entities once.',
+      acceptanceCriteria: 'No nested channel state remains.',
+    })
+    const message = repositories.createMessage({
+      channelId: channel.id,
+      senderType: 'human',
+      authorName: 'Jodu',
+      body: 'Show the global snapshot.',
+    })
+
+    const snapshot = repositories.getBootstrap()
+
+    expect(snapshot.agents).toEqual([expect.objectContaining({ id: agent.id })])
+    expect(snapshot.channels).toEqual([
+      expect.objectContaining({
+        id: channel.id,
+        memberAgentIds: [agent.id],
+        boundWorkspaceIds: [workspace.id],
+      }),
+    ])
+    expect(snapshot.tasks).toEqual([expect.objectContaining({ id: task.id })])
+    expect(snapshot.recentMessages).toEqual([expect.objectContaining({ id: message.id })])
+    expect(snapshot.maxWorkspaceBindingsPerChannel).toBe(5)
+    expect(snapshot.workspaces[0]).not.toHaveProperty('agents')
+    expect(snapshot.workspaces[0]).not.toHaveProperty('channels')
+    expect(snapshot.workspaces[0].repositories[0]).not.toHaveProperty('tasks')
+    expect(snapshot.workspaces[0].repositories[0]).not.toHaveProperty('channels')
+  })
+
+  it('keeps recent history for each channel when another channel is busy', async () => {
+    const { repositories } = await createRepositories()
+    const quietChannel = createChannel(repositories)
+    const busyChannel = repositories.createChannel({ name: 'busy' })
+    const quietMessage = repositories.createMessage({
+      channelId: quietChannel.id,
+      senderType: 'human',
+      authorName: 'Jodu',
+      body: 'Keep this quiet-channel context.',
+    })
+    for (let index = 0; index < 50; index += 1) {
+      repositories.createMessage({
+        channelId: busyChannel.id,
+        senderType: 'human',
+        authorName: 'Jodu',
+        body: `Busy message ${index + 1}`,
+      })
+    }
+
+    const recentMessages = repositories.getBootstrap().recentMessages
+
+    expect(recentMessages.filter((message) => message.channelId === quietChannel.id)).toEqual([
+      expect.objectContaining({ id: quietMessage.id }),
+    ])
+    expect(recentMessages.filter((message) => message.channelId === busyChannel.id)).toHaveLength(50)
+  })
+
+  it('resolves summit membership dynamically in the global bootstrap snapshot', async () => {
+    const { repositories } = await createRepositories()
+    createChannel(repositories)
+    const summit = repositories.createChannel({ name: 'summit', systemKey: summitSystemKey })
+    const newton = repositories.createAgent({
+      identity: 'Newton',
+      mentionName: 'newton',
+      runtime: 'pi',
+      capabilityTags: [],
+      maxConcurrentTasks: 1,
+      command: 'pi',
+      args: [],
+      model: '',
+      env: {},
+    })
+    const clawd = repositories.createAgent({
+      identity: 'Clawd',
+      mentionName: 'clawd',
+      runtime: 'claude-code',
+      capabilityTags: [],
+      maxConcurrentTasks: 1,
+      command: 'claude',
+      args: [],
+      model: '',
+      env: {},
+    })
+
+    const snapshotSummit = repositories.getBootstrap().channels.find((channel) => channel.id === summit.id)
+
+    expect(snapshotSummit?.memberAgentIds).toEqual([newton.id, clawd.id])
   })
 
   it('returns an empty bootstrap snapshot for a new database', async () => {
@@ -295,7 +406,15 @@ describe('SQLite workspace repositories', () => {
       const response = await fetch(`${server.baseUrl}/api/bootstrap`)
 
       expect(response.status).toBe(200)
-      await expect(response.json()).resolves.toEqual({ workspaces: [], typingAgentIdsByChannel: {} })
+      await expect(response.json()).resolves.toEqual({
+        agents: [],
+        channels: [],
+        workspaces: [],
+        tasks: [],
+        recentMessages: [],
+        maxWorkspaceBindingsPerChannel: 5,
+        typingAgentIdsByChannel: {},
+      })
     } finally {
       await server.close()
       app.locals.closeDatabase()

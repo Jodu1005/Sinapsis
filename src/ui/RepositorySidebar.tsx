@@ -1,11 +1,13 @@
 import { Archive, ArchiveRestore, ChevronDown, ChevronRight, FolderKanban, Hash, ListTodo, Menu, Plus, X } from 'lucide-react'
 import { useState } from 'react'
-import type { AgentView, WorkspaceView } from '../domain/workspace-view'
+import type { AgentView, ChannelView, TaskView, WorkspaceView } from '../domain/workspace-view'
 import { AgentStatusList } from './AgentStatusList'
 
 interface RepositorySidebarProps {
   workspace: WorkspaceView
-  workspaces: WorkspaceView[]
+  agents: AgentView[]
+  channels: ChannelView[]
+  tasks: TaskView[]
   selectedChannelId: string | null
   selectedTaskId: string | null
   onSelectChannel(channelId: string): void
@@ -23,10 +25,13 @@ interface RepositorySidebarProps {
   onClose(): void
 }
 
-export function RepositorySidebar({ workspace, workspaces, selectedChannelId, selectedTaskId, onSelectChannel, onSelectTask, onCreateTask, onCreateChannel, onArchiveChannel, onRestoreChannel, channelReadOnly, onCreateWorkspace, onSelectAgent, onCreateAgent, mobileOpen, mobileHidden, onClose }: RepositorySidebarProps) {
+export function RepositorySidebar({ workspace, agents, channels, tasks, selectedChannelId, selectedTaskId, onSelectChannel, onSelectTask, onCreateTask, onCreateChannel, onArchiveChannel, onRestoreChannel, channelReadOnly, onCreateWorkspace, onSelectAgent, onCreateAgent, mobileOpen, mobileHidden, onClose }: RepositorySidebarProps) {
   const [archivedOpen, setArchivedOpen] = useState(false)
-  const workspaceTasks = workspace.repositories.flatMap((repository) => repository.tasks.filter((task) => task.channelId === selectedChannelId).map((task) => ({ repository, task })))
-  const channels = workspaces.flatMap((candidate) => candidate.repositories.flatMap((repository) => repository.channels))
+  const workspaceTasks = tasks.flatMap((task) => {
+    if (task.workspaceId !== workspace.id || task.channelId !== selectedChannelId) return []
+    const repository = workspace.repositories.find((candidate) => candidate.id === task.repositoryId)
+    return repository ? [{ repository, task }] : []
+  })
   const activeChannels = channels.filter((channel) => !channel.archivedAt)
   const archivedChannels = channels.filter((channel) => channel.archivedAt)
   const taskRepository = workspace.repositories[0]
@@ -44,7 +49,7 @@ export function RepositorySidebar({ workspace, workspaces, selectedChannelId, se
       <div className="workspace-task-heading"><FolderKanban size={16} /><span>{workspace.name}</span>{taskRepository && !channelReadOnly && <button type="button" className="icon-button repository-task-create" aria-label={`新建 ${workspace.name} 任务`} data-tooltip="新建任务" onClick={() => onCreateTask(taskRepository.id)}><Plus size={15} /></button>}</div>
       {workspaceTasks.length === 0 ? <p className="sidebar-empty">还没有任务</p> : workspaceTasks.map(({ repository, task }) => <button type="button" className="task-entry" key={task.id} aria-pressed={selectedTaskId === task.id} onClick={() => onSelectTask(repository.id, task.id)}><ListTodo size={15} /><span>{task.title}</span></button>)}
     </div>
-    <AgentStatusList agents={workspace.agents} onSelect={onSelectAgent} onCreate={onCreateAgent} />
+    <AgentStatusList agents={agents} onSelect={onSelectAgent} onCreate={onCreateAgent} />
   </nav>
 }
 

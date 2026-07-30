@@ -196,9 +196,9 @@ describe('task API', () => {
 
 async function firstChannelId(baseUrl: string, workspaceId: string): Promise<string> {
   const bootstrap = await fetch(`${baseUrl}/api/bootstrap`).then((response) => response.json()) as {
-    workspaces: Array<{ repositories: Array<{ channels: Array<{ id: string }> }> }>
+    channels: Array<{ id: string }>
   }
-  const channelId = bootstrap.workspaces[0]!.repositories[0]!.channels[0]!.id
+  const channelId = bootstrap.channels[0]!.id
   const response = await fetch(`${baseUrl}/api/channels/${channelId}/workspaces`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -253,7 +253,7 @@ describe('TaskService channel ownership', () => {
       description: 'Build',
       acceptanceCriteria: 'Pass',
     })
-    const messages = repositories.getBootstrap().workspaces[0]!.recentMessages
+    const messages = repositories.getBootstrap().recentMessages
 
     expect(task.workspaceId).toBe(workspace.id)
     expect(task.repositoryId).toBe(repository.id)

@@ -8,10 +8,10 @@ import { TaskComposerPanel } from './TaskComposerPanel'
 
 const repository: RepositoryView = {
   id: 'repo-1', workspaceId: 'workspace-1', name: 'sinapsis', path: '/code/sinapsis', currentBranch: 'main', defaultBranch: 'main', isClean: true,
-  createdAt: '2026-07-25T08:00:00.000Z', channels: [{ id: 'channel-1', repositoryId: 'repo-1', name: 'general', createdAt: '2026-07-25T08:00:00.000Z' }], tasks: [],
+  createdAt: '2026-07-25T08:00:00.000Z',
 }
 const agent: AgentView = {
-  id: 'agent-1', workspaceId: 'workspace-1', identity: '实现 Agent', mentionName: 'builder', runtime: 'opencode', status: 'idle', capabilityTags: ['frontend'], maxConcurrentTasks: 1,
+  id: 'agent-1', identity: '实现 Agent', mentionName: 'builder', runtime: 'opencode', status: 'idle', capabilityTags: ['frontend'], maxConcurrentTasks: 1,
   command: 'opencode', args: [], model: 'claude', env: [], createdAt: '2026-07-25T08:00:00.000Z', updatedAt: '2026-07-25T08:00:00.000Z',
 }
 

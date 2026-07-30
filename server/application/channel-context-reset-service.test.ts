@@ -40,7 +40,7 @@ describe('ChannelContextResetService', () => {
     expect(cancelTask).toHaveBeenCalledWith(task.id, '频道上下文已清空')
     expect(channel.contextResetAt).toEqual(expect.any(String))
     expect(fixture.repositories.getTask(task.id)).toMatchObject({ status: 'cancelled' })
-    expect(fixture.repositories.getBootstrap().workspaces[0]!.repositories[0]!.tasks).toEqual([])
+    expect(fixture.repositories.getBootstrap().tasks).toEqual([])
   })
 
   it('rejects reset requests when the system key is not summit', async () => {

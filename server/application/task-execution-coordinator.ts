@@ -408,11 +408,7 @@ export class TaskExecutionCoordinator {
   }
 
   private agentName(agentId: string): string {
-    for (const workspace of this.repositories.getBootstrap().workspaces) {
-      const agent = workspace.agents.find((candidate) => candidate.id === agentId)
-      if (agent) return agent.identity
-    }
-    return 'Agent'
+    return this.repositories.getAgent(agentId)?.identity ?? 'Agent'
   }
 
   private requireClaimContext(claim: TaskClaim): { task: Task; agent: Agent; repository: { id: string; path: string; defaultBranch: string } } {

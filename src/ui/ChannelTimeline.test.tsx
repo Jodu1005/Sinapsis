@@ -20,7 +20,7 @@ describe('ChannelTimeline', () => {
 
   it('shows an Agent typing indicator while a reply is being prepared', () => {
     render(<ChannelTimeline messages={[]} typingAgents={[{
-      id: 'agent-1', workspaceId: 'workspace-1', identity: 'Newton', mentionName: 'newton', runtime: 'pi', status: 'busy',
+      id: 'agent-1', identity: 'Newton', mentionName: 'newton', runtime: 'pi', status: 'busy',
       capabilityTags: [], maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: [], createdAt: '2026-07-25T08:00:00.000Z', updatedAt: '2026-07-25T08:00:00.000Z',
     }]} />)
 

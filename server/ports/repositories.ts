@@ -13,18 +13,16 @@ import type {
 } from '../domain/workspace'
 
 export interface BootstrapWorkspace extends Workspace {
-  agents: Agent[]
-  repositories: Array<
-    Repository & {
-      channels: Channel[]
-      tasks: Task[]
-    }
-  >
-  recentMessages: Message[]
+  repositories: Repository[]
 }
 
 export interface BootstrapSnapshot {
+  agents: Agent[]
+  channels: Channel[]
   workspaces: BootstrapWorkspace[]
+  tasks: Task[]
+  recentMessages: Message[]
+  maxWorkspaceBindingsPerChannel: number
 }
 
 export interface TaskClaim {

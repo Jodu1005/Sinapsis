@@ -5,7 +5,7 @@ import type { TaskDetailView, TaskView } from '../domain/workspace-view'
 import { TaskDetailPanel } from './TaskDetailPanel'
 
 const task: TaskView = {
-  id: 'task-1', repositoryId: 'repo-1', channelId: 'channel-1', directAgentId: null, title: '补齐移动端抽屉', description: '修复窄屏下的导航遮挡。',
+  id: 'task-1', workspaceId: 'workspace-1', repositoryId: 'repo-1', channelId: 'channel-1', directAgentId: null, title: '补齐移动端抽屉', description: '修复窄屏下的导航遮挡。',
   acceptanceCriteria: '390px 可操作且没有遮挡。', labels: ['frontend'], status: 'in_review', queuedAt: '2026-07-25T08:00:00.000Z', attemptCount: 1,
   maxRetries: 2, timeoutMs: 3_600_000, leaseTtlMs: null, branchName: 'task/task-1', worktreePath: '/tmp/task-1', createdAt: '2026-07-25T08:00:00.000Z', updatedAt: '2026-07-25T08:00:00.000Z',
 }

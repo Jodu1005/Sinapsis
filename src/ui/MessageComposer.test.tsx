@@ -5,8 +5,8 @@ import type { AgentView } from '../domain/workspace-view'
 import { MessageComposer } from './MessageComposer'
 
 const agents: AgentView[] = [
-  { id: 'agent-newton', workspaceId: 'workspace-1', identity: 'newton', mentionName: 'dev', runtime: 'pi', status: 'idle', capabilityTags: [], maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: [], createdAt: '', updatedAt: '' },
-  { id: 'agent-clawd', workspaceId: 'workspace-1', identity: 'clawd', mentionName: 'build', runtime: 'claude-code', status: 'busy', capabilityTags: [], maxConcurrentTasks: 1, command: 'claude', args: [], model: '', env: [], createdAt: '', updatedAt: '' },
+  { id: 'agent-newton', identity: 'newton', mentionName: 'dev', runtime: 'pi', status: 'idle', capabilityTags: [], maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: [], createdAt: '', updatedAt: '' },
+  { id: 'agent-clawd', identity: 'clawd', mentionName: 'build', runtime: 'claude-code', status: 'busy', capabilityTags: [], maxConcurrentTasks: 1, command: 'claude', args: [], model: '', env: [], createdAt: '', updatedAt: '' },
 ]
 
 describe('MessageComposer', () => {

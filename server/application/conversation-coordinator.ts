@@ -6,7 +6,7 @@ import type { Agent } from '../domain/agent'
 import type { Message } from '../domain/message'
 import { DomainError } from '../domain/task'
 import type { Channel } from '../domain/workspace'
-import type { BootstrapWorkspace, WorkspaceRepositories } from '../ports/repositories'
+import type { WorkspaceRepositories } from '../ports/repositories'
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../ports/runtime'
 import { ChannelMessageService } from './channel-message-service'
 
@@ -88,7 +88,7 @@ export class ConversationCoordinator {
         taskId: execution.runtimeTaskId,
         mode: 'conversation',
         title: `频道 #${channel.name} 对话`,
-        description: `${this.recentConversationContext(snapshot.workspaces, channelId, message.id, threadRootMessageId)}\n\n当前 Agent 职责：${agent.responsibilities?.join('；') || '未设置（仅处理被直接提及的消息）'}。`,
+        description: `${this.recentConversationContext(snapshot.recentMessages, channelId, message.id, threadRootMessageId)}\n\n当前 Agent 职责：${agent.responsibilities?.join('；') || '未设置（仅处理被直接提及的消息）'}。`,
         acceptanceCriteria: '在频道中给出简洁、清晰的回复。',
         initialMessage: message.body,
         worktreePath: conversationPath,
@@ -219,9 +219,8 @@ export class ConversationCoordinator {
     throw new DomainError(`Channel ${channelId} does not exist.`)
   }
 
-  private recentConversationContext(workspaces: BootstrapWorkspace[], channelId: string, currentMessageId: string, threadRootMessageId: string | null): string {
-    const messages = new Map(workspaces.flatMap((workspace) => workspace.recentMessages).map((message) => [message.id, message]))
-    const history = [...messages.values()]
+  private recentConversationContext(messages: Message[], channelId: string, currentMessageId: string, threadRootMessageId: string | null): string {
+    const history = messages
       .filter((message) => message.channelId === channelId && message.id !== currentMessageId)
       .filter((message) => !threadRootMessageId || message.id === threadRootMessageId || message.threadRootMessageId === threadRootMessageId)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))

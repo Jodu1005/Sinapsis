@@ -132,7 +132,7 @@ describe('TaskExecutionCoordinator', () => {
     expect(fixture.repositories.getTaskDetails(claim.task.id)?.sessions).toEqual([
       expect.objectContaining({ status: 'timed_out' }),
     ])
-    expect(fixture.repositories.getBootstrap().workspaces[0].agents[0].status).toBe('idle')
+    expect(fixture.repositories.getBootstrap().agents[0].status).toBe('idle')
   })
 
   it('kills the managed runtime before an expired lease returns its task to FIFO', async () => {
@@ -220,7 +220,7 @@ describe('TaskExecutionCoordinator', () => {
       const details = fixture.repositories.getTaskDetails(claim.task.id)!
       expect(details.task.status).toBe('needs_human')
       expect(details.leases).toEqual([])
-      expect(fixture.repositories.getBootstrap().workspaces[0].agents[0].status).toBe('idle')
+      expect(fixture.repositories.getBootstrap().agents[0].status).toBe('idle')
       expect(fixture.rawArtifactWrites).toEqual([artifactType])
       expect(details.events).toEqual(expect.arrayContaining([
         expect.objectContaining({ type: 'task.runtime_artifact_persistence_failed', payload: expect.objectContaining({ reason: expect.stringContaining('raw artifact persistence unavailable') }) }),
@@ -335,7 +335,7 @@ describe('TaskExecutionCoordinator', () => {
     await fixture.coordinator.startClaim(claim)
 
     expect(fixture.repositories.getTask(claim.task.id)?.status).toBe('needs_human')
-    expect(fixture.repositories.getBootstrap().workspaces[0].agents[0].status).toBe('idle')
+    expect(fixture.repositories.getBootstrap().agents[0].status).toBe('idle')
     expect(fixture.channelMessages().map((message) => message.body).join('\n')).toContain('worktree unavailable')
   })
 
@@ -398,7 +398,7 @@ describe('TaskExecutionCoordinator', () => {
     const details = fixture.repositories.getTaskDetails(claim.task.id)!
     expect(details.task.status).toBe('needs_human')
     expect(details.leases).toEqual([])
-    expect(fixture.repositories.getBootstrap().workspaces[0].agents[0].status).toBe('idle')
+    expect(fixture.repositories.getBootstrap().agents[0].status).toBe('idle')
     expect(details.events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'task.status_changed', payload: expect.objectContaining({ to: 'needs_human' }) }),
     ]))
@@ -479,7 +479,7 @@ describe('TaskExecutionCoordinator', () => {
     return {
       repositories, runtime, claudeRuntime, coordinator, scheduler, workspace, repository, channel, agent, first, rawArtifactWrites,
       createTask,
-      channelMessages: () => repositories.getBootstrap().workspaces[0].recentMessages.filter((message) => message.channelId === channel.id),
+      channelMessages: () => repositories.getBootstrap().recentMessages.filter((message) => message.channelId === channel.id),
     }
   }
 
@@ -491,7 +491,7 @@ describe('TaskExecutionCoordinator', () => {
     const details = fixture.repositories.getTaskDetails(taskId)!
     expect(details.task.status).toBe('needs_human')
     expect(details.leases).toEqual([])
-    expect(fixture.repositories.getBootstrap().workspaces[0].agents[0].status).toBe('idle')
+    expect(fixture.repositories.getBootstrap().agents[0].status).toBe('idle')
     expect(details.events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'task.review_evidence_failed', payload: expect.objectContaining({ reason: expect.stringContaining(reason) }) }),
     ]))
