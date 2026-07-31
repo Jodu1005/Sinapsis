@@ -31,16 +31,16 @@ describe('getServiceConfig', () => {
   it('parses configured conversation controls', () => {
     expect(getServiceConfig({
       SINAPSIS_MAX_PARTICIPATION_CANDIDATES: '4',
-      SINAPSIS_MAX_INITIAL_SPEAKERS: '3',
-      SINAPSIS_MAX_CONVERSATION_ROUNDS: '5',
+      SINAPSIS_MAX_INITIAL_SPEAKERS: '2',
+      SINAPSIS_MAX_CONVERSATION_ROUNDS: '3',
       SINAPSIS_MAX_HANDOFF_TARGETS_PER_REPLY: '1',
       SINAPSIS_PARTICIPATION_PROBE_TIMEOUT_MS: '1000',
       SINAPSIS_DUPLICATE_CHECK_TIMEOUT_MS: '2000',
       SINAPSIS_CONVERSATION_RESPONSE_TIMEOUT_MS: '3000',
     })).toMatchObject({
       maxParticipationCandidates: 4,
-      maxInitialSpeakers: 3,
-      maxConversationRounds: 5,
+      maxInitialSpeakers: 2,
+      maxConversationRounds: 3,
       maxHandoffTargetsPerReply: 1,
       participationProbeTimeoutMs: 1000,
       duplicateCheckTimeoutMs: 2000,
@@ -51,5 +51,15 @@ describe('getServiceConfig', () => {
   it('rejects a participation candidate limit outside the hard maximum', () => {
     expect(() => getServiceConfig({ SINAPSIS_MAX_PARTICIPATION_CANDIDATES: '6' }))
       .toThrow('SINAPSIS_MAX_PARTICIPATION_CANDIDATES must be between 1 and 5.')
+  })
+
+  it('rejects an initial speaker limit above two', () => {
+    expect(() => getServiceConfig({ SINAPSIS_MAX_INITIAL_SPEAKERS: '3' }))
+      .toThrow('SINAPSIS_MAX_INITIAL_SPEAKERS must be between 1 and 2.')
+  })
+
+  it('rejects a conversation round limit above three', () => {
+    expect(() => getServiceConfig({ SINAPSIS_MAX_CONVERSATION_ROUNDS: '4' }))
+      .toThrow('SINAPSIS_MAX_CONVERSATION_ROUNDS must be between 1 and 3.')
   })
 })
