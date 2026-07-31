@@ -24,10 +24,29 @@ describe('ParticipationService', () => {
     })
   })
 
+  it('passes valid candidate IDs into the participation probe prompt', async () => {
+    const service = new ParticipationService({
+      participationProbeTimeoutMs: 50,
+      invoke: async (call) => {
+        expect(call.prompt).toContain('a1')
+        expect(call.prompt).toContain('a2')
+        expect(call.prompt).toContain('dependsOnAgentId must be null or exactly one ID from this list')
+        return '{"decision":"silent","confidence":0,"reason":"not relevant","proposedAngle":"","dependsOnAgentId":null}'
+      },
+    })
+
+    await service.decide({
+      candidateAgentIds: ['a1', 'a2'],
+      candidateResponsibilities: ['frontend'],
+      currentMessage: 'The form does not submit.',
+      channelSummary: 'Checkout reports.',
+    })
+  })
+
   it('returns the minimal timeout fallback without preventing another candidate from deciding', async () => {
     const service = new ParticipationService({
       participationProbeTimeoutMs: 10,
-      invoke: async (call) => call.prompt.includes('slow')
+      invoke: async (call) => call.prompt.includes('Candidate responsibilities:\n- slow')
         ? new Promise<string>(() => undefined)
         : '{"decision":"silent","confidence":0.1,"reason":"not relevant","proposedAngle":"","dependsOnAgentId":null}',
     })

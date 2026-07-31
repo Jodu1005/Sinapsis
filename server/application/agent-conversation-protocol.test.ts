@@ -64,8 +64,9 @@ describe('agent conversation protocol', () => {
     expect(() => parseDuplicateDecision(`{"decision":"silent","reason":"covered","revisedAngle":"${'x'.repeat(501)}"}`)).toThrow()
   })
 
-  it('builds a participation runtime call with only the current message as initial input', () => {
+  it('builds a participation runtime call that constrains dependencies to valid candidate IDs', () => {
     const call = buildParticipationCall({
+      candidateAgentIds: ['a1', 'a2'],
       candidateResponsibilities: ['frontend', 'forms'],
       currentMessage: 'The form does not submit.',
       channelSummary: 'User reported a checkout issue.',
@@ -75,5 +76,8 @@ describe('agent conversation protocol', () => {
     expect(call.initialMessage).toBe('The form does not submit.')
     expect(call.prompt).toContain('frontend')
     expect(call.prompt).toContain('User reported a checkout issue.')
+    expect(call.prompt).toContain('a1')
+    expect(call.prompt).toContain('a2')
+    expect(call.prompt).toContain('dependsOnAgentId must be null or exactly one ID from this list')
   })
 })
