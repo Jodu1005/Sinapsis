@@ -172,6 +172,198 @@ describe('SQLite workspace repositories', () => {
       .toThrow('Thread root must be a root message in the same channel.')
   })
 
+  it('persists conversation records with deterministic ordering and complete message context', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const firstAgent = repositories.createAgent({
+      identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const secondAgent = repositories.createAgent({
+      identity: 'Ada', mentionName: 'ada', runtime: 'claude-code', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'claude', args: [], model: '', env: {},
+    })
+    const staleMessage = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Old context.',
+    })
+    database!.database.prepare('UPDATE messages SET created_at = ?, updated_at = ? WHERE id = ?').run(
+      '2026-07-30T00:00:00.000Z', '2026-07-30T00:00:00.000Z', staleMessage.id,
+    )
+    database!.database.prepare('UPDATE channels SET context_reset_at = ? WHERE id = ?').run(
+      '2026-07-30T01:00:00.000Z', channel.id,
+    )
+    const timelineMessages = Array.from({ length: 10 }, (_, index) => repositories.createMessage({
+      channelId: channel.id,
+      senderType: index === 9 ? 'agent' : 'human',
+      senderId: index === 9 ? firstAgent.id : null,
+      authorName: index === 9 ? firstAgent.identity : 'Jodu',
+      body: `Timeline ${index + 1}`,
+    }))
+    const threadRoot = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Thread root.',
+    })
+    const threadReplies = [
+      repositories.createMessage({
+        channelId: channel.id, threadRootMessageId: threadRoot.id, senderType: 'agent',
+        senderId: secondAgent.id, authorName: secondAgent.identity, body: 'First reply.',
+      }),
+      repositories.createMessage({
+        channelId: channel.id, threadRootMessageId: threadRoot.id, senderType: 'human',
+        authorName: 'Jodu', body: 'Second reply.',
+      }),
+    ]
+
+    const turn = repositories.createConversationTurn({
+      channelId: channel.id,
+      triggerMessageId: timelineMessages[0]!.id,
+      threadRootMessageId: null,
+      mode: 'ordinary',
+      maxRounds: 3,
+    })
+    const participant = repositories.createTurnParticipant({
+      turnId: turn.id,
+      agentId: firstAgent.id,
+      source: 'responsibility',
+      rank: 0,
+      matcherScore: 18,
+    })
+    const firstInvocation = repositories.createAgentInvocation({
+      turnId: turn.id,
+      agentId: firstAgent.id,
+      kind: 'participation',
+      priority: 'participation',
+      round: 0,
+      idempotencyKey: `${turn.id}:${firstAgent.id}:participation`,
+      sourceInvocationId: null,
+    })
+    const secondInvocation = repositories.createAgentInvocation({
+      turnId: turn.id,
+      agentId: secondAgent.id,
+      kind: 'response',
+      priority: 'human_ordinary',
+      round: 0,
+      idempotencyKey: `${turn.id}:${secondAgent.id}:response`,
+      sourceInvocationId: firstInvocation.id,
+    })
+    const handoff = repositories.createConversationHandoff({
+      turnId: turn.id,
+      sourceInvocationId: secondInvocation.id,
+      fromAgentId: secondAgent.id,
+      toAgentId: firstAgent.id,
+      question: 'Can you verify the queue boundary?',
+      round: 1,
+    })
+    const session = repositories.upsertConversationSession({
+      key: `${channel.id}:timeline:${firstAgent.id}`,
+      channelId: channel.id,
+      threadRootMessageId: null,
+      agentId: firstAgent.id,
+      runtime: 'pi',
+      runtimeSessionId: 'session-1',
+      runtimeSessionFile: null,
+      status: 'ready',
+      lastMessageId: timelineMessages[0]!.id,
+    })
+
+    expect(turn).toMatchObject({ status: 'screening', currentRound: 0, completedAt: null })
+    expect(participant).toMatchObject({
+      decision: 'pending', confidence: null, proposedAngle: null, dependsOnAgentId: null,
+      speakingOrder: null, status: 'candidate', reason: null,
+    })
+    expect(repositories.updateConversationTurn(turn.id, {
+      status: 'judging', currentRound: 1,
+    })).toMatchObject({ status: 'judging', currentRound: 1 })
+    expect(repositories.updateTurnParticipant(turn.id, firstAgent.id, {
+      decision: 'speak', confidence: 0.9, proposedAngle: 'Transaction safety',
+      speakingOrder: 0, status: 'selected', reason: 'Strong responsibility match.',
+    })).toMatchObject({ decision: 'speak', status: 'selected', speakingOrder: 0 })
+    expect(repositories.updateAgentInvocation(secondInvocation.id, {
+      status: 'running', startedAt: '2026-07-31T10:00:00.000Z',
+    })).toMatchObject({ status: 'running', startedAt: '2026-07-31T10:00:00.000Z' })
+    expect(repositories.listAgentInvocations(turn.id).map((invocation) => invocation.id)).toEqual([
+      firstInvocation.id, secondInvocation.id,
+    ])
+    expect(repositories.listTurnParticipants(turn.id)).toEqual([
+      expect.objectContaining({ id: participant.id, agentId: firstAgent.id }),
+    ])
+    expect(repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({ id: handoff.id, status: 'queued', reason: null }),
+    ])
+    expect(repositories.listMessagesForConversation(channel.id, null).map((message) => message.id)).toEqual([
+      ...timelineMessages.map((message) => message.id), threadRoot.id,
+    ])
+    expect(repositories.listMessagesForConversation(channel.id, threadRoot.id).map((message) => message.id)).toEqual([
+      threadRoot.id, ...threadReplies.map((message) => message.id),
+    ])
+    expect(repositories.getLastAgentSpokenAt(channel.id, firstAgent.id)).toBe(timelineMessages[9]!.createdAt)
+
+    const updatedSession = repositories.upsertConversationSession({
+      key: session.key,
+      channelId: channel.id,
+      threadRootMessageId: null,
+      agentId: firstAgent.id,
+      runtime: 'pi',
+      runtimeSessionId: 'session-2',
+      runtimeSessionFile: '/tmp/session-2.jsonl',
+      status: 'active',
+      lastMessageId: timelineMessages[9]!.id,
+    })
+    expect(updatedSession).toMatchObject({
+      id: session.id, createdAt: session.createdAt, runtimeSessionId: 'session-2',
+      runtimeSessionFile: '/tmp/session-2.jsonl', status: 'active', lastMessageId: timelineMessages[9]!.id,
+    })
+    expect(repositories.getConversationSession(session.key)).toEqual(updatedSession)
+    expect(() => repositories.createConversationTurn({
+      channelId: channel.id,
+      triggerMessageId: timelineMessages[0]!.id,
+      threadRootMessageId: null,
+      mode: 'ordinary',
+      maxRounds: 3,
+    })).toThrow(/UNIQUE constraint failed/)
+    expect(() => repositories.createAgentInvocation({
+      turnId: turn.id,
+      agentId: firstAgent.id,
+      kind: 'participation',
+      priority: 'participation',
+      round: 1,
+      idempotencyKey: firstInvocation.idempotencyKey,
+      sourceInvocationId: null,
+    })).toThrow(/UNIQUE constraint failed/)
+  })
+
+  it('rolls back a turn, participant, and initial invocation as one unit', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const agent = repositories.createAgent({
+      identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const trigger = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Start a turn.',
+    })
+    let turnId = ''
+
+    expect(() => repositories.inTransaction((unitOfWork) => {
+      const turn = unitOfWork.createConversationTurn({
+        channelId: channel.id, triggerMessageId: trigger.id, threadRootMessageId: null,
+        mode: 'ordinary', maxRounds: 3,
+      })
+      turnId = turn.id
+      unitOfWork.createTurnParticipant({
+        turnId: turn.id, agentId: agent.id, source: 'responsibility', rank: 0, matcherScore: 18,
+      })
+      unitOfWork.createAgentInvocation({
+        turnId: turn.id, agentId: agent.id, kind: 'participation', priority: 'participation',
+        round: 0, idempotencyKey: `${turn.id}:${agent.id}:participation`, sourceInvocationId: null,
+      })
+      throw new Error('roll back conversation setup')
+    })).toThrow('roll back conversation setup')
+
+    expect(repositories.getConversationTurn(turnId)).toBeUndefined()
+    expect(repositories.listTurnParticipants(turnId)).toEqual([])
+    expect(repositories.listAgentInvocations(turnId)).toEqual([])
+  })
+
   it('changes ordinary channel membership only through explicit relationship operations', async () => {
     const { repositories } = await createRepositories()
     const channel = createChannel(repositories)
@@ -500,6 +692,47 @@ describe('SQLite workspace repositories', () => {
     ).get(fixture.summitId, createdAgent.id)).toBeUndefined()
   })
 
+  it('migrates version 14 without losing messages and enables conversation persistence', async () => {
+    const databasePath = await createDatabasePath()
+    const fixture = createVersion14Fixture(databasePath)
+
+    database = createSqliteDatabase(databasePath)
+    const repositories = new SqliteRepositories(database, new RecordingPublisher())
+    const turn = repositories.createConversationTurn({
+      channelId: fixture.channelId,
+      triggerMessageId: fixture.messageId,
+      threadRootMessageId: null,
+      mode: 'ordinary',
+      maxRounds: 3,
+    })
+    repositories.createTurnParticipant({
+      turnId: turn.id,
+      agentId: fixture.agentId,
+      source: 'responsibility',
+      rank: 0,
+      matcherScore: 18,
+    })
+    repositories.upsertConversationSession({
+      key: `${fixture.channelId}:timeline:${fixture.agentId}`,
+      channelId: fixture.channelId,
+      threadRootMessageId: null,
+      agentId: fixture.agentId,
+      runtime: 'pi',
+      runtimeSessionId: 'session-1',
+      runtimeSessionFile: null,
+      status: 'ready',
+      lastMessageId: fixture.messageId,
+    })
+
+    expect(repositories.getMessage(fixture.messageId)?.body).toBe('Legacy message')
+    expect(repositories.getConversationTurn(turn.id)?.status).toBe('screening')
+    expect(repositories.listTurnParticipants(turn.id)).toHaveLength(1)
+    expect(repositories.getConversationSession(`${fixture.channelId}:timeline:${fixture.agentId}`)?.runtimeSessionId)
+      .toBe('session-1')
+    expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 15').get())
+      .toMatchObject({ version: 15 })
+  })
+
   it('rolls back migration 14 when version 13 has normalized duplicate Agent mentions', async () => {
     const databasePath = await createDatabasePath()
     createVersion13Fixture(databasePath, { duplicateNormalizedMention: true })
@@ -598,6 +831,53 @@ describe('SQLite workspace repositories', () => {
       INSERT INTO tasks (id, repository_id, channel_id, direct_agent_id, title, description, acceptance_criteria, labels_json, status, queued_at, attempt_count, max_retries, timeout_ms, lease_ttl_ms, branch_name, worktree_path, created_at, updated_at, thread_root_message_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(fixture.taskId, fixture.repositoryId, fixture.ordinaryChannelId, null, 'Legacy task', 'Description', 'Done', '[]', 'queued', createdAt, 0, 2, 900000, null, null, null, createdAt, createdAt, null)
+    legacy.close()
+    return fixture
+  }
+
+  function createVersion14Fixture(databasePath: string) {
+    const legacy = new DatabaseSync(databasePath)
+    const createdAt = '2026-07-30T00:00:00.000Z'
+    const fixture = {
+      workspaceId: 'workspace-v14',
+      repositoryId: 'repository-v14',
+      channelId: 'channel-v14',
+      agentId: 'agent-v14',
+      messageId: 'message-v14',
+    }
+
+    legacy.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, lease_ttl_ms INTEGER NOT NULL DEFAULT 30000 CHECK(lease_ttl_ms > 0));
+      CREATE TABLE repositories (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), name TEXT NOT NULL, path TEXT NOT NULL, created_at TEXT NOT NULL, current_branch TEXT NOT NULL DEFAULT '', default_branch TEXT NOT NULL DEFAULT '', is_clean INTEGER NOT NULL DEFAULT 1);
+      CREATE TABLE channels (id TEXT PRIMARY KEY, repository_id TEXT NOT NULL REFERENCES repositories(id), name TEXT NOT NULL, created_at TEXT NOT NULL, archived_at TEXT, context_reset_at TEXT, system_key TEXT);
+      CREATE TABLE agents (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), mention_name TEXT NOT NULL, runtime TEXT NOT NULL, status TEXT NOT NULL, capability_tags_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, identity TEXT NOT NULL DEFAULT '', max_concurrent_tasks INTEGER NOT NULL DEFAULT 1, command TEXT NOT NULL DEFAULT '', args_json TEXT NOT NULL DEFAULT '[]', model TEXT NOT NULL DEFAULT '', env_json TEXT NOT NULL DEFAULT '{}', responsibilities_json TEXT NOT NULL DEFAULT '[]');
+      CREATE TABLE tasks (id TEXT PRIMARY KEY, repository_id TEXT NOT NULL REFERENCES repositories(id), channel_id TEXT NOT NULL REFERENCES channels(id), direct_agent_id TEXT REFERENCES agents(id), title TEXT NOT NULL, description TEXT NOT NULL, acceptance_criteria TEXT NOT NULL, labels_json TEXT NOT NULL, status TEXT NOT NULL, queued_at TEXT NOT NULL, attempt_count INTEGER NOT NULL, max_retries INTEGER NOT NULL, timeout_ms INTEGER NOT NULL, branch_name TEXT, worktree_path TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, lease_ttl_ms INTEGER CHECK(lease_ttl_ms IS NULL OR lease_ttl_ms > 0), thread_root_message_id TEXT REFERENCES messages(id), workspace_id TEXT REFERENCES workspaces(id));
+      CREATE TABLE messages (id TEXT PRIMARY KEY, channel_id TEXT NOT NULL REFERENCES channels(id), task_id TEXT REFERENCES tasks(id), sender_type TEXT NOT NULL, sender_id TEXT, author_name TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT, thread_root_id TEXT REFERENCES messages(id));
+      CREATE TABLE channel_agent_subscriptions (channel_id TEXT NOT NULL REFERENCES channels(id), agent_id TEXT NOT NULL REFERENCES agents(id), created_at TEXT NOT NULL, PRIMARY KEY (channel_id, agent_id));
+      CREATE TABLE channel_agent_memberships (channel_id TEXT NOT NULL REFERENCES channels(id), agent_id TEXT NOT NULL REFERENCES agents(id), created_at TEXT NOT NULL, PRIMARY KEY (channel_id, agent_id));
+      CREATE TABLE channel_workspace_bindings (channel_id TEXT NOT NULL REFERENCES channels(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), created_at TEXT NOT NULL, PRIMARY KEY (channel_id, workspace_id));
+    `)
+    const insertMigration = legacy.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+    for (let version = 1; version <= 14; version += 1) insertMigration.run(version, createdAt)
+    legacy.prepare('INSERT INTO workspaces (id, name, lease_ttl_ms, created_at) VALUES (?, ?, ?, ?)').run(
+      fixture.workspaceId, 'Legacy workspace', 30000, createdAt,
+    )
+    legacy.prepare('INSERT INTO repositories (id, workspace_id, name, path, current_branch, default_branch, is_clean, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+      fixture.repositoryId, fixture.workspaceId, 'Legacy repository', '/projects/legacy', 'main', 'main', 1, createdAt,
+    )
+    legacy.prepare('INSERT INTO channels (id, repository_id, name, system_key, archived_at, context_reset_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      fixture.channelId, fixture.repositoryId, 'engineering', null, null, null, createdAt,
+    )
+    legacy.prepare(`
+      INSERT INTO agents (id, workspace_id, identity, mention_name, runtime, status, capability_tags_json, responsibilities_json, max_concurrent_tasks, command, args_json, model, env_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(fixture.agentId, fixture.workspaceId, 'Legacy agent', 'legacy', 'pi', 'idle', '[]', '[]', 1, 'pi', '[]', '', '{}', createdAt, createdAt)
+    legacy.prepare(`
+      INSERT INTO messages (id, channel_id, thread_root_id, task_id, sender_type, sender_id, author_name, body, created_at, updated_at, deleted_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(fixture.messageId, fixture.channelId, null, null, 'human', null, 'Jodu', 'Legacy message', createdAt, createdAt, null)
     legacy.close()
     return fixture
   }

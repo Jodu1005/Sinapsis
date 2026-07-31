@@ -288,6 +288,98 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(14, new Date().toISOString())
     }
 
+    const fifteenthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 15').get()
+    if (!fifteenthMigration) {
+      database.exec(`
+        CREATE TABLE conversation_turns (
+          id TEXT PRIMARY KEY,
+          channel_id TEXT NOT NULL REFERENCES channels(id),
+          trigger_message_id TEXT NOT NULL UNIQUE REFERENCES messages(id),
+          thread_root_message_id TEXT REFERENCES messages(id),
+          mode TEXT NOT NULL CHECK(mode IN ('ordinary', 'direct', 'multi_direct', 'all')),
+          status TEXT NOT NULL CHECK(status IN ('screening', 'judging', 'responding', 'handoff', 'completed', 'cancelled', 'failed')),
+          current_round INTEGER NOT NULL CHECK(current_round >= 0),
+          max_rounds INTEGER NOT NULL CHECK(max_rounds > 0),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT
+        );
+
+        CREATE TABLE turn_participants (
+          id TEXT NOT NULL UNIQUE,
+          turn_id TEXT NOT NULL REFERENCES conversation_turns(id),
+          agent_id TEXT NOT NULL REFERENCES agents(id),
+          source TEXT NOT NULL CHECK(source IN ('responsibility', 'direct', 'all', 'handoff')),
+          rank INTEGER NOT NULL CHECK(rank >= 0),
+          matcher_score REAL,
+          decision TEXT NOT NULL CHECK(decision IN ('pending', 'speak', 'silent', 'skipped')),
+          confidence REAL,
+          proposed_angle TEXT,
+          depends_on_agent_id TEXT REFERENCES agents(id),
+          speaking_order INTEGER CHECK(speaking_order IS NULL OR speaking_order >= 0),
+          status TEXT NOT NULL CHECK(status IN ('candidate', 'selected', 'spoken', 'failed', 'skipped')),
+          reason TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (turn_id, agent_id)
+        );
+
+        CREATE TABLE agent_invocations (
+          id TEXT PRIMARY KEY,
+          turn_id TEXT NOT NULL REFERENCES conversation_turns(id),
+          agent_id TEXT NOT NULL REFERENCES agents(id),
+          kind TEXT NOT NULL CHECK(kind IN ('participation', 'response', 'duplicate_check', 'handoff_response')),
+          priority TEXT NOT NULL CHECK(priority IN ('human_direct', 'human_ordinary', 'participation', 'duplicate_check', 'automatic_handoff')),
+          round INTEGER NOT NULL CHECK(round >= 0),
+          status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'settled', 'failed', 'cancelled')),
+          idempotency_key TEXT NOT NULL UNIQUE,
+          source_invocation_id TEXT REFERENCES agent_invocations(id),
+          sequence INTEGER NOT NULL CHECK(sequence >= 0),
+          queued_at TEXT NOT NULL,
+          started_at TEXT,
+          completed_at TEXT,
+          error_code TEXT
+        );
+
+        CREATE TABLE conversation_handoffs (
+          id TEXT PRIMARY KEY,
+          turn_id TEXT NOT NULL REFERENCES conversation_turns(id),
+          source_invocation_id TEXT NOT NULL REFERENCES agent_invocations(id),
+          from_agent_id TEXT NOT NULL REFERENCES agents(id),
+          to_agent_id TEXT NOT NULL REFERENCES agents(id),
+          question TEXT NOT NULL,
+          round INTEGER NOT NULL CHECK(round >= 0),
+          status TEXT NOT NULL CHECK(status IN ('queued', 'accepted', 'rejected', 'completed')),
+          reason TEXT,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE conversation_sessions (
+          id TEXT NOT NULL UNIQUE,
+          key TEXT PRIMARY KEY,
+          channel_id TEXT NOT NULL REFERENCES channels(id),
+          thread_root_message_id TEXT REFERENCES messages(id),
+          agent_id TEXT NOT NULL REFERENCES agents(id),
+          runtime TEXT NOT NULL CHECK(runtime IN ('opencode', 'pi', 'claude-code')),
+          runtime_session_id TEXT,
+          runtime_session_file TEXT,
+          status TEXT NOT NULL CHECK(status IN ('ready', 'active', 'stale', 'failed')),
+          last_message_id TEXT REFERENCES messages(id),
+          last_used_at TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX conversation_turns_status_created_at_idx
+          ON conversation_turns(status, created_at);
+        CREATE INDEX agent_invocations_turn_sequence_idx
+          ON agent_invocations(turn_id, sequence);
+        CREATE INDEX agent_invocations_agent_status_idx
+          ON agent_invocations(agent_id, status);
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(15, new Date().toISOString())
+    }
+
     database.exec('COMMIT')
   } catch (error) {
     database.exec('ROLLBACK')

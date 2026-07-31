@@ -1,6 +1,21 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import type { Agent, AgentStatus, CreateAgentInput } from '../../domain/agent'
+import type {
+  AgentInvocation,
+  ConversationHandoff,
+  ConversationSession,
+  ConversationTurn,
+  ConversationTurnPatch,
+  CreateAgentInvocationInput,
+  CreateConversationHandoffInput,
+  CreateConversationTurnInput,
+  CreateTurnParticipantInput,
+  InvocationPatch,
+  ParticipantPatch,
+  TurnParticipant,
+  UpsertConversationSessionInput,
+} from '../../domain/conversation'
 import type { DomainEvent } from '../../domain/events'
 import type { CreateMessageInput, Message, MessageSenderType } from '../../domain/message'
 import {
@@ -166,6 +181,84 @@ interface AgentRow {
   args_json: string
   model: string
   env_json: string
+  created_at: string
+  updated_at: string
+}
+
+interface ConversationTurnRow {
+  id: string
+  channel_id: string
+  trigger_message_id: string
+  thread_root_message_id: string | null
+  mode: ConversationTurn['mode']
+  status: ConversationTurn['status']
+  current_round: number
+  max_rounds: number
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+}
+
+interface TurnParticipantRow {
+  id: string
+  turn_id: string
+  agent_id: string
+  source: TurnParticipant['source']
+  rank: number
+  matcher_score: number | null
+  decision: TurnParticipant['decision']
+  confidence: number | null
+  proposed_angle: string | null
+  depends_on_agent_id: string | null
+  speaking_order: number | null
+  status: TurnParticipant['status']
+  reason: string | null
+  created_at: string
+  updated_at: string
+}
+
+interface AgentInvocationRow {
+  id: string
+  turn_id: string
+  agent_id: string
+  kind: AgentInvocation['kind']
+  priority: AgentInvocation['priority']
+  round: number
+  status: AgentInvocation['status']
+  idempotency_key: string
+  source_invocation_id: string | null
+  sequence: number
+  queued_at: string
+  started_at: string | null
+  completed_at: string | null
+  error_code: string | null
+}
+
+interface ConversationHandoffRow {
+  id: string
+  turn_id: string
+  source_invocation_id: string
+  from_agent_id: string
+  to_agent_id: string
+  question: string
+  round: number
+  status: ConversationHandoff['status']
+  reason: string | null
+  created_at: string
+}
+
+interface ConversationSessionRow {
+  id: string
+  key: string
+  channel_id: string
+  thread_root_message_id: string | null
+  agent_id: string
+  runtime: ConversationSession['runtime']
+  runtime_session_id: string | null
+  runtime_session_file: string | null
+  status: ConversationSession['status']
+  last_message_id: string | null
+  last_used_at: string
   created_at: string
   updated_at: string
 }
@@ -431,6 +524,101 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     return message
   }
 
+  createConversationTurn(input: CreateConversationTurnInput): ConversationTurn {
+    const createdAt = now()
+    const turn: ConversationTurn = {
+      id: randomUUID(),
+      channelId: input.channelId,
+      triggerMessageId: input.triggerMessageId,
+      threadRootMessageId: input.threadRootMessageId,
+      mode: input.mode,
+      status: 'screening',
+      currentRound: 0,
+      maxRounds: input.maxRounds,
+      createdAt,
+      updatedAt: createdAt,
+      completedAt: null,
+    }
+    this.database.prepare(`
+      INSERT INTO conversation_turns (
+        id, channel_id, trigger_message_id, thread_root_message_id, mode, status,
+        current_round, max_rounds, created_at, updated_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      turn.id, turn.channelId, turn.triggerMessageId, turn.threadRootMessageId, turn.mode, turn.status,
+      turn.currentRound, turn.maxRounds, turn.createdAt, turn.updatedAt, turn.completedAt,
+    )
+    return turn
+  }
+
+  createTurnParticipant(input: CreateTurnParticipantInput): TurnParticipant {
+    const createdAt = now()
+    const participant: TurnParticipant = {
+      id: randomUUID(),
+      turnId: input.turnId,
+      agentId: input.agentId,
+      source: input.source,
+      rank: input.rank,
+      matcherScore: input.matcherScore,
+      decision: input.decision ?? 'pending',
+      confidence: input.confidence ?? null,
+      proposedAngle: input.proposedAngle ?? null,
+      dependsOnAgentId: input.dependsOnAgentId ?? null,
+      speakingOrder: input.speakingOrder ?? null,
+      status: input.status ?? 'candidate',
+      reason: input.reason ?? null,
+      createdAt,
+      updatedAt: createdAt,
+    }
+    this.database.prepare(`
+      INSERT INTO turn_participants (
+        id, turn_id, agent_id, source, rank, matcher_score, decision, confidence,
+        proposed_angle, depends_on_agent_id, speaking_order, status, reason, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      participant.id, participant.turnId, participant.agentId, participant.source, participant.rank,
+      participant.matcherScore, participant.decision, participant.confidence, participant.proposedAngle,
+      participant.dependsOnAgentId, participant.speakingOrder, participant.status, participant.reason,
+      participant.createdAt, participant.updatedAt,
+    )
+    return participant
+  }
+
+  createAgentInvocation(input: CreateAgentInvocationInput): AgentInvocation {
+    const queuedAt = now()
+    const invocation: AgentInvocation = {
+      id: randomUUID(),
+      turnId: input.turnId,
+      agentId: input.agentId,
+      kind: input.kind,
+      priority: input.priority,
+      round: input.round,
+      status: input.status ?? 'queued',
+      idempotencyKey: input.idempotencyKey,
+      sourceInvocationId: input.sourceInvocationId,
+      queuedAt,
+      startedAt: input.startedAt ?? null,
+      completedAt: input.completedAt ?? null,
+      errorCode: input.errorCode ?? null,
+    }
+    const sequence = (this.database.prepare(`
+      SELECT COALESCE(MAX(sequence), -1) + 1 AS sequence
+      FROM agent_invocations
+      WHERE turn_id = ?
+    `).get(invocation.turnId) as { sequence: number }).sequence
+    this.database.prepare(`
+      INSERT INTO agent_invocations (
+        id, turn_id, agent_id, kind, priority, round, status, idempotency_key,
+        source_invocation_id, sequence, queued_at, started_at, completed_at, error_code
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      invocation.id, invocation.turnId, invocation.agentId, invocation.kind, invocation.priority,
+      invocation.round, invocation.status, invocation.idempotencyKey, invocation.sourceInvocationId,
+      sequence, invocation.queuedAt, invocation.startedAt, invocation.completedAt, invocation.errorCode,
+    )
+    return invocation
+  }
+
   updateMessageBody(messageId: string, body: string): Message {
     const existing = readMessage(this.database, messageId)
     if (!existing) {
@@ -627,6 +815,18 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return this.inTransaction((unitOfWork) => unitOfWork.createMessage(input))
   }
 
+  createConversationTurn(input: CreateConversationTurnInput): ConversationTurn {
+    return this.inTransaction((unitOfWork) => unitOfWork.createConversationTurn(input))
+  }
+
+  createTurnParticipant(input: CreateTurnParticipantInput): TurnParticipant {
+    return this.inTransaction((unitOfWork) => unitOfWork.createTurnParticipant(input))
+  }
+
+  createAgentInvocation(input: CreateAgentInvocationInput): AgentInvocation {
+    return this.inTransaction((unitOfWork) => unitOfWork.createAgentInvocation(input))
+  }
+
   updateMessageBody(messageId: string, body: string): Message {
     return this.inTransaction((unitOfWork) => unitOfWork.updateMessageBody(messageId, body))
   }
@@ -759,6 +959,223 @@ export class SqliteRepositories implements WorkspaceRepositories {
 
   getMessage(messageId: string): Message | undefined {
     return readMessage(this.sqlite.database, messageId)
+  }
+
+  getConversationTurn(turnId: string): ConversationTurn | undefined {
+    return readConversationTurn(this.sqlite.database, turnId)
+  }
+
+  updateConversationTurn(turnId: string, patch: ConversationTurnPatch): ConversationTurn {
+    return this.inTransaction(() => {
+      const turn = readConversationTurn(this.sqlite.database, turnId)
+      if (!turn) throw new Error(`Conversation turn ${turnId} does not exist.`)
+      const updated: ConversationTurn = {
+        ...turn,
+        mode: patch.mode ?? turn.mode,
+        status: patch.status ?? turn.status,
+        currentRound: patch.currentRound ?? turn.currentRound,
+        maxRounds: patch.maxRounds ?? turn.maxRounds,
+        completedAt: patch.completedAt === undefined ? turn.completedAt : patch.completedAt,
+        updatedAt: now(),
+      }
+      this.sqlite.database.prepare(`
+        UPDATE conversation_turns
+        SET mode = ?, status = ?, current_round = ?, max_rounds = ?, completed_at = ?, updated_at = ?
+        WHERE id = ?
+      `).run(
+        updated.mode, updated.status, updated.currentRound, updated.maxRounds,
+        updated.completedAt, updated.updatedAt, updated.id,
+      )
+      return updated
+    })
+  }
+
+  updateTurnParticipant(turnId: string, agentId: string, patch: ParticipantPatch): TurnParticipant {
+    return this.inTransaction(() => {
+      const row = this.sqlite.database.prepare(`
+        SELECT * FROM turn_participants WHERE turn_id = ? AND agent_id = ?
+      `).get(turnId, agentId) as TurnParticipantRow | undefined
+      if (!row) throw new Error(`Turn participant ${turnId}/${agentId} does not exist.`)
+      const participant = mapTurnParticipant(row)
+      const updated: TurnParticipant = {
+        ...participant,
+        source: patch.source ?? participant.source,
+        rank: patch.rank ?? participant.rank,
+        matcherScore: patch.matcherScore === undefined ? participant.matcherScore : patch.matcherScore,
+        decision: patch.decision ?? participant.decision,
+        confidence: patch.confidence === undefined ? participant.confidence : patch.confidence,
+        proposedAngle: patch.proposedAngle === undefined ? participant.proposedAngle : patch.proposedAngle,
+        dependsOnAgentId: patch.dependsOnAgentId === undefined ? participant.dependsOnAgentId : patch.dependsOnAgentId,
+        speakingOrder: patch.speakingOrder === undefined ? participant.speakingOrder : patch.speakingOrder,
+        status: patch.status ?? participant.status,
+        reason: patch.reason === undefined ? participant.reason : patch.reason,
+        updatedAt: now(),
+      }
+      this.sqlite.database.prepare(`
+        UPDATE turn_participants
+        SET source = ?, rank = ?, matcher_score = ?, decision = ?, confidence = ?, proposed_angle = ?,
+          depends_on_agent_id = ?, speaking_order = ?, status = ?, reason = ?, updated_at = ?
+        WHERE turn_id = ? AND agent_id = ?
+      `).run(
+        updated.source, updated.rank, updated.matcherScore, updated.decision, updated.confidence,
+        updated.proposedAngle, updated.dependsOnAgentId, updated.speakingOrder, updated.status,
+        updated.reason, updated.updatedAt, turnId, agentId,
+      )
+      return updated
+    })
+  }
+
+  listTurnParticipants(turnId: string): TurnParticipant[] {
+    return (this.sqlite.database.prepare(`
+      SELECT * FROM turn_participants WHERE turn_id = ? ORDER BY rank, created_at, id
+    `).all(turnId) as unknown as TurnParticipantRow[]).map(mapTurnParticipant)
+  }
+
+  updateAgentInvocation(invocationId: string, patch: InvocationPatch): AgentInvocation {
+    return this.inTransaction(() => {
+      const row = this.sqlite.database.prepare('SELECT * FROM agent_invocations WHERE id = ?')
+        .get(invocationId) as AgentInvocationRow | undefined
+      if (!row) throw new Error(`Agent invocation ${invocationId} does not exist.`)
+      const invocation = mapAgentInvocation(row)
+      const updated: AgentInvocation = {
+        ...invocation,
+        status: patch.status ?? invocation.status,
+        startedAt: patch.startedAt === undefined ? invocation.startedAt : patch.startedAt,
+        completedAt: patch.completedAt === undefined ? invocation.completedAt : patch.completedAt,
+        errorCode: patch.errorCode === undefined ? invocation.errorCode : patch.errorCode,
+      }
+      this.sqlite.database.prepare(`
+        UPDATE agent_invocations
+        SET status = ?, started_at = ?, completed_at = ?, error_code = ?
+        WHERE id = ?
+      `).run(updated.status, updated.startedAt, updated.completedAt, updated.errorCode, updated.id)
+      return updated
+    })
+  }
+
+  listAgentInvocations(turnId: string): AgentInvocation[] {
+    return (this.sqlite.database.prepare(`
+      SELECT * FROM agent_invocations WHERE turn_id = ? ORDER BY sequence
+    `).all(turnId) as unknown as AgentInvocationRow[]).map(mapAgentInvocation)
+  }
+
+  createConversationHandoff(input: CreateConversationHandoffInput): ConversationHandoff {
+    return this.inTransaction(() => {
+      const handoff: ConversationHandoff = {
+        id: randomUUID(),
+        turnId: input.turnId,
+        sourceInvocationId: input.sourceInvocationId,
+        fromAgentId: input.fromAgentId,
+        toAgentId: input.toAgentId,
+        question: input.question,
+        round: input.round,
+        status: input.status ?? 'queued',
+        reason: input.reason ?? null,
+        createdAt: now(),
+      }
+      this.sqlite.database.prepare(`
+        INSERT INTO conversation_handoffs (
+          id, turn_id, source_invocation_id, from_agent_id, to_agent_id,
+          question, round, status, reason, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        handoff.id, handoff.turnId, handoff.sourceInvocationId, handoff.fromAgentId,
+        handoff.toAgentId, handoff.question, handoff.round, handoff.status, handoff.reason,
+        handoff.createdAt,
+      )
+      return handoff
+    })
+  }
+
+  listConversationHandoffs(turnId: string): ConversationHandoff[] {
+    return (this.sqlite.database.prepare(`
+      SELECT * FROM conversation_handoffs WHERE turn_id = ? ORDER BY created_at, rowid
+    `).all(turnId) as unknown as ConversationHandoffRow[]).map(mapConversationHandoff)
+  }
+
+  getConversationSession(key: string): ConversationSession | undefined {
+    const row = this.sqlite.database.prepare('SELECT * FROM conversation_sessions WHERE key = ?')
+      .get(key) as ConversationSessionRow | undefined
+    return row ? mapConversationSession(row) : undefined
+  }
+
+  upsertConversationSession(input: UpsertConversationSessionInput): ConversationSession {
+    return this.inTransaction(() => {
+      const existing = this.getConversationSession(input.key)
+      const updatedAt = now()
+      const session: ConversationSession = {
+        id: existing?.id ?? randomUUID(),
+        ...input,
+        lastUsedAt: updatedAt,
+        createdAt: existing?.createdAt ?? updatedAt,
+        updatedAt,
+      }
+      this.sqlite.database.prepare(`
+        INSERT INTO conversation_sessions (
+          id, key, channel_id, thread_root_message_id, agent_id, runtime,
+          runtime_session_id, runtime_session_file, status, last_message_id,
+          last_used_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          channel_id = excluded.channel_id,
+          thread_root_message_id = excluded.thread_root_message_id,
+          agent_id = excluded.agent_id,
+          runtime = excluded.runtime,
+          runtime_session_id = excluded.runtime_session_id,
+          runtime_session_file = excluded.runtime_session_file,
+          status = excluded.status,
+          last_message_id = excluded.last_message_id,
+          last_used_at = excluded.last_used_at,
+          updated_at = excluded.updated_at
+      `).run(
+        session.id, session.key, session.channelId, session.threadRootMessageId, session.agentId,
+        session.runtime, session.runtimeSessionId, session.runtimeSessionFile, session.status,
+        session.lastMessageId, session.lastUsedAt, session.createdAt, session.updatedAt,
+      )
+      return session
+    })
+  }
+
+  listMessagesForConversation(channelId: string, threadRootMessageId: string | null): Message[] {
+    const database = this.sqlite.database
+    const rows = threadRootMessageId === null
+      ? database.prepare(`
+          SELECT messages.*
+          FROM messages
+          JOIN channels ON channels.id = messages.channel_id
+          WHERE messages.channel_id = ?
+            AND messages.thread_root_id IS NULL
+            AND messages.deleted_at IS NULL
+            AND (channels.context_reset_at IS NULL OR messages.created_at > channels.context_reset_at)
+          ORDER BY messages.created_at, messages.rowid
+        `).all(channelId)
+      : database.prepare(`
+          SELECT messages.*
+          FROM messages
+          JOIN channels ON channels.id = messages.channel_id
+          WHERE messages.channel_id = ?
+            AND (messages.id = ? OR messages.thread_root_id = ?)
+            AND messages.deleted_at IS NULL
+            AND (channels.context_reset_at IS NULL OR messages.created_at > channels.context_reset_at)
+          ORDER BY messages.created_at, messages.rowid
+        `).all(channelId, threadRootMessageId, threadRootMessageId)
+    return (rows as unknown as MessageRow[]).map(mapMessage)
+  }
+
+  getLastAgentSpokenAt(channelId: string, agentId: string): string | null {
+    const row = this.sqlite.database.prepare(`
+      SELECT messages.created_at
+      FROM messages
+      JOIN channels ON channels.id = messages.channel_id
+      WHERE messages.channel_id = ?
+        AND messages.sender_type = 'agent'
+        AND messages.sender_id = ?
+        AND messages.deleted_at IS NULL
+        AND (channels.context_reset_at IS NULL OR messages.created_at > channels.context_reset_at)
+      ORDER BY messages.created_at DESC, messages.rowid DESC
+      LIMIT 1
+    `).get(channelId, agentId) as { created_at: string } | undefined
+    return row?.created_at ?? null
   }
 
   getChannel(channelId: string): Channel | undefined {
@@ -1178,6 +1595,11 @@ function readMessage(database: DatabaseSync, messageId: string): Message | undef
   return row ? mapMessage(row) : undefined
 }
 
+function readConversationTurn(database: DatabaseSync, turnId: string): ConversationTurn | undefined {
+  const row = database.prepare('SELECT * FROM conversation_turns WHERE id = ?').get(turnId) as ConversationTurnRow | undefined
+  return row ? mapConversationTurn(row) : undefined
+}
+
 function readChannel(database: DatabaseSync, channelId: string): Channel | undefined {
   const row = database.prepare('SELECT id, repository_id, name, system_key, archived_at, context_reset_at, created_at FROM channels WHERE id = ?').get(channelId) as ChannelRow | undefined
   return row ? mapChannel(database, row) : undefined
@@ -1344,6 +1766,93 @@ function mapMessage(row: MessageRow): Message {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at,
+  }
+}
+
+function mapConversationTurn(row: ConversationTurnRow): ConversationTurn {
+  return {
+    id: row.id,
+    channelId: row.channel_id,
+    triggerMessageId: row.trigger_message_id,
+    threadRootMessageId: row.thread_root_message_id,
+    mode: row.mode,
+    status: row.status,
+    currentRound: row.current_round,
+    maxRounds: row.max_rounds,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    completedAt: row.completed_at,
+  }
+}
+
+function mapTurnParticipant(row: TurnParticipantRow): TurnParticipant {
+  return {
+    id: row.id,
+    turnId: row.turn_id,
+    agentId: row.agent_id,
+    source: row.source,
+    rank: row.rank,
+    matcherScore: row.matcher_score,
+    decision: row.decision,
+    confidence: row.confidence,
+    proposedAngle: row.proposed_angle,
+    dependsOnAgentId: row.depends_on_agent_id,
+    speakingOrder: row.speaking_order,
+    status: row.status,
+    reason: row.reason,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function mapAgentInvocation(row: AgentInvocationRow): AgentInvocation {
+  return {
+    id: row.id,
+    turnId: row.turn_id,
+    agentId: row.agent_id,
+    kind: row.kind,
+    priority: row.priority,
+    round: row.round,
+    status: row.status,
+    idempotencyKey: row.idempotency_key,
+    sourceInvocationId: row.source_invocation_id,
+    queuedAt: row.queued_at,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    errorCode: row.error_code,
+  }
+}
+
+function mapConversationHandoff(row: ConversationHandoffRow): ConversationHandoff {
+  return {
+    id: row.id,
+    turnId: row.turn_id,
+    sourceInvocationId: row.source_invocation_id,
+    fromAgentId: row.from_agent_id,
+    toAgentId: row.to_agent_id,
+    question: row.question,
+    round: row.round,
+    status: row.status,
+    reason: row.reason,
+    createdAt: row.created_at,
+  }
+}
+
+function mapConversationSession(row: ConversationSessionRow): ConversationSession {
+  return {
+    id: row.id,
+    key: row.key,
+    channelId: row.channel_id,
+    threadRootMessageId: row.thread_root_message_id,
+    agentId: row.agent_id,
+    runtime: row.runtime,
+    runtimeSessionId: row.runtime_session_id,
+    runtimeSessionFile: row.runtime_session_file,
+    status: row.status,
+    lastMessageId: row.last_message_id,
+    lastUsedAt: row.last_used_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   }
 }
 

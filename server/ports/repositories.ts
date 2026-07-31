@@ -1,4 +1,19 @@
 import type { Agent, AgentStatus, CreateAgentInput } from '../domain/agent'
+import type {
+  AgentInvocation,
+  ConversationHandoff,
+  ConversationSession,
+  ConversationTurn,
+  ConversationTurnPatch,
+  CreateAgentInvocationInput,
+  CreateConversationHandoffInput,
+  CreateConversationTurnInput,
+  CreateTurnParticipantInput,
+  InvocationPatch,
+  ParticipantPatch,
+  TurnParticipant,
+  UpsertConversationSessionInput,
+} from '../domain/conversation'
 import type { DomainEvent } from '../domain/events'
 import type { CreateMessageInput, Message } from '../domain/message'
 import type { CreateTaskInput, Task, TaskArtifact, TaskDetails, TaskInput, TaskLease, TaskSession, TaskStatus } from '../domain/task'
@@ -54,6 +69,9 @@ export interface WorkspaceUnitOfWork {
   createTask(input: CreateTaskInput): Task
   createTaskInput(taskId: string, body: string): TaskInput
   createMessage(input: CreateMessageInput): Message
+  createConversationTurn(input: CreateConversationTurnInput): ConversationTurn
+  createTurnParticipant(input: CreateTurnParticipantInput): TurnParticipant
+  createAgentInvocation(input: CreateAgentInvocationInput): AgentInvocation
   updateMessageBody(messageId: string, body: string): Message
   deleteMessage(messageId: string): void
   transitionTask(taskId: string, next: TaskStatus, reason: string): Task
@@ -100,6 +118,21 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   getTaskDetails(taskId: string): TaskDetails | undefined
   getTaskArtifact(taskId: string, artifactId: string): TaskArtifact | undefined
   getMessage(messageId: string): Message | undefined
+  createConversationTurn(input: CreateConversationTurnInput): ConversationTurn
+  getConversationTurn(turnId: string): ConversationTurn | undefined
+  updateConversationTurn(turnId: string, patch: ConversationTurnPatch): ConversationTurn
+  createTurnParticipant(input: CreateTurnParticipantInput): TurnParticipant
+  updateTurnParticipant(turnId: string, agentId: string, patch: ParticipantPatch): TurnParticipant
+  listTurnParticipants(turnId: string): TurnParticipant[]
+  createAgentInvocation(input: CreateAgentInvocationInput): AgentInvocation
+  updateAgentInvocation(invocationId: string, patch: InvocationPatch): AgentInvocation
+  listAgentInvocations(turnId: string): AgentInvocation[]
+  createConversationHandoff(input: CreateConversationHandoffInput): ConversationHandoff
+  listConversationHandoffs(turnId: string): ConversationHandoff[]
+  getConversationSession(key: string): ConversationSession | undefined
+  upsertConversationSession(input: UpsertConversationSessionInput): ConversationSession
+  listMessagesForConversation(channelId: string, threadRootMessageId: string | null): Message[]
+  getLastAgentSpokenAt(channelId: string, agentId: string): string | null
   getChannel(channelId: string): Channel | undefined
   listAgents(): Agent[]
   getChannelAgentIds(channelId: string): string[]
