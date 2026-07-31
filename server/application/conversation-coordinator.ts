@@ -7,7 +7,14 @@ import type { WorkspaceRepositories } from '../ports/repositories'
 import type { RuntimeAdapter } from '../ports/runtime'
 import { ChannelMessageService } from './channel-message-service'
 import { ContextAssembler } from './context-assembler'
-import { ConversationSessionService, conversationSessionKey, type ConversationSessionResult } from './conversation-session-service'
+import {
+  ConversationCancellationBatchError,
+  ConversationInvocationCancelledError,
+  ConversationSessionService,
+  conversationSessionKey,
+  type ConversationCancellationResult,
+  type ConversationSessionResult,
+} from './conversation-session-service'
 
 export interface ConversationCoordinatorOptions {
   repositories: WorkspaceRepositories
@@ -66,6 +73,20 @@ export class ConversationCoordinator {
       return
     }
 
+    const existing = this.executions.get(key)
+    if (existing?.active) {
+      const invocation = this.sessions.invoke({
+        channelId,
+        threadRootMessageId,
+        currentMessageId: message.id,
+        agent,
+        context: '',
+        initialMessage: message.body,
+      })
+      this.observeInvocation(existing, invocation)
+      return
+    }
+
     const execution: ConversationExecution = { key, channelId, threadRootMessageId, agent, active: true }
     this.executions.set(key, execution)
     this.repositories.setAgentStatus(agent.id, 'busy', new Date())
@@ -85,9 +106,7 @@ export class ConversationCoordinator {
       onSettled: (result) => this.settle(execution, result),
       onError: (error) => this.fail(execution, error.message),
     })
-    void invocation.catch((error: unknown) => {
-      this.fail(execution, error instanceof Error ? error.message : 'Runtime 启动失败')
-    })
+    this.observeInvocation(execution, invocation)
   }
 
   getTypingAgentIds(channelId: string): string[] {
@@ -97,17 +116,36 @@ export class ConversationCoordinator {
   }
 
   async cancelChannel(channelId: string): Promise<void> {
-    await this.sessions.cancelChannel(channelId)
-    this.finishCancelledExecutions((execution) => execution.channelId === channelId)
+    await this.cancelAndReconcile(() => this.sessions.cancelChannel(channelId))
   }
 
   async cancelAgentInChannel(channelId: string, agentId: string): Promise<void> {
-    await this.sessions.cancelAgentInChannel(channelId, agentId)
-    this.finishCancelledExecutions((execution) => execution.channelId === channelId && execution.agent.id === agentId)
+    await this.cancelAndReconcile(() => this.sessions.cancelAgentInChannel(channelId, agentId))
   }
 
-  private finishCancelledExecutions(matches: (execution: ConversationExecution) => boolean): void {
-    const executions = [...this.executions.values()].filter((execution) => execution.active && matches(execution))
+  private observeInvocation(execution: ConversationExecution, invocation: Promise<ConversationSessionResult>): void {
+    void invocation.catch((error: unknown) => {
+      if (error instanceof ConversationInvocationCancelledError) return
+      this.fail(execution, error instanceof Error ? error.message : 'Runtime 启动失败')
+    })
+  }
+
+  private async cancelAndReconcile(cancel: () => Promise<ConversationCancellationResult>): Promise<void> {
+    try {
+      const result = await cancel()
+      this.finishCancelledExecutions(result.cancelledSessionKeys)
+    } catch (error) {
+      if (error instanceof ConversationCancellationBatchError) {
+        this.finishCancelledExecutions(error.cancelledSessionKeys)
+        throw error.failure
+      }
+      throw error
+    }
+  }
+
+  private finishCancelledExecutions(cancelledSessionKeys: string[]): void {
+    const cancelled = new Set(cancelledSessionKeys)
+    const executions = [...this.executions.values()].filter((execution) => execution.active && cancelled.has(execution.key))
     const affectedAgentIds = new Set(executions.map((execution) => execution.agent.id))
     for (const execution of executions) {
       execution.active = false

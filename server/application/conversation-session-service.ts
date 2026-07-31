@@ -44,10 +44,18 @@ export interface ConversationSessionServiceOptions {
 
 interface ActiveInvocation {
   input: ConversationSessionInvocation
+  lastMessageId: string
   pendingText: string[]
+  completion: Promise<ConversationSessionResult>
   resolve(result: ConversationSessionResult): void
   reject(error: Error): void
 }
+
+interface DeferredRuntimeInput {
+  message: string
+}
+
+type SessionPhase = 'preparing' | 'active' | 'cancelling' | 'ready' | 'failed'
 
 interface SessionState {
   key: string
@@ -60,7 +68,31 @@ interface SessionState {
   runtimeSessionId: string | null
   runtimeSessionFile: string | null
   active: ActiveInvocation | null
+  phase: SessionPhase
+  cancellationRequested: boolean
+  deferredInputs: DeferredRuntimeInput[]
   preparing: Promise<void>
+}
+
+export interface ConversationCancellationResult {
+  cancelledSessionKeys: string[]
+}
+
+export class ConversationInvocationCancelledError extends Error {
+  constructor() {
+    super('Conversation invocation was cancelled.')
+    this.name = 'ConversationInvocationCancelledError'
+  }
+}
+
+export class ConversationCancellationBatchError extends Error {
+  constructor(
+    readonly cancelledSessionKeys: string[],
+    readonly failure: unknown,
+  ) {
+    super(asError(failure).message)
+    this.name = 'ConversationCancellationBatchError'
+  }
 }
 
 export class ConversationSessionService {
@@ -81,7 +113,7 @@ export class ConversationSessionService {
     if (!adapter) throw new Error(`Runtime ${input.agent.runtime} is unavailable.`)
 
     let state = this.sessions.get(key)
-    if (state?.active) throw new Error(`Conversation session ${key} already has an active invocation.`)
+    if (state?.active) return this.redispatch(state, input)
     if (!state) {
       state = {
         key,
@@ -94,6 +126,9 @@ export class ConversationSessionService {
         runtimeSessionId: null,
         runtimeSessionFile: null,
         active: null,
+        phase: 'ready',
+        cancellationRequested: false,
+        deferredInputs: [],
         preparing: Promise.resolve(),
       }
       this.sessions.set(key, state)
@@ -105,26 +140,58 @@ export class ConversationSessionService {
       resolve = resolvePromise
       reject = rejectPromise
     })
-    state.active = { input, pendingText: [], resolve, reject }
+    state.phase = 'preparing'
+    state.cancellationRequested = false
+    state.deferredInputs = []
+    state.active = {
+      input,
+      lastMessageId: input.currentMessageId,
+      pendingText: [],
+      completion,
+      resolve,
+      reject,
+    }
     state.preparing = this.prepareInvocation(state, input).catch((error: unknown) => {
+      if (state!.cancellationRequested && !state!.active) {
+        this.sessions.delete(state!.key)
+        return
+      }
       this.fail(state!, asError(error))
     })
-    await state.preparing
     return completion
   }
 
-  async cancelChannel(channelId: string): Promise<void> {
-    await this.cancelSessions((state) => state.channelId === channelId)
+  async cancelChannel(channelId: string): Promise<ConversationCancellationResult> {
+    return this.cancelSessions((state) => state.channelId === channelId)
   }
 
-  async cancelAgentInChannel(channelId: string, agentId: string): Promise<void> {
-    await this.cancelSessions((state) => state.channelId === channelId && state.agent.id === agentId)
+  async cancelAgentInChannel(channelId: string, agentId: string): Promise<ConversationCancellationResult> {
+    return this.cancelSessions((state) => state.channelId === channelId && state.agent.id === agentId)
+  }
+
+  private redispatch(state: SessionState, input: ConversationSessionInvocation): Promise<ConversationSessionResult> {
+    const active = state.active!
+    active.lastMessageId = input.currentMessageId
+    if (state.phase === 'preparing') {
+      state.deferredInputs.push({ message: input.initialMessage })
+      return active.completion
+    }
+
+    try {
+      this.persist(state, 'active', active.lastMessageId)
+      state.adapter.sendInput(state.session!, input.initialMessage, (event) => this.handleRuntimeEvent(state, event))
+    } catch (error) {
+      this.fail(state, asError(error))
+    }
+    return active.completion
   }
 
   private async prepareInvocation(state: SessionState, input: ConversationSessionInvocation): Promise<void> {
     if (state.session) {
-      this.persist(state, 'active', input.currentMessageId)
+      state.phase = 'active'
+      this.persist(state, 'active', state.active!.lastMessageId)
       state.adapter.sendInput(state.session, input.initialMessage, (event) => this.handleRuntimeEvent(state, event))
+      this.flushDeferredInputs(state)
       return
     }
 
@@ -143,6 +210,7 @@ export class ConversationSessionService {
       try {
         await state.adapter.resume(state.session, (event) => this.handleRuntimeEvent(state, event))
       } catch {
+        if (state.cancellationRequested || !state.active) return
         this.persist(state, 'stale', persisted.lastMessageId)
         state.session = null
         state.runtimeSessionId = null
@@ -150,7 +218,10 @@ export class ConversationSessionService {
         await this.startColdSession(state, input)
         return
       }
+      if (state.cancellationRequested || !state.active) return
+      state.phase = 'active'
       state.adapter.sendInput(state.session, input.initialMessage, (event) => this.handleRuntimeEvent(state, event))
+      this.flushDeferredInputs(state)
       return
     }
 
@@ -186,53 +257,63 @@ export class ConversationSessionService {
     state.runtimeSessionFile = state.runtimeSessionFile ?? session.sessionFile
     session.sessionId = state.runtimeSessionId
     session.sessionFile = state.runtimeSessionFile
-    if (state.active) this.persist(state, 'active', input.currentMessageId)
+    if (state.cancellationRequested) {
+      this.cancelPreparedSession(state)
+      return
+    }
+    if (!state.active) return
+    state.phase = 'active'
+    this.persist(state, 'active', state.active.lastMessageId)
+    this.flushDeferredInputs(state)
   }
 
   private handleRuntimeEvent(state: SessionState, event: RuntimeEvent): void {
-    if (event.taskId !== state.taskId || !state.active) return
-    switch (event.kind) {
-      case 'session':
-        state.runtimeSessionId = event.sessionId
-        state.runtimeSessionFile = event.sessionFile ?? state.runtimeSessionFile
-        if (state.session) {
-          state.session.sessionId = event.sessionId
-          state.session.sessionFile = state.runtimeSessionFile
-        }
-        this.persist(state, 'active', state.active.input.currentMessageId)
-        return
-      case 'text':
-        state.active.pendingText.push(event.text)
-        return
-      case 'settled':
-        this.settle(state)
-        return
-      case 'error':
-        this.fail(state, new Error(event.message))
-        return
-      case 'artifact':
-      case 'tool_start':
-      case 'tool_end':
-      case 'queue':
-      case 'needs_input':
-        return
+    if (event.taskId !== state.taskId || !state.active || state.phase === 'cancelling') return
+    try {
+      switch (event.kind) {
+        case 'session':
+          state.runtimeSessionId = event.sessionId
+          state.runtimeSessionFile = event.sessionFile ?? state.runtimeSessionFile
+          if (state.session) {
+            state.session.sessionId = event.sessionId
+            state.session.sessionFile = state.runtimeSessionFile
+          }
+          this.persist(state, 'active', state.active.lastMessageId)
+          return
+        case 'text':
+          state.active.pendingText.push(event.text)
+          return
+        case 'settled':
+          this.settle(state)
+          return
+        case 'error':
+          this.fail(state, new Error(event.message))
+          return
+        case 'artifact':
+        case 'tool_start':
+        case 'tool_end':
+        case 'queue':
+        case 'needs_input':
+          return
+      }
+    } catch (error) {
+      this.fail(state, asError(error))
     }
   }
 
   private settle(state: SessionState): void {
     const active = state.active
-    if (!active) return
+    if (!active || state.phase === 'cancelling') return
     const rawText = active.pendingText.join('').trim()
     state.active = null
-    this.persist(state, 'ready', active.input.currentMessageId)
+    state.phase = 'ready'
     try {
+      this.persist(state, 'ready', active.lastMessageId)
       const result = parseResult(rawText, active.input)
       active.input.onSettled?.(result)
       active.resolve(result)
     } catch (error) {
-      const parsedError = asError(error)
-      active.input.onError?.(parsedError)
-      active.reject(parsedError)
+      this.rejectInvocation(active, asError(error))
     }
   }
 
@@ -240,31 +321,93 @@ export class ConversationSessionService {
     const active = state.active
     if (!active) return
     state.active = null
-    this.persist(state, 'failed', active.input.currentMessageId)
+    state.phase = 'failed'
     this.sessions.delete(state.key)
-    active.input.onError?.(error)
-    active.reject(error)
+    try {
+      this.persist(state, 'failed', active.lastMessageId)
+    } catch {
+      // The Runtime/setup error remains the primary invocation failure.
+    }
+    this.rejectInvocation(active, error)
   }
 
-  private async cancelSessions(predicate: (state: SessionState) => boolean): Promise<void> {
-    const matches = [...this.sessions.values()].filter((state) => state.active && predicate(state))
+  private cancelSessions(predicate: (state: SessionState) => boolean): ConversationCancellationResult {
+    const matches = [...this.sessions.values()].filter((state) => (state.active || state.cancellationRequested) && predicate(state))
+    const cancelledSessionKeys: string[] = []
     const failures: unknown[] = []
     for (const state of matches) {
-      await state.preparing
-      if (!state.active) continue
-      try {
-        if (state.session) state.adapter.cancel(state.session)
-      } catch (error) {
-        failures.push(error)
-        continue
-      }
-      const active = state.active
-      state.active = null
-      this.persist(state, 'stale', active.input.currentMessageId)
-      this.sessions.delete(state.key)
-      active.reject(new Error('Conversation invocation was cancelled.'))
+      const outcome = this.requestCancellation(state)
+      if (outcome.cancelled) cancelledSessionKeys.push(state.key)
+      if (outcome.failure) failures.push(outcome.failure)
     }
-    if (failures.length > 0) throw failures[0]
+    if (failures.length > 0) throw new ConversationCancellationBatchError(cancelledSessionKeys, failures[0])
+    return { cancelledSessionKeys }
+  }
+
+  private requestCancellation(state: SessionState): { cancelled: boolean; failure?: unknown } {
+    const active = state.active
+    const previousPhase = state.phase
+    state.cancellationRequested = true
+    state.phase = 'cancelling'
+
+    if (!state.session) {
+      const failure = active ? this.finishCancelledInvocation(state, active) : undefined
+      return { cancelled: true, failure }
+    }
+
+    try {
+      state.adapter.cancel(state.session)
+    } catch (error) {
+      state.cancellationRequested = false
+      state.phase = previousPhase
+      return { cancelled: false, failure: error }
+    }
+
+    const failure = active ? this.finishCancelledInvocation(state, active) : undefined
+    this.sessions.delete(state.key)
+    return { cancelled: true, failure }
+  }
+
+  private finishCancelledInvocation(state: SessionState, active: ActiveInvocation): unknown {
+    state.active = null
+    state.deferredInputs = []
+    let persistenceFailure: unknown
+    try {
+      this.persist(state, 'stale', active.lastMessageId)
+    } catch (error) {
+      persistenceFailure = error
+    }
+    active.reject(new ConversationInvocationCancelledError())
+    return persistenceFailure
+  }
+
+  private cancelPreparedSession(state: SessionState): void {
+    if (!state.session || !state.cancellationRequested) return
+    state.phase = 'cancelling'
+    try {
+      state.adapter.cancel(state.session)
+      this.sessions.delete(state.key)
+    } catch {
+      // Keep the intent and session so a later explicit cancellation can retry.
+    }
+  }
+
+  private flushDeferredInputs(state: SessionState): void {
+    if (!state.session || !state.active || state.phase !== 'active') return
+    const pending = state.deferredInputs
+    state.deferredInputs = []
+    for (const input of pending) {
+      state.adapter.sendInput(state.session, input.message, (event) => this.handleRuntimeEvent(state, event))
+    }
+  }
+
+  private rejectInvocation(active: ActiveInvocation, error: Error): void {
+    try {
+      active.input.onError?.(error)
+    } catch {
+      // Observer failures cannot replace the invocation's primary failure.
+    }
+    active.reject(error)
   }
 
   private persist(state: SessionState, status: ConversationSession['status'], lastMessageId: string | null): void {

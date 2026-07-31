@@ -146,6 +146,34 @@ describe('ConversationCoordinator', () => {
     ])
   })
 
+  it('delivers an active-session redispatch without replacing its tracked execution', async () => {
+    const fixture = await createFixture()
+    const build = fixture.createAgent('Build', 'build')
+    fixture.setIdle(build, '2026-07-25T08:00:00.000Z')
+    const first = fixture.postHuman('@Build 第一条消息。')
+
+    await fixture.coordinator.dispatch(fixture.channel.id, first)
+    const runtimeTaskId = fixture.runtime.starts[0]!.taskId
+    const second = fixture.postHuman('@Build 第二条消息。')
+    await fixture.coordinator.dispatch(fixture.channel.id, second)
+
+    expect(fixture.runtime.starts).toHaveLength(1)
+    expect(fixture.runtime.inputs).toEqual([expect.objectContaining({ input: '@Build 第二条消息。' })])
+    expect(fixture.coordinator.getTypingAgentIds(fixture.channel.id)).toEqual([build.id])
+    expect(fixture.repositories.getAgent(build.id)?.status).toBe('busy')
+    expect(fixture.channelMessages().filter((message) => message.senderType === 'agent')).toEqual([])
+
+    fixture.runtime.emit(runtimeTaskId, { kind: 'text', text: '两条消息已处理。' })
+    fixture.runtime.emit(runtimeTaskId, { kind: 'settled' })
+
+    expect(fixture.coordinator.getTypingAgentIds(fixture.channel.id)).toEqual([])
+    expect(fixture.channelMessages().filter((message) => message.senderType === 'agent')).toEqual([
+      expect.objectContaining({ body: '两条消息已处理。' }),
+    ])
+    expect(fixture.repositories.getConversationSession(`${fixture.channel.id}:timeline:${build.id}`))
+      .toMatchObject({ status: 'ready', lastMessageId: second.id })
+  })
+
   it('exposes a typing Agent only while it is preparing a channel reply', async () => {
     const fixture = await createFixture()
     const build = fixture.createAgent('Build', 'build')
@@ -225,6 +253,37 @@ describe('ConversationCoordinator', () => {
     expect(fixture.runtime.cancellations).toHaveLength(1)
     expect(fixture.coordinator.getTypingAgentIds(fixture.channel.id)).toEqual([])
     expect(fixture.repositories.getAgent(build.id)?.status).toBe('idle')
+  })
+
+  it('reconciles successful cancellations when another Agent cancellation fails', async () => {
+    const fixture = await createFixture()
+    const build = fixture.createAgent('Build', 'build')
+    const review = fixture.createAgent('Review', 'review')
+    fixture.setIdle(build, '2026-07-25T08:00:00.000Z')
+    fixture.setIdle(review, '2026-07-25T08:01:00.000Z')
+    await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('@Build 检查构建。'))
+    await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('@Review 检查界面。'))
+    const buildTaskId = fixture.runtime.starts[0]!.taskId
+    const reviewTaskId = fixture.runtime.starts[1]!.taskId
+    const cancel = fixture.runtime.cancel.bind(fixture.runtime)
+    fixture.runtime.cancel = (session) => {
+      if (session.taskId === reviewTaskId) throw new Error('review cancellation failed')
+      cancel(session)
+    }
+
+    await expect(fixture.coordinator.cancelChannel(fixture.channel.id))
+      .rejects.toThrow('review cancellation failed')
+
+    expect(fixture.runtime.cancellations.map((session) => session.taskId)).toEqual([buildTaskId])
+    expect(fixture.coordinator.getTypingAgentIds(fixture.channel.id)).toEqual([review.id])
+    expect(fixture.repositories.getAgent(build.id)?.status).toBe('idle')
+    expect(fixture.repositories.getAgent(review.id)?.status).toBe('busy')
+    expect(fixture.channelMessages().filter((message) => message.senderType === 'agent')).toEqual([])
+
+    fixture.runtime.cancel = cancel
+    await fixture.coordinator.cancelChannel(fixture.channel.id)
+    expect(fixture.coordinator.getTypingAgentIds(fixture.channel.id)).toEqual([])
+    expect(fixture.repositories.getAgent(review.id)?.status).toBe('idle')
   })
 
   it('keeps an Agent conversation and reply inside the triggering Thread', async () => {

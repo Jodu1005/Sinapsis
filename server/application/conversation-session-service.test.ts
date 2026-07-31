@@ -161,6 +161,130 @@ describe('ConversationSessionService', () => {
     await expect(invocationFailure).resolves.toMatchObject({ message: 'Conversation invocation was cancelled.' })
   })
 
+  it('returns cancellation intent without waiting for a pending Runtime start', async () => {
+    const fixture = await createFixture()
+    const startGate = deferred<void>()
+    fixture.runtime.autoSettle = false
+    fixture.runtime.startGate = startGate.promise
+    const invocation = fixture.service.invoke(fixture.invocation('slow start'))
+    const invocationFailure = invocation.catch((error: unknown) => error)
+    let cancellationSettled = false
+
+    const cancellation = fixture.service.cancelChannel(fixture.channelId).then(() => {
+      cancellationSettled = true
+    })
+    await nextTurn()
+    const settledBeforeStartCompleted = cancellationSettled
+    startGate.resolve()
+    await cancellation
+    await nextTurn()
+
+    expect(settledBeforeStartCompleted).toBe(true)
+    expect(fixture.runtime.cancellations).toHaveLength(1)
+    await expect(invocationFailure).resolves.toMatchObject({ message: 'Conversation invocation was cancelled.' })
+  })
+
+  it('cancels a resumed Session immediately without waiting for resume to finish', async () => {
+    const fixture = await createFixture()
+    const resumeGate = deferred<void>()
+    fixture.runtime.autoSettle = false
+    fixture.runtime.resumeGate = resumeGate.promise
+    fixture.repositories.upsertConversationSession({
+      key: `${fixture.channelId}:timeline:${fixture.agent.id}`,
+      channelId: fixture.channelId,
+      threadRootMessageId: null,
+      agentId: fixture.agent.id,
+      runtime: fixture.agent.runtime,
+      runtimeSessionId: 'resuming-session',
+      runtimeSessionFile: null,
+      status: 'ready',
+      lastMessageId: null,
+    })
+    const invocation = fixture.service.invoke(fixture.invocation('cancel while resuming'))
+    const invocationFailure = invocation.catch((error: unknown) => error)
+
+    await fixture.service.cancelAgentInChannel(fixture.channelId, fixture.agent.id)
+
+    expect(fixture.runtime.cancellations).toHaveLength(1)
+    expect(fixture.runtime.order).toEqual(['resume:resuming-session'])
+    resumeGate.resolve()
+    await nextTurn()
+    expect(fixture.runtime.order).not.toContain('send:cancel while resuming')
+    await expect(invocationFailure).resolves.toMatchObject({ message: 'Conversation invocation was cancelled.' })
+  })
+
+  it('rejects a settled invocation with the persistence failure even when its error observer throws', async () => {
+    const fixture = await createFixture()
+    const upsert = fixture.repositories.upsertConversationSession.bind(fixture.repositories)
+    vi.spyOn(fixture.repositories, 'upsertConversationSession').mockImplementation((input) => {
+      if (input.status === 'ready') throw new Error('ready persistence failed')
+      return upsert(input)
+    })
+    let outcome: unknown
+
+    void fixture.service.invoke({
+      ...fixture.invocation('settle with broken persistence'),
+      onError: () => { throw new Error('error observer failed') },
+    }).then(
+      (result) => { outcome = result },
+      (error: unknown) => { outcome = error },
+    )
+    await nextTurn()
+
+    expect(outcome).toMatchObject({ message: 'ready persistence failed' })
+  })
+
+  it('rejects with an onSettled failure even when onError also throws', async () => {
+    const fixture = await createFixture()
+
+    await expect(fixture.service.invoke({
+      ...fixture.invocation('settle with broken observers'),
+      onSettled: () => { throw new Error('settled observer failed') },
+      onError: () => { throw new Error('error observer failed') },
+    })).rejects.toThrow('settled observer failed')
+  })
+
+  it('preserves a Runtime failure when failed persistence and onError both throw', async () => {
+    const fixture = await createFixture()
+    fixture.runtime.errorOnStart = new Error('runtime primary failure')
+    const upsert = fixture.repositories.upsertConversationSession.bind(fixture.repositories)
+    vi.spyOn(fixture.repositories, 'upsertConversationSession').mockImplementation((input) => {
+      if (input.status === 'failed') throw new Error('failed persistence secondary')
+      return upsert(input)
+    })
+    let outcome: unknown
+
+    void fixture.service.invoke({
+      ...fixture.invocation('runtime failure'),
+      onError: () => { throw new Error('error observer secondary') },
+    }).then(
+      (result) => { outcome = result },
+      (error: unknown) => { outcome = error },
+    )
+    await nextTurn()
+
+    expect(outcome).toMatchObject({ message: 'runtime primary failure' })
+  })
+
+  it.each(['settled', 'error'] as const)('suppresses a synchronous Runtime %s event during cancellation bookkeeping', async (cancelEvent) => {
+    const fixture = await createFixture()
+    fixture.runtime.autoSettle = false
+    fixture.runtime.cancelEvent = cancelEvent
+    let settledCalls = 0
+    const invocation = fixture.service.invoke({
+      ...fixture.invocation('cancel race'),
+      onSettled: () => { settledCalls += 1 },
+    })
+    const invocationFailure = invocation.catch((error: unknown) => error)
+    await nextTurn()
+
+    await fixture.service.cancelAgentInChannel(fixture.channelId, fixture.agent.id)
+
+    expect(settledCalls).toBe(0)
+    await expect(invocationFailure).resolves.toMatchObject({ message: 'Conversation invocation was cancelled.' })
+    expect(fixture.repositories.getConversationSession(`${fixture.channelId}:timeline:${fixture.agent.id}`)?.status).toBe('stale')
+  })
+
   async function createFixture() {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-session-'))
     database = createSqliteDatabase(path.join(temporaryDirectory, 'sinapsis.sqlite'))
@@ -219,10 +343,16 @@ class RecordingRuntime implements RuntimeAdapter {
   resumeError: Error | undefined
   sendError: Error | undefined
   cancelError: Error | undefined
+  errorOnStart: Error | undefined
+  cancelEvent: 'settled' | 'error' | undefined
+  startGate: Promise<void> | undefined
+  resumeGate: Promise<void> | undefined
   sessionIdOnStart: string | undefined
   autoSettle = true
   onSessionEvent: (() => void) | undefined
   responseFor = (input: string) => `reply:${input}`
+  private sink: RuntimeEventSink | undefined
+  private taskId: string | undefined
 
   detect(): Promise<RuntimeAvailability> {
     return Promise.resolve({ executable: 'available', taskExecution: 'unverified' })
@@ -231,18 +361,26 @@ class RecordingRuntime implements RuntimeAdapter {
   async start(task: RuntimeTaskRequest, sink: RuntimeEventSink): Promise<RuntimeSession> {
     this.starts.push(task)
     this.order.push(`start:${task.initialMessage ?? ''}`)
+    this.sink = sink
+    this.taskId = task.taskId
     const session = runtimeSession(task, this.sessionIdOnStart ?? null)
+    if (this.startGate) await this.startGate
     if (this.sessionIdOnStart) {
       sink({ kind: 'session', taskId: task.taskId, sessionId: this.sessionIdOnStart, sessionFile: '/tmp/fresh-session.json' })
       this.onSessionEvent?.()
     }
-    if (this.autoSettle) queueMicrotask(() => this.settle(task.taskId, task.initialMessage ?? '', sink))
+    if (this.errorOnStart) {
+      queueMicrotask(() => sink({ kind: 'error', taskId: task.taskId, message: this.errorOnStart!.message }))
+    } else if (this.autoSettle) {
+      queueMicrotask(() => this.settle(task.taskId, task.initialMessage ?? '', sink))
+    }
     return session
   }
 
   async resume(session: RuntimeSession, _sink: RuntimeEventSink): Promise<void> {
     this.order.push(`resume:${session.sessionId ?? 'none'}`)
     this.resumedWorktreeExists.push(existsSync(session.worktreePath))
+    if (this.resumeGate) await this.resumeGate
     if (this.resumeError) throw this.resumeError
   }
 
@@ -253,6 +391,8 @@ class RecordingRuntime implements RuntimeAdapter {
   }
 
   cancel(session: RuntimeSession): void {
+    if (this.cancelEvent === 'settled') this.sink?.({ kind: 'settled', taskId: this.taskId! })
+    if (this.cancelEvent === 'error') this.sink?.({ kind: 'error', taskId: this.taskId!, message: 'synchronous cancel error event' })
     if (this.cancelError) throw this.cancelError
     this.cancellations.push(session)
   }
@@ -283,4 +423,14 @@ class RecordingPublisher implements DomainEventPublisher {
 
 async function nextTurn(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0))
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
 }
