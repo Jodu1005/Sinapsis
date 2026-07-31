@@ -1102,6 +1102,13 @@ export class SqliteRepositories implements WorkspaceRepositories {
   upsertConversationSession(input: UpsertConversationSessionInput): ConversationSession {
     return this.inTransaction(() => {
       const existing = this.getConversationSession(input.key)
+      if (existing && (
+        existing.channelId !== input.channelId
+        || (existing.threadRootMessageId ?? null) !== (input.threadRootMessageId ?? null)
+        || existing.agentId !== input.agentId
+      )) {
+        throw new Error(`Conversation session ${input.key} identity cannot change.`)
+      }
       const updatedAt = now()
       const session: ConversationSession = {
         id: existing?.id ?? randomUUID(),
@@ -1117,9 +1124,6 @@ export class SqliteRepositories implements WorkspaceRepositories {
           last_used_at, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(key) DO UPDATE SET
-          channel_id = excluded.channel_id,
-          thread_root_message_id = excluded.thread_root_message_id,
-          agent_id = excluded.agent_id,
           runtime = excluded.runtime,
           runtime_session_id = excluded.runtime_session_id,
           runtime_session_file = excluded.runtime_session_file,

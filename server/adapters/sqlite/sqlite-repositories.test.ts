@@ -302,7 +302,7 @@ describe('SQLite workspace repositories', () => {
       channelId: channel.id,
       threadRootMessageId: null,
       agentId: firstAgent.id,
-      runtime: 'pi',
+      runtime: 'claude-code',
       runtimeSessionId: 'session-2',
       runtimeSessionFile: '/tmp/session-2.jsonl',
       status: 'active',
@@ -310,7 +310,8 @@ describe('SQLite workspace repositories', () => {
     })
     expect(updatedSession).toMatchObject({
       id: session.id, createdAt: session.createdAt, runtimeSessionId: 'session-2',
-      runtimeSessionFile: '/tmp/session-2.jsonl', status: 'active', lastMessageId: timelineMessages[9]!.id,
+      runtime: 'claude-code', runtimeSessionFile: '/tmp/session-2.jsonl',
+      status: 'active', lastMessageId: timelineMessages[9]!.id,
     })
     expect(repositories.getConversationSession(session.key)).toEqual(updatedSession)
     expect(() => repositories.createConversationTurn({
@@ -329,6 +330,78 @@ describe('SQLite workspace repositories', () => {
       idempotencyKey: firstInvocation.idempotencyKey,
       sourceInvocationId: null,
     })).toThrow(/UNIQUE constraint failed/)
+  })
+
+  it('rejects a second conversation session key for the same timeline grain', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const agent = repositories.createAgent({
+      identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const message = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Timeline message.',
+    })
+    const sessionInput = {
+      channelId: channel.id,
+      threadRootMessageId: null,
+      agentId: agent.id,
+      runtime: 'pi' as const,
+      runtimeSessionId: 'session-1',
+      runtimeSessionFile: null,
+      status: 'ready' as const,
+      lastMessageId: message.id,
+    }
+
+    repositories.upsertConversationSession({ key: 'timeline-key-1', ...sessionInput })
+
+    expect(() => repositories.upsertConversationSession({ key: 'timeline-key-2', ...sessionInput }))
+      .toThrow(/UNIQUE constraint failed/)
+  })
+
+  it('rejects moving an existing conversation session key to another identity grain', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const otherChannel = repositories.createChannel({ name: 'research' })
+    const agent = repositories.createAgent({
+      identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const otherAgent = repositories.createAgent({
+      identity: 'Ada', mentionName: 'ada', runtime: 'claude-code', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'claude', args: [], model: '', env: {},
+    })
+    const message = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Timeline message.',
+    })
+    const threadRoot = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Thread root.',
+    })
+    const input = {
+      key: 'stable-session-key',
+      channelId: channel.id,
+      threadRootMessageId: null,
+      agentId: agent.id,
+      runtime: 'pi' as const,
+      runtimeSessionId: 'session-1',
+      runtimeSessionFile: null,
+      status: 'ready' as const,
+      lastMessageId: message.id,
+    }
+    repositories.upsertConversationSession(input)
+
+    for (const identityPatch of [
+      { channelId: otherChannel.id },
+      { threadRootMessageId: threadRoot.id },
+      { agentId: otherAgent.id },
+    ]) {
+      expect(() => repositories.upsertConversationSession({ ...input, ...identityPatch }))
+        .toThrow('Conversation session stable-session-key identity cannot change.')
+    }
+
+    expect(repositories.getConversationSession(input.key)).toMatchObject({
+      channelId: channel.id, threadRootMessageId: null, agentId: agent.id,
+    })
   })
 
   it('rolls back a turn, participant, and initial invocation as one unit', async () => {

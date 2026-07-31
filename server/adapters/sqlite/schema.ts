@@ -376,6 +376,8 @@ export function migrateSchema(database: DatabaseSync): void {
           ON agent_invocations(turn_id, sequence);
         CREATE INDEX agent_invocations_agent_status_idx
           ON agent_invocations(agent_id, status);
+        CREATE UNIQUE INDEX conversation_sessions_grain_unique_idx
+          ON conversation_sessions(channel_id, COALESCE(thread_root_message_id, ''), agent_id);
       `)
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(15, new Date().toISOString())
     }
