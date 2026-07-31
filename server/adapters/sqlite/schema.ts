@@ -382,6 +382,11 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(15, new Date().toISOString())
     }
 
+    database.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS conversation_sessions_grain_unique_idx
+        ON conversation_sessions(channel_id, COALESCE(thread_root_message_id, ''), agent_id);
+    `)
+
     database.exec('COMMIT')
   } catch (error) {
     database.exec('ROLLBACK')

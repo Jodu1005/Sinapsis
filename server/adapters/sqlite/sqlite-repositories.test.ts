@@ -806,6 +806,43 @@ describe('SQLite workspace repositories', () => {
       .toMatchObject({ version: 15 })
   })
 
+  it('restores the conversation session grain index for an already-migrated version 15 database', async () => {
+    const { repositories, databasePath } = await createRepositories()
+    const channel = createChannel(repositories)
+    const agent = repositories.createAgent({
+      identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const message = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Timeline message.',
+    })
+    const sessionInput = {
+      channelId: channel.id,
+      threadRootMessageId: null,
+      agentId: agent.id,
+      runtime: 'pi' as const,
+      runtimeSessionId: 'session-1',
+      runtimeSessionFile: null,
+      status: 'ready' as const,
+      lastMessageId: message.id,
+    }
+    repositories.upsertConversationSession({ key: 'timeline-key-1', ...sessionInput })
+    expect(database!.database.prepare('SELECT version FROM schema_migrations WHERE version = 15').get())
+      .toMatchObject({ version: 15 })
+
+    database!.database.exec('DROP INDEX conversation_sessions_grain_unique_idx')
+    database!.close()
+    database = undefined
+    database = createSqliteDatabase(databasePath)
+    const reopenedRepositories = new SqliteRepositories(database, new RecordingPublisher())
+
+    expect(database.database.prepare(`
+      SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'conversation_sessions_grain_unique_idx'
+    `).get()).toEqual({ name: 'conversation_sessions_grain_unique_idx' })
+    expect(() => reopenedRepositories.upsertConversationSession({ key: 'timeline-key-2', ...sessionInput }))
+      .toThrow(/UNIQUE constraint failed/)
+  })
+
   it('rolls back migration 14 when version 13 has normalized duplicate Agent mentions', async () => {
     const databasePath = await createDatabasePath()
     createVersion13Fixture(databasePath, { duplicateNormalizedMention: true })
