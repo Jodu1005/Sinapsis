@@ -16,7 +16,7 @@ export class FakeRuntimeAdapter implements RuntimeAdapter {
   }
 
   async start(task: RuntimeTaskRequest, sink: RuntimeEventSink): Promise<RuntimeSession> {
-    this.starts.push(task)
+    this.starts.push({ ...task, conversation: task.conversation ? { ...task.conversation } : undefined })
     this.sinks.set(task.taskId, sink)
     return {
       taskId: task.taskId,

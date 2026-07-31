@@ -1,4 +1,5 @@
 import type { RuntimeAvailability, RuntimeAvailabilityDetector, RuntimeKind, RuntimeProfile } from '../adapters/runtime/runtime-profile'
+import type { InvocationKind } from '../domain/conversation'
 
 export type RuntimeArtifactType = 'runtime-stdout' | 'runtime-jsonl' | 'runtime-stderr' | 'runtime-exit'
 
@@ -24,6 +25,12 @@ export interface RuntimeTaskRequest {
   initialMessage?: string
   worktreePath: string
   profile: RuntimeProfile
+  conversation?: {
+    turnId: string
+    invocationId: string
+    kind: InvocationKind
+    expectedOutput: 'participation' | 'public_response' | 'duplicate'
+  }
 }
 
 export interface RuntimeSession {
