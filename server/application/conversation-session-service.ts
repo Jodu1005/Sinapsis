@@ -100,6 +100,7 @@ export class ConversationSessionService {
   private readonly runtimes: Partial<Record<RuntimeKind, RuntimeAdapter>>
   private readonly conversationDirectory: string
   private readonly sessions = new Map<string, SessionState>()
+  private readonly retiringSessions = new Set<SessionState>()
 
   constructor(options: ConversationSessionServiceOptions) {
     this.repositories = options.repositories
@@ -153,7 +154,7 @@ export class ConversationSessionService {
     }
     state.preparing = this.prepareInvocation(state, input).catch((error: unknown) => {
       if (state!.cancellationRequested && !state!.active) {
-        this.sessions.delete(state!.key)
+        this.discardState(state!)
         return
       }
       this.fail(state!, asError(error))
@@ -252,6 +253,10 @@ export class ConversationSessionService {
       conversation: input.conversation,
     }, (event) => this.handleRuntimeEvent(state, event))
 
+    if (!this.isTrackedGeneration(state)) {
+      this.cancelUnownedSession(state.adapter, session)
+      return
+    }
     state.session = session
     state.runtimeSessionId = state.runtimeSessionId ?? session.sessionId
     state.runtimeSessionFile = state.runtimeSessionFile ?? session.sessionFile
@@ -322,7 +327,7 @@ export class ConversationSessionService {
     if (!active) return
     state.active = null
     state.phase = 'failed'
-    this.sessions.delete(state.key)
+    this.discardState(state)
     try {
       this.persist(state, 'failed', active.lastMessageId)
     } catch {
@@ -332,7 +337,8 @@ export class ConversationSessionService {
   }
 
   private cancelSessions(predicate: (state: SessionState) => boolean): ConversationCancellationResult {
-    const matches = [...this.sessions.values()].filter((state) => (state.active || state.cancellationRequested) && predicate(state))
+    const candidates = new Set([...this.sessions.values(), ...this.retiringSessions])
+    const matches = [...candidates].filter((state) => (state.active || state.cancellationRequested) && predicate(state))
     const cancelledSessionKeys: string[] = []
     const failures: unknown[] = []
     for (const state of matches) {
@@ -352,6 +358,7 @@ export class ConversationSessionService {
 
     if (!state.session) {
       const failure = active ? this.finishCancelledInvocation(state, active) : undefined
+      this.retireState(state)
       return { cancelled: true, failure }
     }
 
@@ -364,7 +371,7 @@ export class ConversationSessionService {
     }
 
     const failure = active ? this.finishCancelledInvocation(state, active) : undefined
-    this.sessions.delete(state.key)
+    this.discardState(state)
     return { cancelled: true, failure }
   }
 
@@ -386,9 +393,31 @@ export class ConversationSessionService {
     state.phase = 'cancelling'
     try {
       state.adapter.cancel(state.session)
-      this.sessions.delete(state.key)
+      this.discardState(state)
     } catch {
       // Keep the intent and session so a later explicit cancellation can retry.
+    }
+  }
+
+  private retireState(state: SessionState): void {
+    if (this.sessions.get(state.key) === state) this.sessions.delete(state.key)
+    this.retiringSessions.add(state)
+  }
+
+  private discardState(state: SessionState): void {
+    if (this.sessions.get(state.key) === state) this.sessions.delete(state.key)
+    this.retiringSessions.delete(state)
+  }
+
+  private isTrackedGeneration(state: SessionState): boolean {
+    return this.sessions.get(state.key) === state || this.retiringSessions.has(state)
+  }
+
+  private cancelUnownedSession(adapter: RuntimeAdapter, session: RuntimeSession): void {
+    try {
+      adapter.cancel(session)
+    } catch {
+      // The generation is already detached; its Runtime session must not regain ownership.
     }
   }
 

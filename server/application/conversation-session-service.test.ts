@@ -285,6 +285,56 @@ describe('ConversationSessionService', () => {
     expect(fixture.repositories.getConversationSession(`${fixture.channelId}:timeline:${fixture.agent.id}`)?.status).toBe('stale')
   })
 
+  it.each([
+    ['B then A', [1, 0]],
+    ['A then B', [0, 1]],
+  ] as const)('isolates a replacement cold start when cancelled generation A resolves %s', async (_order, resolutionOrder) => {
+    const fixture = await createFixture()
+    const runtime = new AdversarialStartRuntime()
+    const service = new ConversationSessionService({
+      repositories: fixture.repositories,
+      runtimes: { opencode: runtime },
+      conversationDirectory: fixture.conversationDirectory,
+    })
+    let aSettledCalls = 0
+    let bSettledCalls = 0
+    const invocationA = service.invoke({
+      ...fixture.invocation('invocation A'),
+      onSettled: () => { aSettledCalls += 1 },
+    })
+    const invocationAFailure = invocationA.catch((error: unknown) => error)
+
+    expect(runtime.starts).toHaveLength(1)
+    await service.cancelAgentInChannel(fixture.channelId, fixture.agent.id)
+    await expect(invocationAFailure).resolves.toMatchObject({ message: 'Conversation invocation was cancelled.' })
+
+    const invocationB = service.invoke({
+      ...fixture.invocation('invocation B'),
+      onSettled: () => { bSettledCalls += 1 },
+    })
+    expect(runtime.starts).toHaveLength(2)
+
+    for (const index of resolutionOrder) runtime.resolveStart(index, index === 0 ? 'session-a' : 'session-b')
+    await nextTurn()
+
+    runtime.emitText(0, 'text from A')
+    runtime.emitSettled(0)
+    runtime.emitSettled(0)
+    runtime.emitText(1, 'text from B')
+    runtime.emitSettled(1)
+    runtime.emitSettled(1)
+
+    await expect(invocationB).resolves.toEqual({ text: 'text from B', parsed: null })
+    expect(runtime.starts[0]?.taskId).not.toBe(runtime.starts[1]?.taskId)
+    expect(runtime.cancellations.map((session) => session.sessionId)).toEqual(['session-a'])
+    expect(aSettledCalls).toBe(0)
+    expect(bSettledCalls).toBe(1)
+    expect(fixture.repositories.getConversationSession(`${fixture.channelId}:timeline:${fixture.agent.id}`)).toMatchObject({
+      runtimeSessionId: 'session-b',
+      status: 'ready',
+    })
+  })
+
   async function createFixture() {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-session-'))
     database = createSqliteDatabase(path.join(temporaryDirectory, 'sinapsis.sqlite'))
@@ -304,10 +354,11 @@ describe('ConversationSessionService', () => {
       responsibilities: ['构建'], maxConcurrentTasks: 1, command: 'opencode', args: [], model: '', env: {},
     })
     const runtime = new RecordingRuntime()
+    const conversationDirectory = path.join(temporaryDirectory, 'conversations')
     const service = new ConversationSessionService({
       repositories,
       runtimes: { opencode: runtime },
-      conversationDirectory: path.join(temporaryDirectory, 'conversations'),
+      conversationDirectory,
     })
     return {
       repositories,
@@ -315,6 +366,7 @@ describe('ConversationSessionService', () => {
       agent,
       runtime,
       service,
+      conversationDirectory,
       invocation(initialMessage: string) {
         const currentMessage = repositories.createMessage({
           channelId: channel.id,
@@ -334,6 +386,55 @@ describe('ConversationSessionService', () => {
     }
   }
 })
+
+class AdversarialStartRuntime implements RuntimeAdapter {
+  readonly starts: RuntimeTaskRequest[] = []
+  readonly cancellations: RuntimeSession[] = []
+  private readonly pending: Array<{
+    task: RuntimeTaskRequest
+    sink: RuntimeEventSink
+    resolve(session: RuntimeSession): void
+  }> = []
+
+  detect(): Promise<RuntimeAvailability> {
+    return Promise.resolve({ executable: 'available', taskExecution: 'unverified' })
+  }
+
+  start(task: RuntimeTaskRequest, sink: RuntimeEventSink): Promise<RuntimeSession> {
+    this.starts.push(task)
+    return new Promise<RuntimeSession>((resolve) => {
+      this.pending.push({ task, sink, resolve })
+    })
+  }
+
+  resume(_session: RuntimeSession, _sink: RuntimeEventSink): Promise<void> {
+    return Promise.resolve()
+  }
+
+  sendInput(_session: RuntimeSession, _input: string, _sink: RuntimeEventSink): void {}
+
+  cancel(session: RuntimeSession): void {
+    this.cancellations.push(session)
+  }
+
+  resolveStart(index: number, sessionId: string): void {
+    const pending = this.pending[index]
+    if (!pending) throw new Error(`Runtime start ${index} does not exist.`)
+    pending.resolve(runtimeSession(pending.task, sessionId))
+  }
+
+  emitText(index: number, text: string): void {
+    const pending = this.pending[index]
+    if (!pending) throw new Error(`Runtime start ${index} does not exist.`)
+    pending.sink({ kind: 'text', taskId: pending.task.taskId, text })
+  }
+
+  emitSettled(index: number): void {
+    const pending = this.pending[index]
+    if (!pending) throw new Error(`Runtime start ${index} does not exist.`)
+    pending.sink({ kind: 'settled', taskId: pending.task.taskId })
+  }
+}
 
 class RecordingRuntime implements RuntimeAdapter {
   readonly starts: RuntimeTaskRequest[] = []
