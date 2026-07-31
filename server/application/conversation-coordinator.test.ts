@@ -259,6 +259,46 @@ describe('ConversationCoordinator', () => {
     expect(context.length).toBeLessThan(5_000)
   })
 
+  it('uses the complete reset-aware Timeline instead of a fixed eight-message window', async () => {
+    const fixture = await createFixture()
+    const build = fixture.createAgent('Build', 'build')
+    fixture.setIdle(build, '2026-07-25T08:00:00.000Z')
+    for (let index = 0; index < 12; index += 1) fixture.postHuman(`短历史消息-${index}`)
+    const current = fixture.postHuman('请综合全部历史。')
+
+    await fixture.coordinator.dispatch(fixture.channel.id, current)
+
+    expect(fixture.runtime.starts[0]!.description).toContain('近期公开消息：')
+    expect(fixture.runtime.starts[0]!.description).toContain('短历史消息-0')
+    expect(fixture.runtime.starts[0]!.description).toContain('短历史消息-11')
+  })
+
+  it('persists Runtime session events and leaves the session ready after settle', async () => {
+    const fixture = await createFixture()
+    const build = fixture.createAgent('Build', 'build')
+    fixture.setIdle(build, '2026-07-25T08:00:00.000Z')
+    const current = fixture.postHuman('请检查 Session。')
+
+    await fixture.coordinator.dispatch(fixture.channel.id, current)
+    const runtimeTaskId = fixture.runtime.starts[0]!.taskId
+    fixture.runtime.emit(runtimeTaskId, {
+      kind: 'session',
+      sessionId: 'runtime-session-1',
+      sessionFile: '/tmp/runtime-session-1.json',
+    })
+
+    const key = `${fixture.channel.id}:timeline:${build.id}`
+    expect(fixture.repositories.getConversationSession(key)).toMatchObject({
+      runtimeSessionId: 'runtime-session-1',
+      runtimeSessionFile: '/tmp/runtime-session-1.json',
+      status: 'active',
+    })
+
+    fixture.runtime.emit(runtimeTaskId, { kind: 'text', text: 'Session 正常。' })
+    fixture.runtime.emit(runtimeTaskId, { kind: 'settled' })
+    expect(fixture.repositories.getConversationSession(key)).toMatchObject({ status: 'ready', lastMessageId: current.id })
+  })
+
   it('persists one compact Agent reply on settle and excludes raw runtime artifacts from the channel', async () => {
     const fixture = await createFixture()
     const build = fixture.createAgent('Build', 'build')

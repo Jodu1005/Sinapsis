@@ -1,65 +1,64 @@
-import { randomUUID } from 'node:crypto'
-import { mkdir } from 'node:fs/promises'
-import path from 'node:path'
 import type { RuntimeKind } from '../adapters/runtime/runtime-profile'
 import type { Agent } from '../domain/agent'
 import type { Message } from '../domain/message'
 import { DomainError } from '../domain/task'
 import type { Channel } from '../domain/workspace'
 import type { WorkspaceRepositories } from '../ports/repositories'
-import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../ports/runtime'
+import type { RuntimeAdapter } from '../ports/runtime'
 import { ChannelMessageService } from './channel-message-service'
+import { ContextAssembler } from './context-assembler'
+import { ConversationSessionService, conversationSessionKey, type ConversationSessionResult } from './conversation-session-service'
 
 export interface ConversationCoordinatorOptions {
   repositories: WorkspaceRepositories
   runtimes: Partial<Record<RuntimeKind, RuntimeAdapter>>
   conversationDirectory: string
   messages?: ChannelMessageService
+  sessions?: ConversationSessionService
+  contextAssembler?: ContextAssembler
 }
 
 interface ConversationExecution {
   key: string
-  runtimeTaskId: string
   channelId: string
   threadRootMessageId: string | null
   agent: Agent
-  adapter: RuntimeAdapter
-  session: RuntimeSession | null
-  pendingText: string[]
   active: boolean
 }
+
+const conversationContextBudget = 4_000
 
 export class ConversationCoordinator {
   private readonly repositories: WorkspaceRepositories
   private readonly runtimes: Partial<Record<RuntimeKind, RuntimeAdapter>>
-  private readonly conversationDirectory: string
   private readonly messages: ChannelMessageService
+  private readonly sessions: ConversationSessionService
+  private readonly contextAssembler: ContextAssembler
   private readonly executions = new Map<string, ConversationExecution>()
 
   constructor(options: ConversationCoordinatorOptions) {
     this.repositories = options.repositories
     this.runtimes = options.runtimes
-    this.conversationDirectory = options.conversationDirectory
     this.messages = options.messages ?? new ChannelMessageService(options.repositories)
+    this.sessions = options.sessions ?? new ConversationSessionService({
+      repositories: options.repositories,
+      runtimes: options.runtimes,
+      conversationDirectory: options.conversationDirectory,
+    })
+    this.contextAssembler = options.contextAssembler ?? new ContextAssembler(options.repositories)
   }
 
   async dispatch(channelId: string, message: Message): Promise<void> {
     if (message.channelId !== channelId) throw new DomainError('Message does not belong to this channel.')
 
-    const snapshot = this.repositories.getBootstrap()
-    const channel = this.requireChannel(channelId)
+    this.requireChannel(channelId)
     const threadRootMessageId = message.threadRootMessageId ?? null
     const memberAgentIds = new Set(this.repositories.getChannelAgentIds(channelId))
     const agents = this.repositories.listAgents().filter((agent) => memberAgentIds.has(agent.id))
     const agent = this.selectAgent(agents, channelId, threadRootMessageId, message.body)
     if (!agent) return
 
-    const key = conversationKey(channelId, agent.id, threadRootMessageId)
-    const existing = this.executions.get(key)
-    if (existing?.session) {
-      this.sendToExistingSession(existing, message.body)
-      return
-    }
+    const key = conversationSessionKey(channelId, threadRootMessageId, agent.id)
 
     const adapter = this.runtimes[agent.runtime]
     if (!adapter) {
@@ -67,44 +66,28 @@ export class ConversationCoordinator {
       return
     }
 
-    const execution: ConversationExecution = {
-      key,
-      runtimeTaskId: `conversation-${randomUUID()}`,
-      channelId,
-      threadRootMessageId,
-      agent,
-      adapter,
-      session: null,
-      pendingText: [],
-      active: true,
-    }
+    const execution: ConversationExecution = { key, channelId, threadRootMessageId, agent, active: true }
     this.executions.set(key, execution)
     this.repositories.setAgentStatus(agent.id, 'busy', new Date())
-
-    try {
-      const conversationPath = path.join(this.conversationDirectory, channelId, agent.id)
-      await mkdir(conversationPath, { recursive: true })
-      execution.session = await adapter.start({
-        taskId: execution.runtimeTaskId,
-        mode: 'conversation',
-        title: `频道 #${channel.name} 对话`,
-        description: `${this.recentConversationContext(snapshot.recentMessages, channelId, message.id, threadRootMessageId)}\n\n当前 Agent 职责：${agent.responsibilities?.join('；') || '未设置（仅处理被直接提及的消息）'}。`,
-        acceptanceCriteria: '在频道中给出简洁、清晰的回复。',
-        initialMessage: message.body,
-        worktreePath: conversationPath,
-        profile: {
-          runtime: agent.runtime,
-          command: agent.command,
-          args: agent.args,
-          model: agent.model,
-          env: agent.env,
-          policy: 'task-worktree',
-        },
-      }, (event) => this.handleRuntimeEvent(execution, event))
-      if (!execution.active) adapter.cancel(execution.session)
-    } catch (error) {
+    const context = this.contextAssembler.assemble({
+      channelId,
+      threadRootMessageId,
+      currentMessageId: message.id,
+      tokenBudget: conversationContextBudget,
+    })
+    const invocation = this.sessions.invoke({
+      channelId,
+      threadRootMessageId,
+      currentMessageId: message.id,
+      agent,
+      context: this.contextAssembler.render(context),
+      initialMessage: message.body,
+      onSettled: (result) => this.settle(execution, result),
+      onError: (error) => this.fail(execution, error.message),
+    })
+    void invocation.catch((error: unknown) => {
       this.fail(execution, error instanceof Error ? error.message : 'Runtime 启动失败')
-    }
+    })
   }
 
   getTypingAgentIds(channelId: string): string[] {
@@ -114,95 +97,56 @@ export class ConversationCoordinator {
   }
 
   async cancelChannel(channelId: string): Promise<void> {
-    await this.cancelExecutions((execution) => execution.channelId === channelId)
+    await this.sessions.cancelChannel(channelId)
+    this.finishCancelledExecutions((execution) => execution.channelId === channelId)
   }
 
   async cancelAgentInChannel(channelId: string, agentId: string): Promise<void> {
-    await this.cancelExecutions((execution) => execution.channelId === channelId && execution.agent.id === agentId)
+    await this.sessions.cancelAgentInChannel(channelId, agentId)
+    this.finishCancelledExecutions((execution) => execution.channelId === channelId && execution.agent.id === agentId)
   }
 
-  private async cancelExecutions(matches: (execution: ConversationExecution) => boolean): Promise<void> {
+  private finishCancelledExecutions(matches: (execution: ConversationExecution) => boolean): void {
     const executions = [...this.executions.values()].filter((execution) => execution.active && matches(execution))
     const affectedAgentIds = new Set(executions.map((execution) => execution.agent.id))
-    const failures: unknown[] = []
     for (const execution of executions) {
-      execution.pendingText = []
-      try {
-        if (execution.session) execution.adapter.cancel(execution.session)
-        execution.active = false
-        this.executions.delete(execution.key)
-      } catch (error) {
-        failures.push(error)
-      }
+      execution.active = false
+      this.executions.delete(execution.key)
     }
-    for (const agentId of affectedAgentIds) {
-      const stillActive = [...this.executions.values()].some((execution) => execution.active && execution.agent.id === agentId)
-      this.repositories.setAgentStatus(agentId, stillActive ? 'busy' : 'idle', new Date())
-    }
-    if (failures.length > 0) throw failures[0]
+    for (const agentId of affectedAgentIds) this.refreshAgentStatus(agentId)
   }
 
-  private sendToExistingSession(execution: ConversationExecution, body: string): void {
-    execution.pendingText = []
-    execution.active = true
-    this.repositories.setAgentStatus(execution.agent.id, 'busy', new Date())
-    try {
-      execution.adapter.sendInput(execution.session!, body, (event) => this.handleRuntimeEvent(execution, event))
-    } catch (error) {
-      this.fail(execution, error instanceof Error ? error.message : 'Runtime 输入发送失败')
-    }
-  }
-
-  private handleRuntimeEvent(execution: ConversationExecution, event: RuntimeEvent): void {
-    if (!execution.active || event.taskId !== execution.runtimeTaskId) return
-    switch (event.kind) {
-      case 'text':
-        execution.pendingText.push(event.text)
-        return
-      case 'settled':
-        this.settle(execution)
-        return
-      case 'error':
-        this.fail(execution, event.message)
-        return
-      case 'artifact':
-      case 'tool_start':
-      case 'tool_end':
-      case 'queue':
-      case 'session':
-      case 'needs_input':
-        return
-    }
-  }
-
-  private settle(execution: ConversationExecution): void {
+  private settle(execution: ConversationExecution, result: ConversationSessionResult): void {
     if (!execution.active) return
-    const body = execution.pendingText.join('').trim()
-    execution.pendingText = []
     execution.active = false
-    this.repositories.setAgentStatus(execution.agent.id, 'idle', new Date())
+    this.executions.delete(execution.key)
+    this.refreshAgentStatus(execution.agent.id)
     this.messages.postAgent(
       execution.channelId,
       null,
       execution.agent.identity,
-      body || '我已处理这条消息，但没有生成可展示的回复。',
+      result.text || '我已处理这条消息，但没有生成可展示的回复。',
       execution.threadRootMessageId,
     )
   }
 
   private fail(execution: ConversationExecution, reason: string): void {
     if (!execution.active) return
-    execution.pendingText = []
     execution.active = false
     this.executions.delete(execution.key)
-    this.repositories.setAgentStatus(execution.agent.id, 'idle', new Date())
+    this.refreshAgentStatus(execution.agent.id)
     this.messages.postAgent(execution.channelId, null, execution.agent.identity, `抱歉，我暂时无法回复：${reason}`, execution.threadRootMessageId)
+  }
+
+  private refreshAgentStatus(agentId: string): void {
+    const stillActive = [...this.executions.values()].some((execution) => execution.active && execution.agent.id === agentId)
+    this.repositories.setAgentStatus(agentId, stillActive ? 'busy' : 'idle', new Date())
   }
 
   private selectAgent(agents: Agent[], channelId: string, threadRootMessageId: string | null, body: string): Agent | undefined {
     const mentioned = mentionedAgent(agents, body)
     if (mentioned) {
-      const existing = this.executions.get(conversationKey(channelId, mentioned.id, threadRootMessageId))
+      const existing = this.executions.get(conversationSessionKey(channelId, threadRootMessageId, mentioned.id))
       return mentioned.status === 'idle' || existing?.active ? mentioned : undefined
     }
     return agents
@@ -218,25 +162,6 @@ export class ConversationCoordinator {
     if (channel) return channel
     throw new DomainError(`Channel ${channelId} does not exist.`)
   }
-
-  private recentConversationContext(messages: Message[], channelId: string, currentMessageId: string, threadRootMessageId: string | null): string {
-    const history = messages
-      .filter((message) => message.channelId === channelId && message.id !== currentMessageId)
-      .filter((message) => !threadRootMessageId || message.id === threadRootMessageId || message.threadRootMessageId === threadRootMessageId)
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
-      .slice(-8)
-      .map((message) => `${message.authorName}: ${compactContextBody(message.body)}`)
-    return history.join('\n') || '（频道尚无此前消息。）'
-  }
-}
-
-function compactContextBody(body: string): string {
-  const normalized = body.replace(/\s+/g, ' ').trim()
-  return normalized.length > 600 ? `${normalized.slice(0, 600)}...` : normalized
-}
-
-function conversationKey(channelId: string, agentId: string, threadRootMessageId: string | null): string {
-  return `${channelId}:${threadRootMessageId ?? 'timeline'}:${agentId}`
 }
 
 function exactMention(body: string, mention: string): boolean {
