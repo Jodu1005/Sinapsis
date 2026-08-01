@@ -164,6 +164,39 @@ describe('ConversationSessionService', () => {
     await expect(invocationFailure).resolves.toMatchObject({ message: 'Conversation invocation was cancelled.' })
   })
 
+  it('keeps an in-memory invocation retryable when stale persistence fails', async () => {
+    const fixture = await createFixture()
+    fixture.runtime.autoSettle = false
+    const invocation = fixture.service.invoke({
+      ...fixture.invocation('retry stale persistence'),
+      conversation: conversation('turn-retry', 'invocation-retry'),
+    })
+    const invocationFailure = invocation.catch((error: unknown) => error)
+    await nextTurn()
+    const upsert = fixture.repositories.upsertConversationSession.bind(fixture.repositories)
+    let failStale = true
+    vi.spyOn(fixture.repositories, 'upsertConversationSession').mockImplementation((input) => {
+      if (input.status === 'stale' && failStale) throw new Error('stale persistence failed')
+      return upsert(input)
+    })
+
+    await expect(fixture.service.cancelInvocation('invocation-retry'))
+      .rejects.toThrow('stale persistence failed')
+    expect(fixture.repositories.getConversationSession(`${fixture.channelId}:timeline:${fixture.agent.id}`)?.status)
+      .toBe('active')
+
+    failStale = false
+    await expect(fixture.service.cancelInvocation('invocation-retry')).resolves.toEqual({
+      invocationId: 'invocation-retry',
+      cancelledSessionKeys: [`${fixture.channelId}:timeline:${fixture.agent.id}`],
+    })
+
+    expect(fixture.runtime.cancellations).toHaveLength(1)
+    expect(fixture.repositories.getConversationSession(`${fixture.channelId}:timeline:${fixture.agent.id}`)?.status)
+      .toBe('stale')
+    await expect(invocationFailure).resolves.toBeInstanceOf(ConversationInvocationCancelledError)
+  })
+
   it('cancels only the Runtime owned by one invocation when the same Agent has two active Turns', async () => {
     const fixture = await createFixture()
     fixture.runtime.autoSettle = false

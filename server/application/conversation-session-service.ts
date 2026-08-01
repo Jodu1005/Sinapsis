@@ -70,6 +70,7 @@ interface SessionState {
   active: ActiveInvocation | null
   phase: SessionPhase
   cancellationRequested: boolean
+  runtimeCancellationCompleted: boolean
   deferredInputs: DeferredRuntimeInput[]
   preparing: Promise<void>
 }
@@ -133,6 +134,7 @@ export class ConversationSessionService {
         active: null,
         phase: 'ready',
         cancellationRequested: false,
+        runtimeCancellationCompleted: false,
         deferredInputs: [],
         preparing: Promise.resolve(),
       }
@@ -147,6 +149,7 @@ export class ConversationSessionService {
     })
     state.phase = 'preparing'
     state.cancellationRequested = false
+    state.runtimeCancellationCompleted = false
     state.deferredInputs = []
     state.active = {
       input,
@@ -367,42 +370,49 @@ export class ConversationSessionService {
 
     if (!state.session) {
       const failure = active ? this.finishCancelledInvocation(state, active) : undefined
+      if (failure) return { cancelled: false, failure }
       this.retireState(state)
-      return { cancelled: true, failure }
+      return { cancelled: true }
     }
 
-    try {
-      state.adapter.cancel(state.session)
-    } catch (error) {
-      state.cancellationRequested = false
-      state.phase = previousPhase
-      return { cancelled: false, failure: error }
+    if (!state.runtimeCancellationCompleted) {
+      try {
+        state.adapter.cancel(state.session)
+        state.runtimeCancellationCompleted = true
+      } catch (error) {
+        state.cancellationRequested = false
+        state.phase = previousPhase
+        return { cancelled: false, failure: error }
+      }
     }
 
     const failure = active ? this.finishCancelledInvocation(state, active) : undefined
+    if (failure) return { cancelled: false, failure }
     this.discardState(state)
-    return { cancelled: true, failure }
+    return { cancelled: true }
   }
 
   private finishCancelledInvocation(state: SessionState, active: ActiveInvocation): unknown {
-    state.active = null
-    state.deferredInputs = []
-    let persistenceFailure: unknown
     try {
       this.persist(state, 'stale', active.lastMessageId)
     } catch (error) {
-      persistenceFailure = error
+      return error
     }
+    state.active = null
+    state.deferredInputs = []
     active.reject(new ConversationInvocationCancelledError(active.input.conversation?.invocationId ?? null))
-    return persistenceFailure
   }
 
   private cancelPreparedSession(state: SessionState): void {
     if (!state.session || !state.cancellationRequested) return
     state.phase = 'cancelling'
     try {
-      state.adapter.cancel(state.session)
-      this.discardState(state)
+      if (!state.runtimeCancellationCompleted) {
+        state.adapter.cancel(state.session)
+        state.runtimeCancellationCompleted = true
+      }
+      const failure = state.active ? this.finishCancelledInvocation(state, state.active) : undefined
+      if (!failure) this.discardState(state)
     } catch {
       // Keep the intent and session so a later explicit cancellation can retry.
     }

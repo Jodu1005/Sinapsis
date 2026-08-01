@@ -48,6 +48,11 @@ export interface ConversationTurnDetails {
   handoffs: ConversationHandoff[]
 }
 
+export interface ActiveConversationTurnProjection {
+  turn: ConversationTurn
+  invocations: AgentInvocation[]
+}
+
 export interface TaskClaim {
   task: Task
   lease: TaskLease
@@ -129,6 +134,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   createConversationTurn(input: CreateConversationTurnInput): ConversationTurn
   getConversationTurn(turnId: string): ConversationTurn | undefined
   getConversationTurnDetails(turnId: string): ConversationTurnDetails | undefined
+  listActiveConversationActivity(channelId?: string): ActiveConversationTurnProjection[]
   listActiveConversationTurns(channelId?: string): ConversationTurn[]
   updateConversationTurn(turnId: string, patch: ConversationTurnPatch): ConversationTurn
   createTurnParticipant(input: CreateTurnParticipantInput): TurnParticipant

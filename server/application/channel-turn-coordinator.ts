@@ -63,6 +63,7 @@ interface InvocationQueue {
   cancel(predicate: (invocation: QueuedInvocation<unknown>) => boolean): void
   cancelInvocation(invocationId: string): AgentInvocationCancellationResult
   snapshot(agentId: string): { running: boolean; queued: number }
+  snapshotInvocation(invocationId: string): { state: 'queued' | 'running' | 'not_found'; position: number | null }
 }
 
 export interface ChannelTurnCoordinatorOptions {
@@ -331,28 +332,53 @@ export class ChannelTurnCoordinator {
   }
 
   getActiveStates(channelId: string): TurnActivity[] {
-    return this.repositories.listActiveConversationTurns(channelId).flatMap((turn) => {
-      const execution = this.executions.get(turn.id)
-      if (execution && execution.activities.size > 0) return [...execution.activities.values()]
+    return this.composeActiveStates(this.repositories.listActiveConversationActivity(channelId))[channelId] ?? []
+  }
 
-      const invocations = this.repositories.listAgentInvocations(turn.id)
-        .filter((invocation) => invocation.status === 'queued' || invocation.status === 'running')
-      if (invocations.length > 0) {
-        return invocations.map((invocation) => ({
+  getActiveStatesByChannel(): Record<string, TurnActivity[]> {
+    return this.composeActiveStates(this.repositories.listActiveConversationActivity())
+  }
+
+  private composeActiveStates(
+    projections: ReturnType<WorkspaceRepositories['listActiveConversationActivity']>,
+  ): Record<string, TurnActivity[]> {
+    const byChannel: Record<string, TurnActivity[]> = {}
+    for (const { turn, invocations } of projections) {
+      const execution = this.executions.get(turn.id)
+      if (execution && execution.activities.size > 0) {
+        const activities = [...execution.activities.values()].map((activity) => {
+          if (!activity.agentId) return activity
+          for (const invocation of invocations.filter((candidate) => candidate.agentId === activity.agentId)) {
+            const snapshot = this.queue.snapshotInvocation(invocation.id)
+            if (snapshot.state === 'queued') {
+              return { ...activity, phase: 'queued' as const, queuePosition: snapshot.position }
+            }
+            if (snapshot.state === 'running') {
+              return { ...activity, phase: phaseForInvocation(invocation), queuePosition: null }
+            }
+          }
+          return { ...activity, queuePosition: null }
+        })
+        byChannel[turn.channelId] = [...(byChannel[turn.channelId] ?? []), ...activities]
+        continue
+      }
+
+      const activities = invocations.length > 0
+        ? invocations.map((invocation) => ({
           turnId: turn.id,
           agentId: invocation.agentId,
           phase: 'queued' as const,
           queuePosition: null,
         }))
-      }
-
-      return [{
-        turnId: turn.id,
-        agentId: null,
-        phase: phaseForTurnStatus(turn.status),
-        queuePosition: null,
-      }]
-    })
+        : [{
+            turnId: turn.id,
+            agentId: null,
+            phase: phaseForTurnStatus(turn.status),
+            queuePosition: null,
+          }]
+      byChannel[turn.channelId] = [...(byChannel[turn.channelId] ?? []), ...activities]
+    }
+    return byChannel
   }
 
   async cancelChannel(channelId: string): Promise<void> {
@@ -933,8 +959,7 @@ export class ChannelTurnCoordinator {
     onInvocationCreated?.(invocation.id)
     execution.invocationIds.add(invocation.id)
     this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
-    const snapshot = this.queue.snapshot(agent.id)
-    this.setActivity(execution, agent.id, 'queued', snapshot.queued + (snapshot.running ? 1 : 0) + 1)
+    this.setActivity(execution, agent.id, 'queued')
 
     try {
       const result = await this.queue.enqueue({
@@ -1094,7 +1119,8 @@ export class ChannelTurnCoordinator {
     status: Extract<ReturnType<WorkspaceRepositories['updateConversationHandoff']>['status'], 'completed' | 'failed'>,
     reason: string | null,
   ): void {
-    this.repositories.updateConversationHandoff(handoffId, { status, reason })
+    const handoff = this.repositories.updateConversationHandoff(handoffId, { status, reason })
+    this.publish('conversation.turn_updated', 'conversation_turn', handoff.turnId)
   }
 
   private failAcceptedHandoffs(turnId: string, reason: string): void {
@@ -1138,13 +1164,6 @@ export class ChannelTurnCoordinator {
   }
 
   private cancelPersistedInvocation(turn: ConversationTurn, invocation: AgentInvocation): void {
-    this.repositories.updateAgentInvocation(invocation.id, {
-      status: 'cancelled',
-      completedAt: this.now().toISOString(),
-      errorCode: 'cancelled',
-    })
-    this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
-
     const sessionKey = conversationSessionKey(turn.channelId, turn.threadRootMessageId, invocation.agentId)
     const session = this.repositories.getConversationSession(sessionKey)
     if (session && session.status !== 'stale') {
@@ -1160,6 +1179,13 @@ export class ChannelTurnCoordinator {
         lastMessageId: session.lastMessageId,
       })
     }
+
+    this.repositories.updateAgentInvocation(invocation.id, {
+      status: 'cancelled',
+      completedAt: this.now().toISOString(),
+      errorCode: 'cancelled',
+    })
+    this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
   }
 
   private cancelParticipants(turnId: string): void {
@@ -1270,6 +1296,12 @@ function phaseForTurnStatus(status: ConversationTurn['status']): TurnActivity['p
   if (status === 'judging') return 'judging'
   if (status === 'handoff') return 'handoff'
   return 'queued'
+}
+
+function phaseForInvocation(invocation: AgentInvocation): TurnActivity['phase'] {
+  if (invocation.kind === 'participation' || invocation.kind === 'duplicate_check') return 'judging'
+  if (invocation.kind === 'handoff_response') return 'handoff'
+  return 'preparing'
 }
 
 function isDuplicateDecision(value: ConversationSessionResult['parsed']): value is DuplicateDecision {

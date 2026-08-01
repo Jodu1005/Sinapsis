@@ -66,6 +66,36 @@ describe('AgentInvocationQueue', () => {
     expect(order).toEqual(['running', 'direct', 'handoff'])
   })
 
+  it('reports live positions by invocation after priority insertion and lane progress', async () => {
+    const queue = new AgentInvocationQueue()
+    const blocker = deferred<void>()
+    const directGate = deferred<void>()
+    const handoffGate = deferred<void>()
+    const running = queue.enqueue(invocation('running', 'agent-a', 'participation', 1, async () => blocker.promise))
+    const handoff = queue.enqueue(invocation('handoff', 'agent-a', 'automatic_handoff', 2, async () => handoffGate.promise))
+    const direct = queue.enqueue(invocation('direct', 'agent-a', 'human_direct', 3, async () => directGate.promise))
+
+    expect(queue.snapshotInvocation('running')).toEqual({ state: 'running', position: 1 })
+    expect(queue.snapshotInvocation('direct')).toEqual({ state: 'queued', position: 2 })
+    expect(queue.snapshotInvocation('handoff')).toEqual({ state: 'queued', position: 3 })
+
+    blocker.resolve()
+    await running
+    await nextTurn()
+    expect(queue.snapshotInvocation('direct')).toEqual({ state: 'running', position: 1 })
+    expect(queue.snapshotInvocation('handoff')).toEqual({ state: 'queued', position: 2 })
+
+    directGate.resolve()
+    await direct
+    await nextTurn()
+    expect(queue.snapshotInvocation('handoff')).toEqual({ state: 'running', position: 1 })
+
+    handoffGate.resolve()
+    await handoff
+    await nextTurn()
+    expect(queue.snapshotInvocation('handoff')).toEqual({ state: 'not_found', position: null })
+  })
+
   it('keeps a new human ordinary call ahead of an unstarted automatic handoff', async () => {
     const queue = new AgentInvocationQueue()
     const blocker = deferred<void>()

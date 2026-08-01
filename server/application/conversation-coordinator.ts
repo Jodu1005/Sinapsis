@@ -51,6 +51,10 @@ export class ConversationCoordinator {
     return this.turnCoordinator.getActiveStates(channelId)
   }
 
+  getActiveStatesByChannel(): Record<string, TurnActivity[]> {
+    return this.turnCoordinator.getActiveStatesByChannel()
+  }
+
   cancel(turnId: string) {
     return this.turnCoordinator.cancel(turnId)
   }

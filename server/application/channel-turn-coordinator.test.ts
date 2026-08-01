@@ -725,6 +725,52 @@ describe('ChannelTurnCoordinator', () => {
     ]))
   })
 
+  it.each([
+    ['completed', false],
+    ['failed', true],
+  ] as const)('publishes a Turn update after an accepted Handoff becomes %s', async (expectedStatus, targetFails) => {
+    const observed: Array<{ type: string; entityId: string; handoffStatuses: string[] }> = []
+    const fixture = await createFixture({
+      onCoordinatorEvent: (event, repositories) => {
+        if (!event.type.startsWith('conversation.')) return
+        const turn = event.entityType === 'conversation_turn'
+          ? repositories.getConversationTurn(event.entityId)
+          : undefined
+        observed.push({
+          type: event.type,
+          entityId: event.entityId,
+          handoffStatuses: turn
+            ? repositories.listConversationHandoffs(turn.id).map((handoff) => handoff.status)
+            : [],
+        })
+      },
+    })
+    const source = fixture.createAgent('Source', ['handoff event topic'])
+    const target = fixture.createAgent('Target', ['other topic'])
+    fixture.sessions.handle = async (input) => {
+      if (input.agent.id === source.id) {
+        return publicReply('source reply', [{ agentId: target.id, question: 'Please continue.' }])
+      }
+      if (targetFails) throw new Error('target failed')
+      return publicReply('target reply')
+    }
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('@Source handoff event topic'))
+    const handoff = fixture.repositories.listConversationHandoffs(turn.id)[0]!
+    const createdIndex = observed.findIndex((entry) => (
+      entry.type === 'conversation.handoff_created' && entry.entityId === handoff.id
+    ))
+    const terminalUpdateIndex = observed.findIndex((entry, index) => (
+      index > createdIndex
+      && entry.type === 'conversation.turn_updated'
+      && entry.entityId === turn.id
+      && entry.handoffStatuses.includes(expectedStatus)
+    ))
+
+    expect(createdIndex).toBeGreaterThanOrEqual(0)
+    expect(terminalUpdateIndex).toBeGreaterThan(createdIndex)
+  })
+
   it('persists a partial Turn and the system reason when policy fails after a public reply', async () => {
     const fixture = await createFixture({
       handoffPolicy: {
@@ -966,6 +1012,70 @@ describe('ChannelTurnCoordinator', () => {
     expect(fixture.repositories.listTurnParticipants(turn.id)[0]).toMatchObject({ status: 'cancelled' })
   })
 
+  it('reports live queue positions after priority insertion and lane progress', async () => {
+    const fixture = await createFixture({ realQueue: true })
+    const source = fixture.createAgent('Source', ['unrelated'])
+    const target = fixture.createAgent('Target', ['unrelated'])
+    const blockerGate = deferred<ConversationSessionResult>()
+    const directGate = deferred<ConversationSessionResult>()
+    const handoffGate = deferred<ConversationSessionResult>()
+    let blockerTurnId = ''
+    let directTurnId = ''
+    fixture.sessions.handle = async (input) => {
+      if (input.agent.id === source.id) {
+        return publicReply('source reply', [{ agentId: target.id, question: 'Please follow up.' }])
+      }
+      if (input.conversation?.turnId === blockerTurnId) return blockerGate.promise
+      if (input.conversation?.turnId === directTurnId) return directGate.promise
+      if (input.conversation?.kind === 'handoff_response') return handoffGate.promise
+      throw new Error(`Unexpected invocation ${input.conversation?.turnId}`)
+    }
+
+    const blocker = fixture.coordinator.start(fixture.postHuman('@Target occupy the lane'))
+    blockerTurnId = blocker.turn.id
+    await waitFor(() => fixture.sessions.calls.some((call) => call.conversation?.turnId === blockerTurnId))
+
+    const handoff = fixture.coordinator.start(fixture.postHuman('@Source create a handoff'))
+    await waitFor(() => fixture.repositories.listAgentInvocations(handoff.turn.id)
+      .some((invocation) => invocation.kind === 'handoff_response' && invocation.status === 'queued'))
+
+    const direct = fixture.coordinator.start(fixture.postHuman('@Target urgent direct'))
+    directTurnId = direct.turn.id
+    await waitFor(() => fixture.repositories.listAgentInvocations(directTurnId)
+      .some((invocation) => invocation.kind === 'response' && invocation.status === 'queued'))
+
+    let activities = fixture.coordinator.getActiveStates(fixture.channel.id)
+    expect(activities.find((activity) => activity.turnId === directTurnId)).toMatchObject({
+      phase: 'queued',
+      queuePosition: 2,
+    })
+    expect(activities.find((activity) => activity.turnId === handoff.turn.id && activity.agentId === target.id)).toMatchObject({
+      phase: 'queued',
+      queuePosition: 3,
+    })
+
+    blockerGate.resolve(publicReply('blocker done'))
+    await blocker.completion
+    await waitFor(() => fixture.repositories.listAgentInvocations(directTurnId)
+      .some((invocation) => invocation.status === 'running'))
+    activities = fixture.coordinator.getActiveStates(fixture.channel.id)
+    expect(activities.find((activity) => activity.turnId === directTurnId)).toMatchObject({
+      phase: 'preparing',
+      queuePosition: null,
+    })
+    expect(activities.find((activity) => activity.turnId === handoff.turn.id && activity.agentId === target.id)).toMatchObject({
+      phase: 'queued',
+      queuePosition: 2,
+    })
+
+    directGate.resolve(publicReply('direct done'))
+    await direct.completion
+    await waitFor(() => fixture.repositories.listAgentInvocations(handoff.turn.id)
+      .some((invocation) => invocation.kind === 'handoff_response' && invocation.status === 'running'))
+    handoffGate.resolve(publicReply('handoff done'))
+    await handoff.completion
+  })
+
   it('cancels persisted active Turns during channel cancellation after a restart', async () => {
     const fixture = await createFixture()
     const agent = fixture.createAgent('Persisted', ['restart'])
@@ -1020,6 +1130,70 @@ describe('ChannelTurnCoordinator', () => {
       runtimeSessionId: 'persisted-runtime-session',
       status: 'stale',
     })
+  })
+
+  it('keeps a persisted Invocation retryable when stale persistence fails', async () => {
+    const fixture = await createFixture()
+    const agent = fixture.createAgent('Retryable', ['restart'])
+    const message = fixture.postHuman('@Retryable restart')
+    const turn = fixture.repositories.createConversationTurn({
+      channelId: fixture.channel.id,
+      triggerMessageId: message.id,
+      threadRootMessageId: null,
+      mode: 'direct',
+      maxRounds: 3,
+    })
+    fixture.repositories.createTurnParticipant({
+      turnId: turn.id,
+      agentId: agent.id,
+      source: 'direct',
+      rank: 1,
+      matcherScore: null,
+      decision: 'speak',
+      status: 'selected',
+    })
+    const invocation = fixture.repositories.createAgentInvocation({
+      turnId: turn.id,
+      agentId: agent.id,
+      kind: 'response',
+      priority: 'human_direct',
+      round: 1,
+      idempotencyKey: `${turn.id}:retryable`,
+      sourceInvocationId: null,
+      status: 'running',
+      startedAt: '2026-07-31T08:00:00.000Z',
+    })
+    const sessionKey = `${fixture.channel.id}:timeline:${agent.id}`
+    fixture.repositories.upsertConversationSession({
+      key: sessionKey,
+      channelId: fixture.channel.id,
+      threadRootMessageId: null,
+      agentId: agent.id,
+      runtime: agent.runtime,
+      runtimeSessionId: 'retryable-runtime-session',
+      runtimeSessionFile: null,
+      status: 'active',
+      lastMessageId: message.id,
+    })
+    const upsert = fixture.repositories.upsertConversationSession.bind(fixture.repositories)
+    let failStale = true
+    vi.spyOn(fixture.repositories, 'upsertConversationSession').mockImplementation((input) => {
+      if (input.status === 'stale' && failStale) throw new Error('stale persistence failed')
+      return upsert(input)
+    })
+
+    await expect(fixture.coordinator.cancel(turn.id)).rejects.toThrow('stale persistence failed')
+    expect(fixture.repositories.getConversationTurn(turn.id)?.status).not.toBe('cancelled')
+    expect(fixture.repositories.listAgentInvocations(turn.id)).toEqual([
+      expect.objectContaining({ id: invocation.id, status: 'running' }),
+    ])
+
+    failStale = false
+    await expect(fixture.coordinator.cancel(turn.id)).resolves.toMatchObject({ status: 'cancelled' })
+    expect(fixture.repositories.getConversationSession(sessionKey)?.status).toBe('stale')
+    expect(fixture.repositories.listAgentInvocations(turn.id)).toEqual([
+      expect.objectContaining({ id: invocation.id, status: 'cancelled' }),
+    ])
   })
 
   it('cancels only the removed Agent persisted Turn while preserving other restart work', async () => {
@@ -1144,6 +1318,7 @@ describe('ChannelTurnCoordinator', () => {
         cancel: () => undefined,
         cancelInvocation: (invocationId) => ({ invocationId, state: 'not_found' as const }),
         snapshot: (agentId) => ({ running: queueAvailability.get(agentId) === false, queued: 0 }),
+        snapshotInvocation: () => ({ state: 'not_found' as const, position: null }),
       } }),
     })
     const createAgent = (identity: string, responsibilities: string[]): Agent => {

@@ -44,6 +44,7 @@ import type {
 import type { DomainEventPublisher } from '../../ports/domain-event-publisher'
 import type {
   BootstrapSnapshot,
+  ActiveConversationTurnProjection,
   ExpiredLease,
   LeaseRecovery,
   TaskClaim,
@@ -233,6 +234,21 @@ interface AgentInvocationRow {
   started_at: string | null
   completed_at: string | null
   error_code: string | null
+}
+
+interface ActiveConversationTurnRow extends ConversationTurnRow {
+  invocation_id: string | null
+  invocation_agent_id: string | null
+  invocation_kind: AgentInvocation['kind'] | null
+  invocation_priority: AgentInvocation['priority'] | null
+  invocation_round: number | null
+  invocation_status: AgentInvocation['status'] | null
+  invocation_idempotency_key: string | null
+  invocation_source_id: string | null
+  invocation_queued_at: string | null
+  invocation_started_at: string | null
+  invocation_completed_at: string | null
+  invocation_error_code: string | null
 }
 
 interface ConversationHandoffRow {
@@ -977,6 +993,59 @@ export class SqliteRepositories implements WorkspaceRepositories {
       invocations: this.listAgentInvocations(turnId),
       handoffs: this.listConversationHandoffs(turnId),
     }
+  }
+
+  listActiveConversationActivity(channelId?: string): ActiveConversationTurnProjection[] {
+    const terminalStatuses = "'completed', 'partial', 'cancelled', 'failed'"
+    const channelFilter = channelId === undefined ? '' : 'AND turns.channel_id = ?'
+    const rows = this.sqlite.database.prepare(`
+      SELECT
+        turns.*,
+        invocations.id AS invocation_id,
+        invocations.agent_id AS invocation_agent_id,
+        invocations.kind AS invocation_kind,
+        invocations.priority AS invocation_priority,
+        invocations.round AS invocation_round,
+        invocations.status AS invocation_status,
+        invocations.idempotency_key AS invocation_idempotency_key,
+        invocations.source_invocation_id AS invocation_source_id,
+        invocations.queued_at AS invocation_queued_at,
+        invocations.started_at AS invocation_started_at,
+        invocations.completed_at AS invocation_completed_at,
+        invocations.error_code AS invocation_error_code
+      FROM conversation_turns AS turns
+      LEFT JOIN agent_invocations AS invocations
+        ON invocations.turn_id = turns.id
+        AND invocations.status IN ('queued', 'running')
+      WHERE turns.status NOT IN (${terminalStatuses})
+        ${channelFilter}
+      ORDER BY turns.created_at, turns.id, invocations.queued_at, invocations.id
+    `).all(...(channelId === undefined ? [] : [channelId])) as unknown as ActiveConversationTurnRow[]
+
+    const projections = new Map<string, ActiveConversationTurnProjection>()
+    for (const row of rows) {
+      const projection = projections.get(row.id) ?? { turn: mapConversationTurn(row), invocations: [] }
+      if (row.invocation_id) {
+        projection.invocations.push(mapAgentInvocation({
+          id: row.invocation_id,
+          turn_id: row.id,
+          agent_id: row.invocation_agent_id!,
+          kind: row.invocation_kind!,
+          priority: row.invocation_priority!,
+          round: row.invocation_round!,
+          status: row.invocation_status!,
+          idempotency_key: row.invocation_idempotency_key!,
+          source_invocation_id: row.invocation_source_id,
+          sequence: 0,
+          queued_at: row.invocation_queued_at!,
+          started_at: row.invocation_started_at,
+          completed_at: row.invocation_completed_at,
+          error_code: row.invocation_error_code,
+        }))
+      }
+      projections.set(row.id, projection)
+    }
+    return [...projections.values()]
   }
 
   listActiveConversationTurns(channelId?: string): ConversationTurn[] {

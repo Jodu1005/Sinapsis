@@ -27,6 +27,11 @@ export interface AgentInvocationCancellationResult {
   state: AgentInvocationCancellationState
 }
 
+export interface AgentInvocationSnapshot {
+  state: AgentInvocationCancellationState
+  position: number | null
+}
+
 export class AgentInvocationQueueCancelledError extends Error {
   constructor(readonly invocationId: string) {
     super(`Invocation ${invocationId} was cancelled.`)
@@ -95,6 +100,21 @@ export class AgentInvocationQueue {
   snapshot(agentId: string): { running: boolean; queued: number } {
     const lane = this.lanes.get(agentId)
     return { running: lane?.running !== null && lane?.running !== undefined, queued: lane?.queued.length ?? 0 }
+  }
+
+  snapshotInvocation(invocationId: string): AgentInvocationSnapshot {
+    for (const lane of this.lanes.values()) {
+      if (lane.running?.invocation.id === invocationId) return { state: 'running', position: 1 }
+      const queued = [...lane.queued].sort(compareEntries)
+      const index = queued.findIndex((entry) => entry.invocation.id === invocationId)
+      if (index >= 0) {
+        return {
+          state: 'queued',
+          position: index + (lane.running ? 2 : 1),
+        }
+      }
+    }
+    return { state: 'not_found', position: null }
   }
 
   private drain(agentId: string, lane: AgentLane): void {

@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app'
 import { startHttpTestServer } from './test/http-test-server'
 import type { WorkspaceRepositories } from './ports/repositories'
 import { ConversationCoordinator } from './application/conversation-coordinator'
 import type { ChannelTurnCoordinator } from './application/channel-turn-coordinator'
 import type { ConversationTurn } from './domain/conversation'
+import type { DomainEvent } from './domain/events'
 import type { TaskExecutionCoordinator } from './application/task-execution-coordinator'
 
 describe('local service API', () => {
@@ -450,7 +451,7 @@ describe('local service API', () => {
     const { channel, agent, message, turn, invocation } = createPersistedTurn(repositories)
     const target = createTestAgent(repositories, 'Target', 'target')
     repositories.addChannelAgent(channel.id, target.id, new Date())
-    repositories.createConversationHandoff({
+    const handoff = repositories.createConversationHandoff({
       turnId: turn.id,
       sourceInvocationId: invocation.id,
       fromAgentId: agent.id,
@@ -459,6 +460,20 @@ describe('local service API', () => {
       question: '请补充测试。',
       round: 2,
       status: 'accepted',
+    })
+    const privateFailure = 'provider failed: API_TOKEN=secret /Users/private/runtime.log prompt=do-not-share'
+    repositories.updateAgentInvocation(invocation.id, {
+      status: 'failed',
+      completedAt: '2026-07-31T08:02:00.000Z',
+      errorCode: privateFailure,
+    })
+    repositories.updateTurnParticipant(turn.id, agent.id, {
+      status: 'failed',
+      reason: `response_failed:${privateFailure}`,
+    })
+    repositories.updateConversationHandoff(handoff.id, {
+      status: 'failed',
+      reason: `response_failed:${privateFailure}`,
     })
     const server = await startHttpTestServer(app)
     closeServer = server.close
@@ -471,10 +486,22 @@ describe('local service API', () => {
     expect(detail).toEqual({
       turn: expect.objectContaining({ id: turn.id, triggerMessageId: message.id }),
       participants: [expect.objectContaining({ agentId: agent.id, proposedAngle: '从公开信息回答' })],
-      invocations: [expect.objectContaining({ id: invocation.id, agentId: agent.id })],
-      handoffs: [expect.objectContaining({ fromAgentId: agent.id, toAgentId: target.id })],
+      invocations: [expect.objectContaining({
+        id: invocation.id,
+        agentId: agent.id,
+        status: 'failed',
+        errorCategory: 'runtime_failure',
+      })],
+      handoffs: [expect.objectContaining({
+        fromAgentId: agent.id,
+        toAgentId: target.id,
+        reason: 'response_failed',
+      })],
     })
-    expect(raw).not.toMatch(/runtimeRawLog|privatePrompt|environment|API_TOKEN|secret/i)
+    expect((detail.invocations as Array<Record<string, unknown>>)[0]).not.toHaveProperty('errorCode')
+    expect((detail.invocations as Array<Record<string, unknown>>)[0]).not.toHaveProperty('idempotencyKey')
+    expect((detail.participants as Array<Record<string, unknown>>)[0]).toMatchObject({ reason: 'response_failed' })
+    expect(raw).not.toMatch(/runtimeRawLog|privatePrompt|environment|API_TOKEN|secret|Users\/private|do-not-share/i)
   })
 
   it('does not expose a Turn through a different Channel', async () => {
@@ -512,6 +539,54 @@ describe('local service API', () => {
     ])
   })
 
+  it('streams persisted Coordinator cancellation events through the real HTTP SSE endpoint', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const { channel, turn, invocation, agent } = createPersistedTurn(repositories)
+    const participant = repositories.listTurnParticipants(turn.id)[0]!
+    const target = createTestAgent(repositories, 'SSE Target', 'sse-target')
+    repositories.addChannelAgent(channel.id, target.id, new Date())
+    const handoff = repositories.createConversationHandoff({
+      turnId: turn.id,
+      sourceInvocationId: invocation.id,
+      fromAgentId: agent.id,
+      requestedTargetAgentId: target.id,
+      toAgentId: target.id,
+      question: 'private prompt must stay persisted only',
+      round: 2,
+      status: 'accepted',
+    })
+    repositories.updateAgentInvocation(invocation.id, {
+      errorCode: 'API_TOKEN=secret /Users/private/runtime.log prompt=do-not-share',
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+    const stream = await fetch(`${server.baseUrl}/events`)
+    const reader = stream.body!.getReader()
+    const eventsPromise = readSseEventsUntil(reader, (event) => (
+      event.type === 'conversation.turn_completed' && event.entityId === turn.id
+    ))
+
+    const cancelResponse = await fetch(
+      `${server.baseUrl}/api/channels/${channel.id}/turns/${turn.id}/cancel`,
+      { method: 'POST' },
+    )
+    const events = await eventsPromise
+    await reader.cancel()
+
+    expect(cancelResponse.status).toBe(200)
+    expect(events.map(({ type, entityType, entityId }) => ({ type, entityType, entityId }))).toEqual([
+      { type: 'conversation.invocation_updated', entityType: 'agent_invocation', entityId: invocation.id },
+      { type: 'conversation.participant_updated', entityType: 'turn_participant', entityId: participant.id },
+      { type: 'conversation.turn_updated', entityType: 'conversation_turn', entityId: turn.id },
+      { type: 'conversation.turn_completed', entityType: 'conversation_turn', entityId: turn.id },
+    ])
+    expect(repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({ id: handoff.id, status: 'failed', reason: 'turn_cancelled' }),
+    ])
+    expect(JSON.stringify(events)).not.toMatch(/API_TOKEN|secret|Users\/private|prompt|do-not-share/i)
+  })
+
   it('reports persisted running Invocations as queued after restart in bootstrap activity', async () => {
     const app = createApp()
     const repositories = app.locals.repositories as WorkspaceRepositories
@@ -520,6 +595,39 @@ describe('local service API', () => {
     repositories.updateAgentInvocation(invocation.id, {
       status: 'running',
       startedAt: '2026-07-31T08:01:00.000Z',
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/bootstrap`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      activeTurnsByChannel: {
+        [channel.id]: [{
+          turnId: turn.id,
+          agentId: agent.id,
+          phase: 'queued',
+          queuePosition: null,
+        }],
+      },
+    })
+  })
+
+  it('builds Bootstrap activity from one batch projection instead of per-Channel Turn queries', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const { channel, turn, invocation, agent } = createPersistedTurn(repositories)
+    repositories.updateConversationTurn(turn.id, { status: 'responding', currentRound: 1 })
+    repositories.updateAgentInvocation(invocation.id, {
+      status: 'running',
+      startedAt: '2026-07-31T08:01:00.000Z',
+    })
+    vi.spyOn(repositories, 'listActiveConversationTurns').mockImplementation(() => {
+      throw new Error('per-channel active Turn query must not run')
+    })
+    vi.spyOn(repositories, 'listAgentInvocations').mockImplementation(() => {
+      throw new Error('per-Turn Invocation query must not run')
     })
     const server = await startHttpTestServer(app)
     closeServer = server.close
@@ -993,5 +1101,28 @@ function conversationTurn(overrides: Partial<ConversationTurn> = {}): Conversati
     createdAt: '2026-07-31T08:00:00.000Z', updatedAt: '2026-07-31T08:00:00.000Z',
     completedAt: '2026-07-31T08:00:01.000Z',
     ...overrides,
+  }
+}
+
+async function readSseEventsUntil(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  done: (event: DomainEvent) => boolean,
+): Promise<DomainEvent[]> {
+  const decoder = new TextDecoder()
+  const events: DomainEvent[] = []
+  let buffer = ''
+  while (true) {
+    const chunk = await reader.read()
+    if (chunk.done) throw new Error('SSE stream closed before the expected event.')
+    buffer += decoder.decode(chunk.value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) {
+      const data = frame.split('\n').find((line) => line.startsWith('data: '))
+      if (!data) continue
+      const event = JSON.parse(data.slice('data: '.length)) as DomainEvent
+      events.push(event)
+      if (done(event)) return events
+    }
   }
 }

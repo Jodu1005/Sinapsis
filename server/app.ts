@@ -23,10 +23,85 @@ import { TaskScheduler } from './application/task-scheduler'
 import { TaskService } from './application/task-service'
 import { NotFoundError, ValidationError, WorkspaceService, type WorkspaceCatalog, type WorkspaceMutationCatalog } from './application/workspace-service'
 import { getServiceConfig } from './config'
+import type {
+  AgentInvocation,
+  ConversationHandoff,
+  ConversationTurn,
+  TurnParticipant,
+} from './domain/conversation'
 import { DomainError } from './domain/task'
 import type { GitClient } from './ports/git-client'
 import { NodeProcessRunner } from './ports/process-runner'
-import type { WorkspaceRepositories, WorkspaceUnitOfWork } from './ports/repositories'
+import type { ConversationTurnDetails, WorkspaceRepositories, WorkspaceUnitOfWork } from './ports/repositories'
+
+export interface PublicConversationTurnDetails {
+  turn: PublicConversationTurn
+  participants: PublicTurnParticipant[]
+  invocations: PublicAgentInvocation[]
+  handoffs: PublicConversationHandoff[]
+}
+
+export interface PublicConversationTurn {
+  id: string
+  channelId: string
+  triggerMessageId: string
+  threadRootMessageId: string | null
+  mode: ConversationTurn['mode']
+  status: ConversationTurn['status']
+  currentRound: number
+  maxRounds: number
+  createdAt: string
+  updatedAt: string
+  completedAt: string | null
+}
+
+export interface PublicTurnParticipant {
+  id: string
+  turnId: string
+  agentId: string
+  source: TurnParticipant['source']
+  rank: number
+  matcherScore: number | null
+  decision: TurnParticipant['decision']
+  confidence: number | null
+  proposedAngle: string | null
+  dependsOnAgentId: string | null
+  speakingOrder: number | null
+  status: TurnParticipant['status']
+  reason: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PublicAgentInvocation {
+  id: string
+  turnId: string
+  agentId: string
+  kind: AgentInvocation['kind']
+  priority: AgentInvocation['priority']
+  round: number
+  status: AgentInvocation['status']
+  sourceInvocationId: string | null
+  queuedAt: string
+  startedAt: string | null
+  completedAt: string | null
+  errorCategory: 'timeout' | 'cancelled' | 'runtime_failure' | null
+}
+
+export interface PublicConversationHandoff {
+  id: string
+  turnId: string
+  sourceInvocationId: string
+  fromAgentId: string
+  requestedTargetAgentId: string
+  toAgentId: string | null
+  question: string
+  round: number
+  status: ConversationHandoff['status']
+  reason: string | null
+  createdAt: string
+  updatedAt: string
+}
 
 export interface CreateAppOptions {
   databasePath?: string
@@ -36,7 +111,7 @@ export interface CreateAppOptions {
   executionCoordinator?: TaskExecutionCoordinator
   conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'> & Partial<Pick<
     ConversationCoordinator,
-    'getTypingAgentIds' | 'getActiveStates' | 'cancel' | 'cancelChannel' | 'cancelAgentInChannel'
+    'getTypingAgentIds' | 'getActiveStates' | 'getActiveStatesByChannel' | 'cancel' | 'cancelChannel' | 'cancelAgentInChannel'
   >>
   scheduler?: TaskScheduler
   reviewService?: TaskReviewService
@@ -100,15 +175,15 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   app.get('/api/bootstrap', (_request, response) => {
     const snapshot = repositories.getBootstrap()
-    const activeTurnsByChannel = Object.fromEntries(snapshot.channels.map((channel) => [
-      channel.id,
-      conversationCoordinator.getActiveStates?.(channel.id) ?? persistedTurnActivity(repositories, channel.id),
-    ]))
+    const projectedActivities = conversationCoordinator.getActiveStatesByChannel?.()
+      ?? persistedTurnActivityByChannel(repositories)
+    const activeTurnsByChannel = Object.fromEntries(snapshot.channels.map((channel) => (
+      [channel.id, projectedActivities[channel.id] ?? []]
+    )))
     const typingAgentIdsByChannel = Object.fromEntries(snapshot.channels.map((channel) => [
       channel.id,
-      conversationCoordinator.getTypingAgentIds?.(channel.id)
-        ?? [...new Set(activeTurnsByChannel[channel.id]
-          .flatMap((activity) => activity.agentId ? [activity.agentId] : []))],
+      [...new Set(activeTurnsByChannel[channel.id]
+        .flatMap((activity) => activity.agentId ? [activity.agentId] : []))],
     ]))
     response.json(sanitizeBootstrap(snapshot, typingAgentIdsByChannel, activeTurnsByChannel))
   })
@@ -354,7 +429,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     if (!details || details.turn.channelId !== channelId) {
       throw new NotFoundError(`Conversation turn ${turnId} does not exist in channel ${channelId}.`)
     }
-    response.json(details)
+    response.json(toPublicConversationTurnDetails(details))
   }))
 
   app.post('/api/channels/:channelId/turns/:turnId/cancel', asyncRoute(async (request, response) => {
@@ -539,6 +614,83 @@ function requiredParam(value: unknown, name: string): string {
   return value
 }
 
+function toPublicConversationTurnDetails(details: ConversationTurnDetails): PublicConversationTurnDetails {
+  return {
+    turn: {
+      id: details.turn.id,
+      channelId: details.turn.channelId,
+      triggerMessageId: details.turn.triggerMessageId,
+      threadRootMessageId: details.turn.threadRootMessageId,
+      mode: details.turn.mode,
+      status: details.turn.status,
+      currentRound: details.turn.currentRound,
+      maxRounds: details.turn.maxRounds,
+      createdAt: details.turn.createdAt,
+      updatedAt: details.turn.updatedAt,
+      completedAt: details.turn.completedAt,
+    },
+    participants: details.participants.map((participant) => ({
+      id: participant.id,
+      turnId: participant.turnId,
+      agentId: participant.agentId,
+      source: participant.source,
+      rank: participant.rank,
+      matcherScore: participant.matcherScore,
+      decision: participant.decision,
+      confidence: participant.confidence,
+      proposedAngle: participant.proposedAngle,
+      dependsOnAgentId: participant.dependsOnAgentId,
+      speakingOrder: participant.speakingOrder,
+      status: participant.status,
+      reason: publicFailureReason(participant.reason),
+      createdAt: participant.createdAt,
+      updatedAt: participant.updatedAt,
+    })),
+    invocations: details.invocations.map((invocation) => ({
+      id: invocation.id,
+      turnId: invocation.turnId,
+      agentId: invocation.agentId,
+      kind: invocation.kind,
+      priority: invocation.priority,
+      round: invocation.round,
+      status: invocation.status,
+      sourceInvocationId: invocation.sourceInvocationId,
+      queuedAt: invocation.queuedAt,
+      startedAt: invocation.startedAt,
+      completedAt: invocation.completedAt,
+      errorCategory: publicInvocationError(invocation),
+    })),
+    handoffs: details.handoffs.map((handoff) => ({
+      id: handoff.id,
+      turnId: handoff.turnId,
+      sourceInvocationId: handoff.sourceInvocationId,
+      fromAgentId: handoff.fromAgentId,
+      requestedTargetAgentId: handoff.requestedTargetAgentId,
+      toAgentId: handoff.toAgentId,
+      question: handoff.question,
+      round: handoff.round,
+      status: handoff.status,
+      reason: publicFailureReason(handoff.reason),
+      createdAt: handoff.createdAt,
+      updatedAt: handoff.updatedAt,
+    })),
+  }
+}
+
+function publicInvocationError(invocation: AgentInvocation): PublicAgentInvocation['errorCategory'] {
+  if (invocation.status === 'cancelled') return 'cancelled'
+  if (invocation.errorCode === 'timeout') return 'timeout'
+  if (invocation.status === 'failed') return 'runtime_failure'
+  return null
+}
+
+function publicFailureReason(reason: string | null): string | null {
+  if (!reason) return reason
+  const category = ['participation_failed', 'response_failed', 'coordinator_failed']
+    .find((prefix) => reason === prefix || reason.startsWith(`${prefix}:`))
+  return category ?? reason
+}
+
 function sanitizeBootstrap(
   snapshot: ReturnType<WorkspaceRepositories['getBootstrap']>,
   typingAgentIdsByChannel: Record<string, string[]>,
@@ -552,27 +704,31 @@ function sanitizeBootstrap(
   }
 }
 
-function persistedTurnActivity(repositories: WorkspaceRepositories, channelId: string): TurnActivity[] {
-  return repositories.listActiveConversationTurns(channelId).flatMap<TurnActivity>((turn) => {
-    const invocations = repositories.listAgentInvocations(turn.id)
-      .filter((invocation) => invocation.status === 'queued' || invocation.status === 'running')
-    if (invocations.length > 0) {
-      return invocations.map((invocation) => ({
+function persistedTurnActivityByChannel(repositories: WorkspaceRepositories): Record<string, TurnActivity[]> {
+  const byChannel: Record<string, TurnActivity[]> = {}
+  for (const { turn, invocations } of repositories.listActiveConversationActivity()) {
+    const activities: TurnActivity[] = invocations.length > 0
+      ? invocations.map((invocation) => ({
         turnId: turn.id,
         agentId: invocation.agentId,
         phase: 'queued' as const,
         queuePosition: null,
       }))
-    }
-    const phase: TurnActivity['phase'] = turn.status === 'screening'
-      ? 'screening'
-      : turn.status === 'judging'
-        ? 'judging'
-        : turn.status === 'handoff'
-          ? 'handoff'
-          : 'queued'
-    return [{ turnId: turn.id, agentId: null, phase, queuePosition: null }]
-  })
+      : [{
+          turnId: turn.id,
+          agentId: null,
+          phase: turn.status === 'screening'
+            ? 'screening'
+            : turn.status === 'judging'
+              ? 'judging'
+              : turn.status === 'handoff'
+                ? 'handoff'
+                : 'queued',
+          queuePosition: null,
+        }]
+    byChannel[turn.channelId] = [...(byChannel[turn.channelId] ?? []), ...activities]
+  }
+  return byChannel
 }
 
 function sanitizeAgent(agent: ReturnType<WorkspaceRepositories['getBootstrap']>['agents'][number]) {
