@@ -316,14 +316,7 @@ export class ChannelTurnCoordinator {
     } else {
       const activeInvocations = this.repositories.listAgentInvocations(turnId)
         .filter((invocation) => invocation.status === 'queued' || invocation.status === 'running')
-      for (const invocation of activeInvocations) {
-        this.repositories.updateAgentInvocation(invocation.id, {
-          status: 'cancelled',
-          completedAt: this.now().toISOString(),
-          errorCode: 'cancelled',
-        })
-        this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
-      }
+      for (const invocation of activeInvocations) this.cancelPersistedInvocation(invocation)
       this.cancelParticipantsForInvocations(turnId, activeInvocations.map((invocation) => invocation.id), 'turn_cancelled')
       this.cancelParticipants(turnId)
     }
@@ -362,9 +355,7 @@ export class ChannelTurnCoordinator {
   }
 
   async cancelChannel(channelId: string): Promise<void> {
-    const turnIds = [...this.executions.values()]
-      .filter((execution) => execution.channelId === channelId)
-      .map((execution) => execution.turnId)
+    const turnIds = this.repositories.listActiveConversationTurns(channelId).map((turn) => turn.id)
     await Promise.all(turnIds.map((turnId) => this.cancel(turnId)))
   }
 
@@ -378,6 +369,35 @@ export class ChannelTurnCoordinator {
       this.cancelParticipantsForInvocations(execution.turnId, cancellation.cancelledInvocationIds, 'agent_cancelled')
       this.clearActivitiesForInvocations(execution, cancellation.cancelledInvocationIds)
       if (cancellation.failures.length > 0) throw cancellation.failures[0]!.error
+    }
+
+    const executingTurnIds = new Set(executions.map((execution) => execution.turnId))
+    const persistedTurns = this.repositories.listActiveConversationTurns(channelId)
+      .filter((turn) => !executingTurnIds.has(turn.id))
+    for (const turn of persistedTurns) {
+      const invocations = this.repositories.listAgentInvocations(turn.id)
+      const activeTargetInvocations = invocations.filter((invocation) => invocation.agentId === agentId
+        && (invocation.status === 'queued' || invocation.status === 'running'))
+      const participant = this.repositories.listTurnParticipants(turn.id)
+        .find((candidate) => candidate.agentId === agentId)
+      const hasActiveParticipant = participant !== undefined && !isTerminalParticipant(participant)
+      if (activeTargetInvocations.length === 0 && !hasActiveParticipant) continue
+
+      for (const invocation of activeTargetInvocations) this.cancelPersistedInvocation(invocation)
+      this.cancelParticipantsForInvocations(
+        turn.id,
+        activeTargetInvocations.map((invocation) => invocation.id),
+        'agent_cancelled',
+      )
+      if (activeTargetInvocations.length === 0 && hasActiveParticipant) {
+        this.updateParticipant(turn.id, agentId, { status: 'cancelled', reason: 'agent_cancelled' })
+      }
+
+      const hasRemainingInvocation = this.repositories.listAgentInvocations(turn.id)
+        .some((invocation) => invocation.status === 'queued' || invocation.status === 'running')
+      const hasRemainingParticipant = this.repositories.listTurnParticipants(turn.id)
+        .some((candidate) => candidate.agentId !== agentId && !isTerminalParticipant(candidate))
+      if (!hasRemainingInvocation && !hasRemainingParticipant) await this.cancel(turn.id)
     }
   }
 
@@ -1114,6 +1134,15 @@ export class ChannelTurnCoordinator {
       errorCode,
     })
     this.publish('conversation.invocation_updated', 'agent_invocation', invocationId)
+  }
+
+  private cancelPersistedInvocation(invocation: AgentInvocation): void {
+    this.repositories.updateAgentInvocation(invocation.id, {
+      status: 'cancelled',
+      completedAt: this.now().toISOString(),
+      errorCode: 'cancelled',
+    })
+    this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
   }
 
   private cancelParticipants(turnId: string): void {

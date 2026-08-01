@@ -966,6 +966,112 @@ describe('ChannelTurnCoordinator', () => {
     expect(fixture.repositories.listTurnParticipants(turn.id)[0]).toMatchObject({ status: 'cancelled' })
   })
 
+  it('cancels persisted active Turns during channel cancellation after a restart', async () => {
+    const fixture = await createFixture()
+    const agent = fixture.createAgent('Persisted', ['restart'])
+    const message = fixture.postHuman('@Persisted restart')
+    const turn = fixture.repositories.createConversationTurn({
+      channelId: fixture.channel.id,
+      triggerMessageId: message.id,
+      threadRootMessageId: null,
+      mode: 'direct',
+      maxRounds: 3,
+    })
+    fixture.repositories.createTurnParticipant({
+      turnId: turn.id,
+      agentId: agent.id,
+      source: 'direct',
+      rank: 1,
+      matcherScore: null,
+      decision: 'speak',
+      status: 'selected',
+    })
+    const invocation = fixture.repositories.createAgentInvocation({
+      turnId: turn.id,
+      agentId: agent.id,
+      kind: 'response',
+      priority: 'human_direct',
+      round: 1,
+      idempotencyKey: `${turn.id}:persisted`,
+      sourceInvocationId: null,
+      status: 'running',
+      startedAt: '2026-07-31T08:00:00.000Z',
+    })
+
+    await fixture.coordinator.cancelChannel(fixture.channel.id)
+
+    expect(fixture.repositories.getConversationTurn(turn.id)).toMatchObject({ status: 'cancelled' })
+    expect(fixture.repositories.listAgentInvocations(turn.id)).toEqual([
+      expect.objectContaining({ id: invocation.id, status: 'cancelled' }),
+    ])
+  })
+
+  it('cancels only the removed Agent persisted Turn while preserving other restart work', async () => {
+    const fixture = await createFixture()
+    const removed = fixture.createAgent('Removed', ['restart'])
+    const retained = fixture.createAgent('Retained', ['restart'])
+    const createPersistedDirectTurn = (agent: Agent) => {
+      const message = fixture.postHuman(`@${agent.identity} restart`)
+      const turn = fixture.repositories.createConversationTurn({
+        channelId: fixture.channel.id,
+        triggerMessageId: message.id,
+        threadRootMessageId: null,
+        mode: 'direct',
+        maxRounds: 3,
+      })
+      fixture.repositories.createTurnParticipant({
+        turnId: turn.id,
+        agentId: agent.id,
+        source: 'direct',
+        rank: 1,
+        matcherScore: null,
+        decision: 'speak',
+        status: 'selected',
+      })
+      fixture.repositories.createAgentInvocation({
+        turnId: turn.id,
+        agentId: agent.id,
+        kind: 'response',
+        priority: 'human_direct',
+        round: 1,
+        idempotencyKey: `${turn.id}:persisted`,
+        sourceInvocationId: null,
+      })
+      return turn
+    }
+    const removedTurn = createPersistedDirectTurn(removed)
+    const retainedTurn = createPersistedDirectTurn(retained)
+    const screeningMessage = fixture.postHuman('@Removed before invocation')
+    const screeningTurn = fixture.repositories.createConversationTurn({
+      channelId: fixture.channel.id,
+      triggerMessageId: screeningMessage.id,
+      threadRootMessageId: null,
+      mode: 'direct',
+      maxRounds: 3,
+    })
+    fixture.repositories.createTurnParticipant({
+      turnId: screeningTurn.id,
+      agentId: removed.id,
+      source: 'direct',
+      rank: 1,
+      matcherScore: null,
+      decision: 'speak',
+      status: 'selected',
+    })
+
+    await fixture.coordinator.cancelAgentInChannel(fixture.channel.id, removed.id)
+
+    expect(fixture.repositories.getConversationTurn(removedTurn.id)).toMatchObject({ status: 'cancelled' })
+    expect(fixture.repositories.getConversationTurn(screeningTurn.id)).toMatchObject({ status: 'cancelled' })
+    expect(fixture.repositories.listAgentInvocations(removedTurn.id)).toEqual([
+      expect.objectContaining({ agentId: removed.id, status: 'cancelled' }),
+    ])
+    expect(fixture.repositories.getConversationTurn(retainedTurn.id)).toMatchObject({ status: 'screening' })
+    expect(fixture.repositories.listAgentInvocations(retainedTurn.id)).toEqual([
+      expect.objectContaining({ agentId: retained.id, status: 'queued' }),
+    ])
+  })
+
   async function createFixture(options: {
     participationProbeTimeoutMs?: number
     onCoordinatorEvent?: (event: DomainEvent, repositories: WorkspaceRepositories) => void
