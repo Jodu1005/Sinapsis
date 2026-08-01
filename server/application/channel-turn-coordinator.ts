@@ -27,6 +27,7 @@ import type {
 } from './agent-conversation-protocol'
 import { ChannelMessageService } from './channel-message-service'
 import {
+  conversationSessionKey,
   ConversationInvocationCancelledError,
   ConversationSessionService,
   type ConversationSessionInvocation,
@@ -316,7 +317,7 @@ export class ChannelTurnCoordinator {
     } else {
       const activeInvocations = this.repositories.listAgentInvocations(turnId)
         .filter((invocation) => invocation.status === 'queued' || invocation.status === 'running')
-      for (const invocation of activeInvocations) this.cancelPersistedInvocation(invocation)
+      for (const invocation of activeInvocations) this.cancelPersistedInvocation(turn, invocation)
       this.cancelParticipantsForInvocations(turnId, activeInvocations.map((invocation) => invocation.id), 'turn_cancelled')
       this.cancelParticipants(turnId)
     }
@@ -383,7 +384,7 @@ export class ChannelTurnCoordinator {
       const hasActiveParticipant = participant !== undefined && !isTerminalParticipant(participant)
       if (activeTargetInvocations.length === 0 && !hasActiveParticipant) continue
 
-      for (const invocation of activeTargetInvocations) this.cancelPersistedInvocation(invocation)
+      for (const invocation of activeTargetInvocations) this.cancelPersistedInvocation(turn, invocation)
       this.cancelParticipantsForInvocations(
         turn.id,
         activeTargetInvocations.map((invocation) => invocation.id),
@@ -1136,13 +1137,29 @@ export class ChannelTurnCoordinator {
     this.publish('conversation.invocation_updated', 'agent_invocation', invocationId)
   }
 
-  private cancelPersistedInvocation(invocation: AgentInvocation): void {
+  private cancelPersistedInvocation(turn: ConversationTurn, invocation: AgentInvocation): void {
     this.repositories.updateAgentInvocation(invocation.id, {
       status: 'cancelled',
       completedAt: this.now().toISOString(),
       errorCode: 'cancelled',
     })
     this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
+
+    const sessionKey = conversationSessionKey(turn.channelId, turn.threadRootMessageId, invocation.agentId)
+    const session = this.repositories.getConversationSession(sessionKey)
+    if (session && session.status !== 'stale') {
+      this.repositories.upsertConversationSession({
+        key: session.key,
+        channelId: session.channelId,
+        threadRootMessageId: session.threadRootMessageId,
+        agentId: session.agentId,
+        runtime: session.runtime,
+        runtimeSessionId: session.runtimeSessionId,
+        runtimeSessionFile: session.runtimeSessionFile,
+        status: 'stale',
+        lastMessageId: session.lastMessageId,
+      })
+    }
   }
 
   private cancelParticipants(turnId: string): void {

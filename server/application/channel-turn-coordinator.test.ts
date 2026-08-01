@@ -997,6 +997,18 @@ describe('ChannelTurnCoordinator', () => {
       status: 'running',
       startedAt: '2026-07-31T08:00:00.000Z',
     })
+    const sessionKey = `${fixture.channel.id}:timeline:${agent.id}`
+    fixture.repositories.upsertConversationSession({
+      key: sessionKey,
+      channelId: fixture.channel.id,
+      threadRootMessageId: null,
+      agentId: agent.id,
+      runtime: agent.runtime,
+      runtimeSessionId: 'persisted-runtime-session',
+      runtimeSessionFile: null,
+      status: 'active',
+      lastMessageId: message.id,
+    })
 
     await fixture.coordinator.cancelChannel(fixture.channel.id)
 
@@ -1004,6 +1016,10 @@ describe('ChannelTurnCoordinator', () => {
     expect(fixture.repositories.listAgentInvocations(turn.id)).toEqual([
       expect.objectContaining({ id: invocation.id, status: 'cancelled' }),
     ])
+    expect(fixture.repositories.getConversationSession(sessionKey)).toMatchObject({
+      runtimeSessionId: 'persisted-runtime-session',
+      status: 'stale',
+    })
   })
 
   it('cancels only the removed Agent persisted Turn while preserving other restart work', async () => {
@@ -1041,6 +1057,21 @@ describe('ChannelTurnCoordinator', () => {
     }
     const removedTurn = createPersistedDirectTurn(removed)
     const retainedTurn = createPersistedDirectTurn(retained)
+    const removedSessionKey = `${fixture.channel.id}:timeline:${removed.id}`
+    const retainedSessionKey = `${fixture.channel.id}:timeline:${retained.id}`
+    for (const [agent, key] of [[removed, removedSessionKey], [retained, retainedSessionKey]] as const) {
+      fixture.repositories.upsertConversationSession({
+        key,
+        channelId: fixture.channel.id,
+        threadRootMessageId: null,
+        agentId: agent.id,
+        runtime: agent.runtime,
+        runtimeSessionId: `${agent.identity}-runtime-session`,
+        runtimeSessionFile: null,
+        status: 'ready',
+        lastMessageId: null,
+      })
+    }
     const screeningMessage = fixture.postHuman('@Removed before invocation')
     const screeningTurn = fixture.repositories.createConversationTurn({
       channelId: fixture.channel.id,
@@ -1070,6 +1101,8 @@ describe('ChannelTurnCoordinator', () => {
     expect(fixture.repositories.listAgentInvocations(retainedTurn.id)).toEqual([
       expect.objectContaining({ agentId: retained.id, status: 'queued' }),
     ])
+    expect(fixture.repositories.getConversationSession(removedSessionKey)?.status).toBe('stale')
+    expect(fixture.repositories.getConversationSession(retainedSessionKey)?.status).toBe('ready')
   })
 
   async function createFixture(options: {
