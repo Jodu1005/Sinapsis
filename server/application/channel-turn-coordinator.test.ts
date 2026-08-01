@@ -89,17 +89,27 @@ describe('ChannelTurnCoordinator', () => {
     gates.get(alpha.id)!.resolve(publicReply('alpha answer', [{ agentId: unmentioned.id, question: 'continue?' }]))
     await Promise.resolve()
     expect(fixture.agentMessages()).toEqual([])
-    gates.get(beta.id)!.resolve(publicReply('beta answer'))
+    gates.get(beta.id)!.resolve(publicReply('beta answer', [{ agentId: unmentioned.id, question: 'beta continue?' }]))
 
     const turn = await dispatch
     expect(turn).toMatchObject({ mode: 'multi_direct', status: 'completed', currentRound: 1 })
     expect(fixture.agentMessages().map((message) => message.senderId)).toEqual([beta.id, alpha.id])
     expect(fixture.repositories.listTurnParticipants(turn.id).map((participant) => participant.agentId))
       .toEqual([beta.id, alpha.id])
+    expect(fixture.repositories.listAgentInvocations(turn.id).map((invocation) => invocation.agentId))
+      .toEqual([beta.id, alpha.id])
     expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({
+        fromAgentId: beta.id,
+        requestedTargetAgentId: unmentioned.id,
+        question: 'beta continue?',
+        status: 'rejected',
+        reason: 'handoff_disabled_for_parallel_mode',
+      }),
       expect.objectContaining({
         fromAgentId: alpha.id,
         requestedTargetAgentId: unmentioned.id,
+        question: 'continue?',
         status: 'rejected',
         reason: 'handoff_disabled_for_parallel_mode',
       }),
@@ -107,7 +117,7 @@ describe('ChannelTurnCoordinator', () => {
     expect(fixture.sessions.calls.some((call) => call.conversation?.kind === 'handoff_response')).toBe(false)
   })
 
-  it('invokes every @all member, isolates failures, and rejects response handoffs', async () => {
+  it('marks @all partial when one member fails while preserving successful replies', async () => {
     const fixture = await createFixture()
     const agents = Array.from({ length: 4 }, (_, index) => fixture.createAgent(`Agent ${index}`, ['all topic']))
     const failing = agents[1]!
@@ -118,11 +128,11 @@ describe('ChannelTurnCoordinator', () => {
 
     const turn = await fixture.coordinator.dispatch(fixture.postHuman('@all all topic'))
 
-    expect(turn).toMatchObject({ mode: 'all', status: 'completed', currentRound: 1 })
+    expect(turn).toMatchObject({ mode: 'all', status: 'partial', currentRound: 1 })
     expect(fixture.sessions.calls).toHaveLength(4)
     expect(fixture.sessions.calls.every((call) => call.conversation?.kind === 'response')).toBe(true)
     expect(fixture.agentMessages().map((message) => message.senderId)).toEqual(
-      agents.filter((agent) => agent.id !== failing.id).map((agent) => agent.id),
+      fixture.repositories.listAgents().filter((agent) => agent.id !== failing.id).map((agent) => agent.id),
     )
     expect(fixture.repositories.listTurnParticipants(turn.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({ agentId: failing.id, status: 'failed', reason: 'response_failed:runtime unavailable' }),
@@ -131,6 +141,143 @@ describe('ChannelTurnCoordinator', () => {
       expect.objectContaining({ status: 'rejected', reason: 'handoff_disabled_for_parallel_mode' }),
     ]))
     expect(fixture.sessions.calls.some((call) => call.conversation?.kind === 'handoff_response')).toBe(false)
+  })
+
+  it('marks a parallel explicit Turn failed when every Runtime fails', async () => {
+    const fixture = await createFixture()
+    const alpha = fixture.createAgent('Alpha', [])
+    const beta = fixture.createAgent('Beta', [])
+    fixture.sessions.handle = async (input) => {
+      throw new Error(`${input.agent.identity} unavailable`)
+    }
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('@Alpha @Beta answer'))
+
+    expect(turn).toMatchObject({ mode: 'multi_direct', status: 'failed', currentRound: 1 })
+    expect(fixture.agentMessages()).toEqual([])
+    expect(fixture.repositories.listTurnParticipants(turn.id)).toEqual([
+      expect.objectContaining({ agentId: alpha.id, status: 'failed' }),
+      expect.objectContaining({ agentId: beta.id, status: 'failed' }),
+    ])
+  })
+
+  it('marks a direct Turn failed when its only public response fails', async () => {
+    const fixture = await createFixture()
+    fixture.createAgent('Solo', [])
+    fixture.sessions.handle = async () => { throw new Error('runtime unavailable') }
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('@Solo answer'))
+
+    expect(turn).toMatchObject({ mode: 'direct', status: 'failed', currentRound: 1 })
+    expect(fixture.agentMessages()).toEqual([])
+  })
+
+  it('marks an ordinary Turn partial when one public reply succeeds and another fails', async () => {
+    const fixture = await createFixture()
+    fixture.createAgent('Alpha', ['partial topic'])
+    fixture.createAgent('Beta', ['partial topic'])
+    let responseCount = 0
+    fixture.sessions.handle = async (input) => {
+      if (input.conversation?.kind === 'participation') return participation('speak', 1)
+      if (input.conversation?.kind === 'duplicate_check') return duplicate('speak')
+      responseCount += 1
+      if (responseCount === 2) throw new Error('second response failed')
+      return publicReply('first response')
+    }
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('partial topic'))
+
+    expect(turn).toMatchObject({ mode: 'ordinary', status: 'partial', currentRound: 1 })
+    expect(fixture.agentMessages()).toHaveLength(1)
+  })
+
+  it('keeps a partially failed multi-Invocation cancellation terminal and suppresses late replies', async () => {
+    const fixture = await createFixture({ realQueue: true })
+    fixture.createAgent('Alpha', [])
+    fixture.createAgent('Beta', [])
+    const gates = new Map<string, ReturnType<typeof deferred<ConversationSessionResult>>>()
+    fixture.sessions.handle = (input) => {
+      const gate = deferred<ConversationSessionResult>()
+      gates.set(input.agent.id, gate)
+      return gate.promise
+    }
+    const started = fixture.coordinator.start(fixture.postHuman('@Alpha @Beta cancel both'))
+    await waitFor(() => fixture.sessions.calls.length === 2)
+    const invocations = fixture.repositories.listAgentInvocations(started.turn.id)
+    const first = invocations[0]!
+    const second = invocations[1]!
+    fixture.sessions.cancellationFailures.set(second.id, new Error('second runtime cancellation failed'))
+    fixture.sessions.onCancelInvocation = (invocationId) => {
+      if (invocationId === first.id) {
+        gates.get(first.agentId)!.reject(new ConversationInvocationCancelledError(invocationId))
+      }
+    }
+
+    await expect(fixture.coordinator.cancel(started.turn.id)).resolves.toMatchObject({ status: 'cancelled' })
+    gates.get(second.agentId)!.resolve(publicReply('late reply must be discarded'))
+    await expect(started.completion).resolves.toMatchObject({ status: 'cancelled' })
+
+    expect(fixture.repositories.listAgentInvocations(started.turn.id))
+      .toEqual(invocations.map((invocation) => expect.objectContaining({ id: invocation.id, status: 'cancelled' })))
+    expect(fixture.repositories.listTurnParticipants(started.turn.id).every((participant) => participant.status === 'cancelled'))
+      .toBe(true)
+    expect(fixture.repositories.listTurnParticipants(started.turn.id).some((participant) => participant.status === 'selected'))
+      .toBe(false)
+    expect(fixture.agentMessages()).toEqual([])
+  })
+
+  it('allows a direct reply to hand off to another channel member', async () => {
+    const fixture = await createFixture()
+    const source = fixture.createAgent('Source', [])
+    const target = fixture.createAgent('Target', [])
+    fixture.sessions.handle = async (input) => input.conversation?.kind === 'handoff_response'
+      ? publicReply('target answer')
+      : publicReply('source answer', [{ agentId: target.id, question: 'Please continue.' }])
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('@Source begin'))
+
+    expect(turn).toMatchObject({ mode: 'direct', status: 'completed', currentRound: 2 })
+    expect(fixture.agentMessages().map((message) => message.senderId)).toEqual([source.id, target.id])
+    expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({ fromAgentId: source.id, toAgentId: target.id, status: 'completed' }),
+    ])
+  })
+
+  it('queues a busy direct Agent and runs its reply after the active Invocation settles', async () => {
+    const fixture = await createFixture({ realQueue: true })
+    const agent = fixture.createAgent('Solo', [])
+    const firstGate = deferred<ConversationSessionResult>()
+    fixture.sessions.handle = (input) => input.initialMessage.includes('first')
+      ? firstGate.promise
+      : Promise.resolve(publicReply('second answer'))
+    const first = fixture.coordinator.start(fixture.postHuman('@Solo first'))
+    await waitFor(() => fixture.sessions.calls.length === 1)
+    const second = fixture.coordinator.start(fixture.postHuman('@Solo second'))
+    await waitFor(() => fixture.repositories.listAgentInvocations(second.turn.id).length === 1)
+
+    expect(fixture.repositories.listAgentInvocations(second.turn.id)[0]).toMatchObject({ status: 'queued' })
+    expect(fixture.sessions.calls).toHaveLength(1)
+    firstGate.resolve(publicReply('first answer'))
+    await expect(first.completion).resolves.toMatchObject({ status: 'completed' })
+    await expect(second.completion).resolves.toMatchObject({ status: 'completed' })
+    expect(fixture.agentMessages().map((message) => message.body)).toEqual(['first answer', 'second answer'])
+    expect(fixture.repositories.getAgent(agent.id)?.status).toBe('idle')
+  })
+
+  it('limits ordinary-channel @all to current members', async () => {
+    const fixture = await createFixture()
+    const member = fixture.createAgent('Member', [])
+    const outsider = fixture.repositories.createAgent({
+      identity: 'Outsider', mentionName: 'outsider', runtime: 'opencode', capabilityTags: [], responsibilities: [],
+      maxConcurrentTasks: 1, command: 'fake-runtime', args: [], model: '', env: {},
+    })
+    fixture.repositories.setAgentStatus(outsider.id, 'idle', new Date())
+    fixture.sessions.handle = async (input) => publicReply(`${input.agent.identity} answer`)
+
+    await fixture.coordinator.dispatch(fixture.postHuman('@all answer'))
+
+    expect(fixture.sessions.calls.map((call) => call.agent.id)).toEqual([member.id])
+    expect(fixture.sessions.calls.some((call) => call.agent.id === outsider.id)).toBe(false)
   })
 
   it('resolves summit @all membership dynamically for every Turn', async () => {
@@ -158,7 +305,7 @@ describe('ChannelTurnCoordinator', () => {
     expect(count.count).toBe(0)
   })
 
-  it('uses the timeout union shape guard and completes when no candidate elects to speak', async () => {
+  it('uses the timeout union shape guard and fails when no candidate replies after a timeout', async () => {
     const fixture = await createFixture({ participationProbeTimeoutMs: 5 })
     const slow = fixture.createAgent('Slow', ['timeout topic'])
     const quiet = fixture.createAgent('Quiet', ['timeout topic'])
@@ -169,7 +316,7 @@ describe('ChannelTurnCoordinator', () => {
 
     const turn = await fixture.coordinator.dispatch(message)
 
-    expect(turn.status).toBe('completed')
+    expect(turn.status).toBe('failed')
     expect(fixture.repositories.listTurnParticipants(turn.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({ agentId: slow.id, decision: 'silent', confidence: null, status: 'skipped', reason: 'timeout' }),
       expect.objectContaining({ agentId: quiet.id, decision: 'silent', confidence: 0.1, status: 'skipped' }),
@@ -280,7 +427,7 @@ describe('ChannelTurnCoordinator', () => {
     ]))
   })
 
-  it('completes with persisted failure reasons when every selected response fails', async () => {
+  it('fails with persisted failure reasons when every selected response fails', async () => {
     const fixture = await createFixture()
     fixture.createAgent('One', ['failure topic'])
     fixture.createAgent('Two', ['failure topic'])
@@ -292,7 +439,7 @@ describe('ChannelTurnCoordinator', () => {
 
     const turn = await fixture.coordinator.dispatch(fixture.postHuman('failure topic'))
 
-    expect(turn.status).toBe('completed')
+    expect(turn.status).toBe('failed')
     expect(fixture.agentMessages()).toEqual([])
     expect(fixture.repositories.listTurnParticipants(turn.id)).toEqual(expect.arrayContaining([
       expect.objectContaining({ status: 'failed', reason: expect.stringContaining('response_failed') }),
@@ -357,7 +504,7 @@ describe('ChannelTurnCoordinator', () => {
     const targetParticipant = fixture.repositories.listTurnParticipants(turn.id)
       .find((participant) => participant.agentId === target.id)
 
-    expect(turn).toMatchObject({ status: 'completed', currentRound: 2 })
+    expect(turn).toMatchObject({ status: 'partial', currentRound: 2 })
     expect(targetParticipant).toMatchObject({
       source: 'handoff',
       decision: 'speak',
@@ -387,7 +534,7 @@ describe('ChannelTurnCoordinator', () => {
 
     const turn = await fixture.coordinator.dispatch(fixture.postHuman('handoff failure topic'))
 
-    expect(turn.status).toBe('completed')
+    expect(turn.status).toBe('partial')
     expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual([
       expect.objectContaining({
         toAgentId: target.id,
@@ -831,6 +978,7 @@ class ScriptedSessions {
   cancelledInvocationIds: string[] = []
   coarseCancellationCalls: string[] = []
   cancellationFailure: Error | undefined
+  cancellationFailures = new Map<string, Error>()
   onCancelInvocation: ((invocationId: string) => void) | undefined
   handle: (input: ConversationSessionInvocation) => Promise<ConversationSessionResult> = async () => participation('silent', 0)
 
@@ -850,6 +998,8 @@ class ScriptedSessions {
   }
 
   cancelInvocation(invocationId: string): Promise<{ invocationId: string; cancelledSessionKeys: string[] }> {
+    const invocationFailure = this.cancellationFailures.get(invocationId)
+    if (invocationFailure) return Promise.reject(invocationFailure)
     if (this.cancellationFailure) return Promise.reject(this.cancellationFailure)
     this.cancelledInvocationIds.push(invocationId)
     this.onCancelInvocation?.(invocationId)

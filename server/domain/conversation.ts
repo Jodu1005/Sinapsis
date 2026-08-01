@@ -6,7 +6,7 @@ export type TurnMode = 'ordinary' | 'direct' | 'multi_direct' | 'all'
 
 export type TurnStatus =
   | 'screening' | 'judging' | 'responding' | 'handoff'
-  | 'completed' | 'cancelled' | 'failed'
+  | 'completed' | 'partial' | 'cancelled' | 'failed'
 
 export interface ConversationTurn {
   id: string

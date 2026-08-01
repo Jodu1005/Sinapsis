@@ -73,6 +73,24 @@ describe('routeMentions', () => {
       unknownMentions: ['Newtonian'],
     })
   })
+
+  it('does not treat email addresses or scoped package names as mentions', () => {
+    const scope = createAgent('scope', 'Scope', 'scope')
+
+    expect(routeMentions('联系 foo@example.com，安装 @scope/pkg。', [scope])).toEqual({
+      mode: 'ordinary',
+      targetAgentIds: [],
+      unknownMentions: [],
+    })
+  })
+
+  it('reports unknown mentions at the start of text or after punctuation', () => {
+    expect(routeMentions('@Missing 请回答；然后看（@Other）。', [newton])).toEqual({
+      mode: 'ordinary',
+      targetAgentIds: [],
+      unknownMentions: ['Missing', 'Other'],
+    })
+  })
 })
 
 function createAgent(id: string, identity: string, mentionName: string): Agent {

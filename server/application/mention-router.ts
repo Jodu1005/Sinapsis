@@ -7,6 +7,9 @@ interface MentionMatch {
   end: number
 }
 
+const mentionLeftBoundary = '(^|[^A-Za-z0-9_])'
+const mentionRightBoundary = '(?=$|[^\\p{L}\\p{N}_/-])'
+
 export class UnknownMentionError extends Error {
   constructor(readonly mentions: string[]) {
     super(mentions.length === 1
@@ -42,7 +45,7 @@ function agentMentionMatches(body: string, agents: Agent[]): MentionMatch[] {
 
 function exactMentionMatches(body: string, name: string): Array<Omit<MentionMatch, 'agentId'>> {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const expression = new RegExp(`(^|[^A-Za-z0-9_])@${escaped}(?=$|[^\\p{L}\\p{N}_-])`, 'giu')
+  const expression = new RegExp(`${mentionLeftBoundary}@${escaped}${mentionRightBoundary}`, 'giu')
   return [...body.matchAll(expression)].map((match) => ({
     start: match.index! + match[1].length,
     end: match.index! + match[0].length,
@@ -51,11 +54,12 @@ function exactMentionMatches(body: string, name: string): Array<Omit<MentionMatc
 
 function unknownMentionNames(body: string, knownMatches: Array<Omit<MentionMatch, 'agentId'>>): string[] {
   const unknownMentions: string[] = []
-  for (const match of body.matchAll(/@([\p{L}\p{N}_-]+)/gu)) {
-    const start = match.index!
-    const end = start + match[0].length
+  const expression = new RegExp(`${mentionLeftBoundary}@([\\p{L}\\p{N}_-]+)${mentionRightBoundary}`, 'gu')
+  for (const match of body.matchAll(expression)) {
+    const start = match.index! + match[1].length
+    const end = start + match[0].length - match[1].length
     if (knownMatches.some((known) => start >= known.start && end <= known.end)) continue
-    if (!unknownMentions.includes(match[1])) unknownMentions.push(match[1])
+    if (!unknownMentions.includes(match[2])) unknownMentions.push(match[2])
   }
   return unknownMentions
 }

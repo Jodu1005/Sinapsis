@@ -108,6 +108,11 @@ interface ResponseOutcome {
   response: PublicAgentResponse
 }
 
+interface InvocationCancellationBatch {
+  cancelledInvocationIds: string[]
+  failures: Array<{ invocationId: string; error: unknown }>
+}
+
 const duplicateCheckCancelled = Symbol('duplicate_check_cancelled')
 
 const maxParticipationCandidates = 3
@@ -285,7 +290,7 @@ export class ChannelTurnCoordinator {
       await this.runHandoffWorklist(execution, turn, message, memberIds, spokenAgentIds, reservedAgentIds, edges, worklist)
 
       if (execution.cancelled) return this.currentTurn(turn.id)
-      turn = this.completeTurn(turn.id)
+      turn = this.finishTurn(turn.id)
       return turn
     } catch (error) {
       if (execution.cancelled) return this.currentTurn(turn.id)
@@ -300,11 +305,17 @@ export class ChannelTurnCoordinator {
     const execution = this.executions.get(turnId)
     if (execution) {
       execution.cancelled = true
-      try {
-        await this.cancelInvocations(execution, this.repositories.listAgentInvocations(turnId))
-      } catch (error) {
+      const cancellation = await this.cancelInvocations(execution, this.repositories.listAgentInvocations(turnId))
+      if (cancellation.failures.length > 0 && cancellation.cancelledInvocationIds.length === 0) {
         execution.cancelled = false
-        throw error
+        throw cancellation.failures[0]!.error
+      }
+      for (const failure of cancellation.failures) {
+        this.markInvocationCancelled(
+          execution.turnId,
+          failure.invocationId,
+          `cancellation_failed:${errorMessage(failure.error)}`,
+        )
       }
       this.cancelParticipants(turnId)
       execution.activities.clear()
@@ -334,10 +345,11 @@ export class ChannelTurnCoordinator {
   async cancelAgentInChannel(channelId: string, agentId: string): Promise<void> {
     const executions = [...this.executions.values()].filter((execution) => execution.channelId === channelId)
     for (const execution of executions) {
-      await this.cancelInvocations(
+      const cancellation = await this.cancelInvocations(
         execution,
         this.repositories.listAgentInvocations(execution.turnId).filter((invocation) => invocation.agentId === agentId),
       )
+      if (cancellation.failures.length > 0) throw cancellation.failures[0]!.error
       const participant = this.repositories.listTurnParticipants(execution.turnId)
         .find((candidate) => candidate.agentId === agentId)
       if (participant && !isTerminalParticipant(participant)) {
@@ -367,12 +379,12 @@ export class ChannelTurnCoordinator {
     this.publish('conversation.participant_decided', 'turn_participant', participant.id)
     if (agent.status === 'offline' || agent.status === 'error') {
       this.updateParticipant(initialTurn.id, agent.id, { status: 'failed', reason: 'agent_unavailable' })
-      return this.completeTurn(initialTurn.id)
+      return this.finishTurn(initialTurn.id)
     }
 
     const turn = this.transitionTurn(initialTurn.id, { status: 'responding', currentRound: 1 })
     const outcome = await this.respond(execution, turn, message, agent, 'response', 'human_direct', 1, null)
-    if (!outcome) return execution.cancelled ? this.currentTurn(turn.id) : this.completeTurn(turn.id)
+    if (!outcome) return execution.cancelled ? this.currentTurn(turn.id) : this.finishTurn(turn.id)
     this.updateParticipant(turn.id, agent.id, { status: 'spoken' })
     const spokenAgentIds = new Set([agent.id])
     const reservedAgentIds = new Set(spokenAgentIds)
@@ -393,7 +405,7 @@ export class ChannelTurnCoordinator {
       edges,
       worklist,
     )
-    return execution.cancelled ? this.currentTurn(turn.id) : this.completeTurn(turn.id)
+    return execution.cancelled ? this.currentTurn(turn.id) : this.finishTurn(turn.id)
   }
 
   private async runParallelExplicitTurn(
@@ -421,7 +433,7 @@ export class ChannelTurnCoordinator {
       this.publish('conversation.participant_decided', 'turn_participant', participant.id)
       if (!unavailable) availableAgents.push(agent)
     }
-    if (availableAgents.length === 0) return this.completeTurn(initialTurn.id)
+    if (availableAgents.length === 0) return this.finishTurn(initialTurn.id)
 
     const turn = this.transitionTurn(initialTurn.id, { status: 'responding', currentRound: 1 })
     const settled = await Promise.allSettled(availableAgents.map((agent) => this.generateResponse(
@@ -451,7 +463,7 @@ export class ChannelTurnCoordinator {
       this.updateParticipant(turn.id, agent.id, { status: 'spoken' })
       this.rejectParallelHandoffs(turn, outcome, agent.id, memberIds)
     }
-    return this.completeTurn(turn.id)
+    return this.finishTurn(turn.id)
   }
 
   private async probeCandidate(
@@ -909,6 +921,7 @@ export class ChannelTurnCoordinator {
           })
         },
       })
+      if (execution.cancelled) throw new ConversationInvocationCancelledError(invocation.id)
       if (execution.timedOutInvocationIds.has(invocation.id)) throw new Error('timeout')
       this.repositories.updateAgentInvocation(invocation.id, { status: 'settled', completedAt: this.now().toISOString() })
       this.publish('conversation.invocation_completed', 'agent_invocation', invocation.id)
@@ -994,6 +1007,22 @@ export class ChannelTurnCoordinator {
     return turn
   }
 
+  private finishTurn(turnId: string): ConversationTurn {
+    const participants = this.repositories.listTurnParticipants(turnId)
+    const spokenCount = participants.filter((participant) => participant.status === 'spoken').length
+    const hasFailure = participants.some((participant) => participant.status === 'failed')
+      || this.repositories.listAgentInvocations(turnId).some((invocation) => invocation.status === 'failed')
+    if (!hasFailure) return this.completeTurn(turnId)
+
+    this.failAcceptedHandoffs(turnId, 'turn_completed_without_handoff_terminal_state')
+    const turn = this.repositories.updateConversationTurn(turnId, {
+      status: spokenCount > 0 ? 'partial' : 'failed',
+      completedAt: this.now().toISOString(),
+    })
+    this.publish('conversation.turn_completed', 'conversation_turn', turn.id)
+    return turn
+  }
+
   private failTurn(turnId: string, error: unknown): ConversationTurn {
     for (const participant of this.repositories.listTurnParticipants(turnId)) {
       if (!isTerminalParticipant(participant)) {
@@ -1031,24 +1060,38 @@ export class ChannelTurnCoordinator {
     }
   }
 
-  private async cancelInvocations(execution: TurnExecution, invocations: AgentInvocation[]): Promise<void> {
+  private async cancelInvocations(
+    execution: TurnExecution,
+    invocations: AgentInvocation[],
+  ): Promise<InvocationCancellationBatch> {
+    const result: InvocationCancellationBatch = { cancelledInvocationIds: [], failures: [] }
     for (const invocation of invocations) {
       if (invocation.status !== 'queued' && invocation.status !== 'running') continue
-      const ownership = this.queue.cancelInvocation(invocation.id)
-      if (ownership.state === 'running' || (ownership.state === 'not_found' && invocation.status === 'running')) {
-        await this.sessions.cancelInvocation(invocation.id)
+      try {
+        const ownership = this.queue.cancelInvocation(invocation.id)
+        if (ownership.state === 'running' || (ownership.state === 'not_found' && invocation.status === 'running')) {
+          await this.sessions.cancelInvocation(invocation.id)
+        }
+      } catch (error) {
+        result.failures.push({ invocationId: invocation.id, error })
+        continue
       }
-      const current = this.repositories.listAgentInvocations(execution.turnId)
-        .find((candidate) => candidate.id === invocation.id)
-      if (current && (current.status === 'queued' || current.status === 'running')) {
-        this.repositories.updateAgentInvocation(invocation.id, {
-          status: 'cancelled',
-          completedAt: this.now().toISOString(),
-          errorCode: 'cancelled',
-        })
-        this.publish('conversation.invocation_completed', 'agent_invocation', invocation.id)
-      }
+      this.markInvocationCancelled(execution.turnId, invocation.id, 'cancelled')
+      result.cancelledInvocationIds.push(invocation.id)
     }
+    return result
+  }
+
+  private markInvocationCancelled(turnId: string, invocationId: string, errorCode: string): void {
+    const current = this.repositories.listAgentInvocations(turnId)
+      .find((candidate) => candidate.id === invocationId)
+    if (!current || (current.status !== 'queued' && current.status !== 'running')) return
+    this.repositories.updateAgentInvocation(invocationId, {
+      status: 'cancelled',
+      completedAt: this.now().toISOString(),
+      errorCode,
+    })
+    this.publish('conversation.invocation_completed', 'agent_invocation', invocationId)
   }
 
   private cancelParticipants(turnId: string): void {
@@ -1162,7 +1205,7 @@ function lastSpokenAtByAuthor(
 }
 
 function isTerminal(turn: ConversationTurn): boolean {
-  return turn.status === 'completed' || turn.status === 'cancelled' || turn.status === 'failed'
+  return turn.status === 'completed' || turn.status === 'partial' || turn.status === 'cancelled' || turn.status === 'failed'
 }
 
 function isTerminalParticipant(participant: TurnParticipant): boolean {

@@ -473,6 +473,30 @@ describe('local service API', () => {
     })).not.toThrow()
   })
 
+  it('accepts email addresses and scoped package names as ordinary channel text', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'lexical-boundary' })
+    const scope = createTestAgent(repositories, 'Scope', 'scope')
+    repositories.addChannelAgent(channel.id, scope.id, new Date())
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const emailResponse = await fetch(`${server.baseUrl}/api/channels/${channel.id}/messages`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ body: '联系 foo@example.com。' }),
+    })
+    const packageResponse = await fetch(`${server.baseUrl}/api/channels/${channel.id}/messages`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ body: '安装 @scope/pkg。' }),
+    })
+
+    expect(emailResponse.status).toBe(201)
+    expect(packageResponse.status).toBe(201)
+  })
+
   it('routes a non-Task mention to channel conversation and rejects a foreign Task reference', async () => {
     const dispatched: Array<{ channelId: string; body: string }> = []
     const app = createApp({

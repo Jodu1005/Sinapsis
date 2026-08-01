@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 
 export function migrateSchema(database: DatabaseSync): void {
-  database.exec('PRAGMA foreign_keys = ON')
+  database.exec('PRAGMA foreign_keys = OFF')
   database.exec('BEGIN IMMEDIATE')
 
   try {
@@ -433,14 +433,43 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(16, new Date().toISOString())
     }
 
+    const seventeenthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 17').get()
+    if (!seventeenthMigration) {
+      database.exec(`
+        CREATE TABLE conversation_turns_v17 (
+          id TEXT PRIMARY KEY,
+          channel_id TEXT NOT NULL REFERENCES channels(id),
+          trigger_message_id TEXT NOT NULL UNIQUE REFERENCES messages(id),
+          thread_root_message_id TEXT REFERENCES messages(id),
+          mode TEXT NOT NULL CHECK(mode IN ('ordinary', 'direct', 'multi_direct', 'all')),
+          status TEXT NOT NULL CHECK(status IN ('screening', 'judging', 'responding', 'handoff', 'completed', 'partial', 'cancelled', 'failed')),
+          current_round INTEGER NOT NULL CHECK(current_round >= 0),
+          max_rounds INTEGER NOT NULL CHECK(max_rounds > 0),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          completed_at TEXT
+        );
+        INSERT INTO conversation_turns_v17 SELECT * FROM conversation_turns;
+        DROP TABLE conversation_turns;
+        ALTER TABLE conversation_turns_v17 RENAME TO conversation_turns;
+        CREATE INDEX conversation_turns_status_created_at_idx
+          ON conversation_turns(status, created_at);
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(17, new Date().toISOString())
+    }
+
     database.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS conversation_sessions_grain_unique_idx
         ON conversation_sessions(channel_id, COALESCE(thread_root_message_id, ''), agent_id);
     `)
 
+    const foreignKeyViolations = database.prepare('PRAGMA foreign_key_check').all()
+    if (foreignKeyViolations.length > 0) throw new Error('Schema migration introduced foreign key violations.')
     database.exec('COMMIT')
+    database.exec('PRAGMA foreign_keys = ON')
   } catch (error) {
     database.exec('ROLLBACK')
+    database.exec('PRAGMA foreign_keys = ON')
     throw error
   }
 }

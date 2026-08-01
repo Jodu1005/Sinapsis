@@ -907,6 +907,32 @@ describe('SQLite workspace repositories', () => {
       .toMatchObject({ status: 'failed', reason: 'legacy_failed' })
   })
 
+  it('upgrades an existing migration 16 database so partial Turn status is persisted and constrained', async () => {
+    const { repositories, databasePath } = await createRepositories()
+    const channel = createChannel(repositories)
+    const message = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Legacy parallel Turn.',
+    })
+    const turn = repositories.createConversationTurn({
+      channelId: channel.id, triggerMessageId: message.id, threadRootMessageId: null,
+      mode: 'multi_direct', maxRounds: 3,
+    })
+    database!.close()
+    database = undefined
+    downgradeConversationTurnsToVersion16(databasePath)
+
+    database = createSqliteDatabase(databasePath)
+    const upgraded = new SqliteRepositories(database, new RecordingPublisher())
+
+    expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 17').get())
+      .toEqual({ version: 17 })
+    expect(upgraded.getConversationTurn(turn.id)).toMatchObject({ status: 'screening' })
+    expect(upgraded.updateConversationTurn(turn.id, { status: 'partial' }).status).toBe('partial')
+    expect(() => database!.database.prepare('UPDATE conversation_turns SET status = ? WHERE id = ?')
+      .run('invalid-status', turn.id)).toThrow(/CHECK constraint failed/)
+    expect(database.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+  })
+
   it('restores the conversation session grain index for an already-migrated version 15 database', async () => {
     const { repositories, databasePath } = await createRepositories()
     const channel = createChannel(repositories)
@@ -1094,6 +1120,34 @@ describe('SQLite workspace repositories', () => {
       FROM conversation_handoffs_v16;
       DROP TABLE conversation_handoffs_v16;
       DELETE FROM schema_migrations WHERE version = 16;
+      COMMIT;
+    `)
+    legacy.close()
+  }
+
+  function downgradeConversationTurnsToVersion16(databasePath: string): void {
+    const legacy = new DatabaseSync(databasePath)
+    legacy.exec(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN;
+      CREATE TABLE conversation_turns_v16 (
+        id TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL REFERENCES channels(id),
+        trigger_message_id TEXT NOT NULL UNIQUE REFERENCES messages(id),
+        thread_root_message_id TEXT REFERENCES messages(id),
+        mode TEXT NOT NULL CHECK(mode IN ('ordinary', 'direct', 'multi_direct', 'all')),
+        status TEXT NOT NULL CHECK(status IN ('screening', 'judging', 'responding', 'handoff', 'completed', 'cancelled', 'failed')),
+        current_round INTEGER NOT NULL CHECK(current_round >= 0),
+        max_rounds INTEGER NOT NULL CHECK(max_rounds > 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+      INSERT INTO conversation_turns_v16 SELECT * FROM conversation_turns;
+      DROP TABLE conversation_turns;
+      ALTER TABLE conversation_turns_v16 RENAME TO conversation_turns;
+      CREATE INDEX conversation_turns_status_created_at_idx ON conversation_turns(status, created_at);
+      DELETE FROM schema_migrations WHERE version = 17;
       COMMIT;
     `)
     legacy.close()
