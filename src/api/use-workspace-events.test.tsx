@@ -53,4 +53,23 @@ describe('useWorkspaceEvents', () => {
     expect(refresh).toHaveBeenCalledOnce()
     Object.defineProperty(window, 'EventSource', { configurable: true, value: originalEventSource })
   })
+
+  it('cancels a pending throttled refresh when an immediate refresh event arrives', () => {
+    vi.useFakeTimers()
+    const originalEventSource = window.EventSource
+    Object.defineProperty(window, 'EventSource', { configurable: true, value: FakeEventSource })
+    const refresh = vi.fn()
+    render(<Harness refresh={refresh} />)
+
+    act(() => {
+      FakeEventSource.current?.listeners.get('conversation.invocation_updated')?.(new Event('conversation.invocation_updated'))
+      FakeEventSource.current?.listeners.get('message.created')?.(new Event('message.created'))
+    })
+    expect(refresh).toHaveBeenCalledOnce()
+
+    act(() => vi.advanceTimersByTime(200))
+
+    expect(refresh).toHaveBeenCalledOnce()
+    Object.defineProperty(window, 'EventSource', { configurable: true, value: originalEventSource })
+  })
 })

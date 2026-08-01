@@ -25,10 +25,10 @@ export function MessageComposer({ channelName, agents, onSend }: { channelName: 
   const suggestions = useMemo(() => {
     if (!mention) return []
     if (closedMentionKey === mentionKey(mention)) return []
-    const query = mention.query.toLocaleLowerCase()
+    const query = normalizeMentionText(mention.query)
     const agentSuggestions: MentionSuggestion[] = distinctAgentsByIdentity(agents)
       .filter((agent) => agent.identity.toLocaleLowerCase() !== 'all' && agent.mentionName.toLocaleLowerCase() !== 'all')
-      .filter((agent) => agent.identity.toLocaleLowerCase().includes(query))
+      .filter((agent) => normalizeMentionText(agent.identity).includes(query) || normalizeMentionText(agent.mentionName).includes(query))
       .map((agent) => ({ kind: 'agent', id: agent.id, agent, identity: agent.identity }))
     const allSuggestions: MentionSuggestion[] = 'all'.includes(query) ? [{ kind: 'all', id: 'all', identity: 'all' }] : []
     return [...allSuggestions, ...agentSuggestions]
@@ -103,9 +103,15 @@ function mentionKey(mention: MentionMatch): string {
 
 function mentionAtCaret(body: string, caret: number): MentionMatch | undefined {
   const beforeCaret = body.slice(0, caret)
-  const match = /@([^\s@]*)$/.exec(beforeCaret)
-  if (!match) return undefined
-  return { query: match[1] ?? '', start: caret - (match[1]?.length ?? 0) - 1, end: caret }
+  const start = beforeCaret.lastIndexOf('@')
+  if (start < 0) return undefined
+  const query = beforeCaret.slice(start + 1)
+  if (query.includes('@')) return undefined
+  return { query, start, end: caret }
+}
+
+function normalizeMentionText(value: string): string {
+  return value.trimStart().replace(/\s+/g, ' ').toLocaleLowerCase()
 }
 
 function statusLabel(status: AgentView['status']): string {

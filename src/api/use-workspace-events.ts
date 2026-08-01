@@ -28,6 +28,10 @@ export function useWorkspaceEvents(refresh: () => void): boolean {
     const onChange = (event: Event) => {
       setReconnecting(false)
       if (!throttledEvents.has(event.type)) {
+        if (pendingRuntimeRefresh.current) {
+          clearTimeout(pendingRuntimeRefresh.current)
+          pendingRuntimeRefresh.current = undefined
+        }
         refresh()
         return
       }

@@ -1,13 +1,42 @@
-import { GitBranch, ListChecks, Route, ShieldAlert } from 'lucide-react'
+import { X, ListChecks, Route, ShieldAlert } from 'lucide-react'
+import { useState } from 'react'
 import type { AgentView, AgentInvocationView, ConversationHandoffView, ConversationTurnDetailView, TurnParticipantView } from '../domain/workspace-view'
 
-export function ConversationTurnDetail({ detail, agents }: { detail: ConversationTurnDetailView; agents: AgentView[] }) {
+export function ConversationTurnDetail({
+  detail,
+  agents,
+  onCancel,
+}: {
+  detail: ConversationTurnDetailView
+  agents: AgentView[]
+  onCancel?(): Promise<void>
+}) {
+  const [confirmingCancel, setConfirmingCancel] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelError, setCancelError] = useState<string | null>(null)
   const agentById = new Map(agents.map((agent) => [agent.id, agent]))
+  const failedParticipants = detail.participants.filter(hasParticipantFailureDetail)
+  const failedInvocations = detail.invocations.filter((invocation) => invocation.errorCategory)
+  const failedHandoffs = detail.handoffs.filter((handoff) => handoff.status === 'failed' || handoff.status === 'rejected' || handoff.reason)
   const failures = [
-    ...detail.participants.filter((participant) => participant.status === 'failed' || participant.reason),
-    ...detail.invocations.filter((invocation) => invocation.errorCategory),
-    ...detail.handoffs.filter((handoff) => handoff.status === 'failed' || handoff.status === 'rejected' || handoff.reason),
+    ...failedParticipants,
+    ...failedInvocations,
+    ...failedHandoffs,
   ]
+  const canCancel = Boolean(onCancel && !isTerminalTurnStatus(detail.turn.status))
+
+  const cancelTurn = async () => {
+    if (!onCancel || cancelling) return
+    setCancelling(true)
+    setCancelError(null)
+    try {
+      await onCancel()
+    } catch (cause) {
+      setCancelError(cause instanceof Error ? cause.message : '无法取消 Turn。')
+    } finally {
+      setCancelling(false)
+    }
+  }
 
   return <section className="turn-detail-panel" aria-label="Turn 详情">
     <div className="detail-section turn-detail-summary">
@@ -20,6 +49,13 @@ export function ConversationTurnDetail({ detail, agents }: { detail: Conversatio
         <div><dt>轮次</dt><dd>{`第 ${detail.turn.currentRound} / ${detail.turn.maxRounds} 轮`}</dd></div>
         <div><dt>模式</dt><dd>{turnModeLabel(detail.turn.mode)}</dd></div>
       </dl>
+      {canCancel && <div className="turn-cancel-row">
+        {!confirmingCancel ? <button type="button" className="context-small-action context-danger" onClick={() => { setConfirmingCancel(true); setCancelError(null) }}><X size={14} />取消 Turn</button> : <div className="turn-cancel-confirm">
+          <button type="button" className="danger-action" disabled={cancelling} onClick={() => void cancelTurn()}><X size={14} />{cancelling ? '正在取消...' : `确认取消 Turn ${detail.turn.id}`}</button>
+          <button type="button" className="secondary-action" disabled={cancelling} onClick={() => { setConfirmingCancel(false); setCancelError(null) }}>保留 Turn</button>
+        </div>}
+        {cancelError && <p className="form-error" role="alert">{cancelError}</p>}
+      </div>}
     </div>
 
     <section className="detail-section">
@@ -71,9 +107,9 @@ export function ConversationTurnDetail({ detail, agents }: { detail: Conversatio
       <details className="turn-failure-details">
         <summary><ShieldAlert size={14} />失败详情</summary>
         <ul>
-          {detail.participants.filter((participant) => participant.status === 'failed' || participant.reason).map((participant) => <li key={`participant-${participant.id}`}>{agentName(participant.agentId, agentById)}：{participant.reason ?? participantStatusLabel(participant.status)}</li>)}
-          {detail.invocations.filter((invocation) => invocation.errorCategory).map((invocation) => <li key={`invocation-${invocation.id}`}>{agentName(invocation.agentId, agentById)}：{errorCategoryLabel(invocation.errorCategory!)}</li>)}
-          {detail.handoffs.filter((handoff) => handoff.status === 'failed' || handoff.status === 'rejected' || handoff.reason).map((handoff) => <li key={`handoff-${handoff.id}`}>{handoffPath(handoff, agentById)}：{handoff.reason ?? handoffStatusLabel(handoff.status)}</li>)}
+          {failedParticipants.map((participant) => <li key={`participant-${participant.id}`}>{agentName(participant.agentId, agentById)}：{participant.reason ?? participantStatusLabel(participant.status)}</li>)}
+          {failedInvocations.map((invocation) => <li key={`invocation-${invocation.id}`}>{agentName(invocation.agentId, agentById)}：{errorCategoryLabel(invocation.errorCategory!)}</li>)}
+          {failedHandoffs.map((handoff) => <li key={`handoff-${handoff.id}`}>{handoffPath(handoff, agentById)}：{handoff.reason ?? handoffStatusLabel(handoff.status)}</li>)}
         </ul>
       </details>
     </section>}
@@ -110,6 +146,19 @@ function decisionLabel(decision: TurnParticipantView['decision']): string {
 
 function participantStatusLabel(status: TurnParticipantView['status']): string {
   return { candidate: '候选', selected: '已选择', spoken: '已发言', failed: '失败', skipped: '已跳过', cancelled: '已取消' }[status]
+}
+
+function hasParticipantFailureDetail(participant: TurnParticipantView): boolean {
+  if (participant.status === 'failed') return true
+  return participant.status === 'skipped' && isControlledParticipantFailure(participant.reason)
+}
+
+function isControlledParticipantFailure(reason: string | null): boolean {
+  return reason === 'participation_failed' || reason === 'response_failed' || reason === 'coordinator_failed'
+}
+
+function isTerminalTurnStatus(status: ConversationTurnDetailView['turn']['status']): boolean {
+  return status === 'completed' || status === 'partial' || status === 'cancelled' || status === 'failed' || status === 'interrupted'
 }
 
 function invocationKindLabel(kind: AgentInvocationView['kind']): string {

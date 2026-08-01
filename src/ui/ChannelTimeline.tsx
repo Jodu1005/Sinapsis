@@ -1,25 +1,22 @@
-import { Bot, CornerDownRight, LoaderCircle, MessageSquareText } from 'lucide-react'
+import { Bot, CornerDownRight, MessageSquareText } from 'lucide-react'
 import type { AgentView, ChannelMessage, TurnActivityView } from '../domain/workspace-view'
 
 export function ChannelTimeline({
   messages,
   agents = [],
-  typingAgents = [],
   turnActivities = [],
   onOpenThread,
   onOpenTurn,
 }: {
   messages: ChannelMessage[]
   agents?: AgentView[]
-  typingAgents?: AgentView[]
   turnActivities?: TurnActivityView[]
   onOpenThread?(message: ChannelMessage): void
   onOpenTurn?(turnId: string): void
 }) {
   const rootMessages = messages.filter((message) => !message.threadRootMessageId)
   const agentById = new Map(agents.map((agent) => [agent.id, agent]))
-  const repliedAgentIds = new Set(rootMessages.flatMap((message) => message.senderType === 'agent' && message.senderId ? [message.senderId] : []))
-  const activityGroups = groupActivities(turnActivities.filter((activity) => !(activity.phase === 'preparing' && activity.agentId && repliedAgentIds.has(activity.agentId))))
+  const activityGroups = groupActivities(turnActivities)
   return <section className="channel-timeline" aria-label="频道消息" aria-live="polite">
     {rootMessages.length === 0 ? <div className="empty-timeline"><p>这里还没有消息</p><span>发一条消息，或在任务里 @ 指定 Agent。</span></div> : rootMessages.map((message) => <article className={`message message-${message.senderType}`} key={message.id}>
       <div className="message-avatar" aria-hidden="true">{message.senderType === 'agent' ? <Bot size={17} /> : message.senderType === 'system' ? <CornerDownRight size={17} /> : message.authorName.slice(0, 1)}</div>
@@ -33,15 +30,14 @@ export function ChannelTimeline({
         </div>
       </div>)}
     </div>}
-    {typingAgents.map((agent) => <div className="typing-indicator" key={agent.id} role="status" aria-live="polite"><Bot size={15} /><span>{agent.identity} 正在准备回复</span><LoaderCircle className="spin" size={14} /></div>)}
   </section>
 }
 
 function groupActivities(activities: TurnActivityView[]): Array<{ turnId: string; activities: TurnActivityView[] }> {
   const sorted = [...activities].sort((left, right) =>
     left.turnId.localeCompare(right.turnId)
-    || queueRank(left).localeCompare(queueRank(right))
     || phaseRank(left.phase) - phaseRank(right.phase)
+    || queueRank(left) - queueRank(right)
     || (left.agentId ?? '').localeCompare(right.agentId ?? ''),
   )
   const groups = new Map<string, TurnActivityView[]>()
@@ -49,8 +45,8 @@ function groupActivities(activities: TurnActivityView[]): Array<{ turnId: string
   return [...groups.entries()].map(([turnId, grouped]) => ({ turnId, activities: grouped }))
 }
 
-function queueRank(activity: TurnActivityView): string {
-  return `${activity.queuePosition ?? 9999}`.padStart(4, '0')
+function queueRank(activity: TurnActivityView): number {
+  return activity.queuePosition ?? 9999
 }
 
 function phaseRank(phase: TurnActivityView['phase']): number {

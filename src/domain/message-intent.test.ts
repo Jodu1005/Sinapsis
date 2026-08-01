@@ -7,6 +7,12 @@ const agents = [
   { id: 'agent-opencode', identity: 'ada', mentionName: 'frontend' },
 ] as AgentView[]
 
+const localizedAgents = [
+  { id: 'agent-frontend-new', identity: '前端 Agent', mentionName: 'frontend', updatedAt: '2026-07-31T08:02:00.000Z' },
+  { id: 'agent-frontend-old', identity: '前端 Agent', mentionName: 'frontend-old', updatedAt: '2026-07-31T08:01:00.000Z' },
+  { id: 'agent-review', identity: '审查 Agent', mentionName: 'review', updatedAt: '2026-07-31T08:00:00.000Z' },
+] as AgentView[]
+
 describe('parseMessageIntent', () => {
   it('keeps ordinary chat messages intact', () => {
     expect(parseMessageIntent('大家同步一下。', agents)).toEqual({ kind: 'message', body: '大家同步一下。' })
@@ -30,6 +36,14 @@ describe('parseMessageIntent', () => {
 
   it('keeps legacy handles compatible while preferring Agent names', () => {
     expect(parseMessageIntent('/task @dev 修复按钮', agents)).toMatchObject({ directAgentId: 'agent-pi' })
+  })
+
+  it('resolves a direct task mention whose Agent identity contains spaces', () => {
+    expect(parseMessageIntent('/task 请修复表单 @前端 Agent', localizedAgents)).toMatchObject({
+      kind: 'task',
+      title: '请修复表单',
+      directAgentId: 'agent-frontend-new',
+    })
   })
 
   it('reports an unknown task-agent mention', () => {

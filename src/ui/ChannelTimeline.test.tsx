@@ -51,13 +51,14 @@ describe('ChannelTimeline', () => {
     expect(container.querySelector('.message-agent')).toBeInTheDocument()
   })
 
-  it('shows an Agent typing indicator while a reply is being prepared', () => {
-    render(<ChannelTimeline messages={[]} typingAgents={[{
+  it('does not render legacy typing indicators after turn activity migration', () => {
+    const legacyProps = { typingAgents: [{
       id: 'agent-1', identity: 'Newton', mentionName: 'newton', runtime: 'pi', status: 'busy',
       capabilityTags: [], maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: [], createdAt: '2026-07-25T08:00:00.000Z', updatedAt: '2026-07-25T08:00:00.000Z',
-    }]} />)
+    }] }
+    render(<ChannelTimeline messages={[]} {...legacyProps} />)
 
-    expect(screen.getByRole('status')).toHaveTextContent('Newton 正在准备回复')
+    expect(screen.queryByText('Newton 正在准备回复')).not.toBeInTheDocument()
   })
 
   it('shows stable multi-agent turn activity at the bottom of the timeline', async () => {
@@ -75,7 +76,7 @@ describe('ChannelTimeline', () => {
     expect(openTurn).toHaveBeenCalledWith('turn-1')
   })
 
-  it('removes the preparing activity once the matching Agent reply is visible', () => {
+  it('keeps a new turn preparing activity visible when the same Agent has an older reply', () => {
     render(<ChannelTimeline messages={[
       humanMessage,
       {
@@ -92,6 +93,20 @@ describe('ChannelTimeline', () => {
       },
     ]} agents={agents} turnActivities={[activities[3]!]} />)
 
-    expect(screen.queryByText('Newton 正在准备回复')).not.toBeInTheDocument()
+    expect(screen.getByText('Newton 正在准备回复')).toBeInTheDocument()
+  })
+
+  it('orders activity by phase before queue position within a turn', () => {
+    render(<ChannelTimeline messages={[humanMessage]} agents={agents} turnActivities={[
+      { turnId: 'turn-order', agentId: 'agent-clawd', phase: 'queued', queuePosition: 1 },
+      { turnId: 'turn-order', agentId: null, phase: 'screening', queuePosition: null },
+      { turnId: 'turn-order', agentId: 'agent-newton', phase: 'judging', queuePosition: null },
+      { turnId: 'turn-order', agentId: 'agent-newton', phase: 'preparing', queuePosition: null },
+    ]} />)
+
+    const activityText = screen.getByLabelText('Turn 活动').textContent ?? ''
+    expect(activityText.indexOf('正在筛选职责')).toBeLessThan(activityText.indexOf('Newton 正在判断是否参与'))
+    expect(activityText.indexOf('Newton 正在判断是否参与')).toBeLessThan(activityText.indexOf('Clawd 排队中（第 1 位）'))
+    expect(activityText.indexOf('Clawd 排队中（第 1 位）')).toBeLessThan(activityText.indexOf('Newton 正在准备回复'))
   })
 })

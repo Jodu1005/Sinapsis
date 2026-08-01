@@ -1,6 +1,6 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiClient, type WorkspaceApi } from '../api/client'
 import type { ConversationTurnDetailView, TaskDetailView, TaskView, WorkspaceSnapshot } from '../domain/workspace-view'
 import { WorkspaceShell } from './WorkspaceShell'
@@ -149,6 +149,9 @@ describe('WorkspaceShell', () => {
     FakeEventSource.instances = []
     vi.stubGlobal('EventSource', FakeEventSource)
     window.localStorage.clear()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('shows workspace creation when no workspace exists', async () => {
@@ -383,6 +386,94 @@ describe('WorkspaceShell', () => {
     expect(within(context).getByText('职责命中 frontend')).toBeInTheDocument()
     expect(within(context).queryByText(/Prompt/)).not.toBeInTheDocument()
     expect(within(context).queryByText(/Runtime raw output/)).not.toBeInTheDocument()
+  })
+
+  it('keeps existing turn details visible while conversation refreshes load updated details once', async () => {
+    const activeSnapshot = structuredClone(snapshot)
+    activeSnapshot.activeTurnsByChannel = {
+      'channel-general': [{ turnId: 'turn-1', agentId: 'agent-1', phase: 'preparing', queuePosition: null }],
+      'channel-build': [],
+    }
+    const refreshedSnapshot = structuredClone(activeSnapshot)
+    refreshedSnapshot.activeTurnsByChannel = { 'channel-general': [], 'channel-build': [] }
+    const secondRefreshedSnapshot = structuredClone(refreshedSnapshot)
+    const refreshedDetail: ConversationTurnDetailView = {
+      ...turnDetail,
+      turn: { ...turnDetail.turn, status: 'completed', currentRound: 2, completedAt: '2026-07-31T08:03:00.000Z' },
+    }
+    let resolveRefreshDetail: (detail: ConversationTurnDetailView) => void = () => undefined
+    const getConversationTurn = vi.fn()
+      .mockResolvedValueOnce(turnDetail)
+      .mockImplementationOnce(() => new Promise<ConversationTurnDetailView>((resolve) => { resolveRefreshDetail = resolve }))
+    const getBootstrap = vi.fn().mockResolvedValueOnce(activeSnapshot).mockResolvedValueOnce(refreshedSnapshot).mockResolvedValue(secondRefreshedSnapshot)
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={makeApi({ getBootstrap, getConversationTurn })} />)
+
+    await user.click(await screen.findByRole('button', { name: '查看 Turn turn-1 活动详情' }))
+    expect(await screen.findByRole('heading', { name: 'Turn turn-1' })).toBeInTheDocument()
+
+    vi.useFakeTimers()
+    await act(async () => {
+      FakeEventSource.instances[0]!.emit('conversation.invocation_updated')
+      FakeEventSource.instances[0]!.emit('conversation.turn_completed')
+      await vi.advanceTimersByTimeAsync(200)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(getConversationTurn).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      FakeEventSource.instances[0]!.emit('conversation.turn_updated')
+      await vi.advanceTimersByTimeAsync(200)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(getBootstrap).toHaveBeenCalledTimes(3)
+    expect(getConversationTurn).toHaveBeenCalledTimes(2)
+
+    expect(screen.getByRole('heading', { name: 'Turn turn-1' })).toBeInTheDocument()
+    expect(screen.queryByText('正在读取 Turn 详情...')).not.toBeInTheDocument()
+    await act(async () => {
+      resolveRefreshDetail(refreshedDetail)
+    })
+
+    expect(screen.getByText('已完成')).toBeInTheDocument()
+    expect(getBootstrap).toHaveBeenCalledTimes(3)
+    expect(getConversationTurn).toHaveBeenCalledTimes(2)
+  })
+
+  it('cancels a non-terminal turn with confirmation and refreshes snapshot plus detail', async () => {
+    let resolveCancel: () => void = () => undefined
+    const activeSnapshot = structuredClone(snapshot)
+    activeSnapshot.activeTurnsByChannel = {
+      'channel-general': [{ turnId: 'turn-1', agentId: 'agent-1', phase: 'queued', queuePosition: 1 }],
+      'channel-build': [],
+    }
+    const cancelledSnapshot = structuredClone(activeSnapshot)
+    cancelledSnapshot.activeTurnsByChannel = { 'channel-general': [], 'channel-build': [] }
+    const cancelledDetail: ConversationTurnDetailView = {
+      ...turnDetail,
+      turn: { ...turnDetail.turn, status: 'cancelled', completedAt: '2026-07-31T08:04:00.000Z' },
+    }
+    const getBootstrap = vi.fn().mockResolvedValueOnce(activeSnapshot).mockResolvedValue(cancelledSnapshot)
+    const getConversationTurn = vi.fn().mockResolvedValueOnce(turnDetail).mockResolvedValueOnce(cancelledDetail)
+    const cancelConversationTurn = vi.fn().mockImplementation(() => new Promise<void>((resolve) => { resolveCancel = resolve }))
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={makeApi({ getBootstrap, getConversationTurn, cancelConversationTurn })} />)
+
+    await user.click(await screen.findByRole('button', { name: '查看 Turn turn-1 活动详情' }))
+    await user.click(await screen.findByRole('button', { name: '取消 Turn' }))
+    const confirm = screen.getByRole('button', { name: '确认取消 Turn turn-1' })
+    await user.click(confirm)
+    await user.click(confirm)
+
+    expect(cancelConversationTurn).toHaveBeenCalledOnce()
+    expect(confirm).toBeDisabled()
+    resolveCancel()
+
+    expect(await screen.findByText('已取消')).toBeInTheDocument()
+    expect(getBootstrap).toHaveBeenCalledTimes(2)
+    expect(getConversationTurn).toHaveBeenCalledTimes(2)
   })
 
   it('opens a Thread and sends replies under its root message', async () => {

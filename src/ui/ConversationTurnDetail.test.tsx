@@ -1,5 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
 import type { AgentView, ConversationTurnDetailView } from '../domain/workspace-view'
 import { ConversationTurnDetail } from './ConversationTurnDetail'
 
@@ -134,5 +135,41 @@ describe('ConversationTurnDetail', () => {
     expect(within(turnDetail).queryByText(/Runtime raw output/)).not.toBeInTheDocument()
     expect(within(turnDetail).queryByText(/Prompt should stay private/)).not.toBeInTheDocument()
     expect(within(turnDetail).queryByText(/"decision"/)).not.toBeInTheDocument()
+  })
+
+  it('keeps normal spoken participant reasons out of failure details', async () => {
+    const user = userEvent.setup()
+    const { container } = render(<ConversationTurnDetail detail={detail} agents={agents} />)
+
+    const details = container.querySelector('details')!
+    await user.click(within(details).getByText('失败详情'))
+
+    expect(within(details).queryByText('Newton：职责命中 React 表单')).not.toBeInTheDocument()
+    expect(within(details).getByText('Clawd：participation_failed')).toBeInTheDocument()
+    expect(screen.getByText('职责命中 React 表单')).toBeInTheDocument()
+  })
+
+  it('shows a confirmed cancel command for a non-terminal turn and keeps details on failure', async () => {
+    const user = userEvent.setup()
+    let rejectCancel: (error: Error) => void = () => undefined
+    const onCancel = vi.fn().mockImplementation(() => new Promise<void>((_resolve, reject) => { rejectCancel = reject }))
+    render(<ConversationTurnDetail detail={{ ...detail, turn: { ...detail.turn, status: 'responding', completedAt: null } }} agents={agents} onCancel={onCancel} />)
+
+    await user.click(screen.getByRole('button', { name: '取消 Turn' }))
+    const confirm = screen.getByRole('button', { name: '确认取消 Turn turn-1' })
+    await user.click(confirm)
+    await user.click(confirm)
+
+    expect(onCancel).toHaveBeenCalledOnce()
+    expect(confirm).toBeDisabled()
+    rejectCancel(new Error('取消失败，请稍后重试。'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('取消失败，请稍后重试。')
+    expect(screen.getByRole('heading', { name: 'Turn turn-1' })).toBeInTheDocument()
+  })
+
+  it('does not show cancel for terminal turns', () => {
+    render(<ConversationTurnDetail detail={{ ...detail, turn: { ...detail.turn, status: 'completed' } }} agents={agents} onCancel={vi.fn()} />)
+
+    expect(screen.queryByRole('button', { name: '取消 Turn' })).not.toBeInTheDocument()
   })
 })
