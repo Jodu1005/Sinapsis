@@ -480,13 +480,15 @@ describe('local service API', () => {
     repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
     const channel = repositories.createChannel({ name: 'lexical-boundary' })
     const scope = createTestAgent(repositories, 'Scope', 'scope')
+    const example = createTestAgent(repositories, 'Example', 'example')
     repositories.addChannelAgent(channel.id, scope.id, new Date())
+    repositories.addChannelAgent(channel.id, example.id, new Date())
     const server = await startHttpTestServer(app)
     closeServer = server.close
 
     const emailResponse = await fetch(`${server.baseUrl}/api/channels/${channel.id}/messages`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ body: '联系 foo@example.com。' }),
+      body: JSON.stringify({ body: '联系 foo@example.com、用户@example.com 或 用户@例子.公司。' }),
     })
     const packageResponse = await fetch(`${server.baseUrl}/api/channels/${channel.id}/messages`, {
       method: 'POST', headers: { 'content-type': 'application/json' },

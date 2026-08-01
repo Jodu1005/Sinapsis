@@ -304,19 +304,13 @@ export class ChannelTurnCoordinator {
     if (isTerminal(turn)) return turn
     const execution = this.executions.get(turnId)
     if (execution) {
-      execution.cancelled = true
       const cancellation = await this.cancelInvocations(execution, this.repositories.listAgentInvocations(turnId))
-      if (cancellation.failures.length > 0 && cancellation.cancelledInvocationIds.length === 0) {
-        execution.cancelled = false
+      this.cancelParticipantsForInvocations(turnId, cancellation.cancelledInvocationIds, 'turn_cancelled')
+      this.clearActivitiesForInvocations(execution, cancellation.cancelledInvocationIds)
+      if (cancellation.failures.length > 0) {
         throw cancellation.failures[0]!.error
       }
-      for (const failure of cancellation.failures) {
-        this.markInvocationCancelled(
-          execution.turnId,
-          failure.invocationId,
-          `cancellation_failed:${errorMessage(failure.error)}`,
-        )
-      }
+      execution.cancelled = true
       this.cancelParticipants(turnId)
       execution.activities.clear()
     }
@@ -349,13 +343,9 @@ export class ChannelTurnCoordinator {
         execution,
         this.repositories.listAgentInvocations(execution.turnId).filter((invocation) => invocation.agentId === agentId),
       )
+      this.cancelParticipantsForInvocations(execution.turnId, cancellation.cancelledInvocationIds, 'agent_cancelled')
+      this.clearActivitiesForInvocations(execution, cancellation.cancelledInvocationIds)
       if (cancellation.failures.length > 0) throw cancellation.failures[0]!.error
-      const participant = this.repositories.listTurnParticipants(execution.turnId)
-        .find((candidate) => candidate.agentId === agentId)
-      if (participant && !isTerminalParticipant(participant)) {
-        this.updateParticipant(execution.turnId, agentId, { status: 'cancelled', reason: 'agent_cancelled' })
-      }
-      execution.activities.delete(agentId)
     }
   }
 
@@ -1024,17 +1014,22 @@ export class ChannelTurnCoordinator {
   }
 
   private failTurn(turnId: string, error: unknown): ConversationTurn {
-    for (const participant of this.repositories.listTurnParticipants(turnId)) {
+    const failureReason = `coordinator_failed:${errorMessage(error)}`
+    const participants = this.repositories.listTurnParticipants(turnId)
+    const hasPublicReply = participants.some((participant) => participant.status === 'spoken')
+    for (const participant of participants) {
       if (!isTerminalParticipant(participant)) {
         this.updateParticipant(turnId, participant.agentId, {
           status: 'failed',
-          reason: `coordinator_failed:${errorMessage(error)}`,
+          reason: failureReason,
         })
+      } else if (participant.status === 'spoken') {
+        this.updateParticipant(turnId, participant.agentId, { reason: failureReason })
       }
     }
-    this.failAcceptedHandoffs(turnId, `coordinator_failed:${errorMessage(error)}`)
+    this.failAcceptedHandoffs(turnId, failureReason)
     const turn = this.repositories.updateConversationTurn(turnId, {
-      status: 'failed',
+      status: hasPublicReply ? 'partial' : 'failed',
       completedAt: this.now().toISOString(),
     })
     this.publish('conversation.turn_completed', 'conversation_turn', turn.id)
@@ -1099,6 +1094,29 @@ export class ChannelTurnCoordinator {
       if (!isTerminalParticipant(participant)) {
         this.updateParticipant(turnId, participant.agentId, { status: 'cancelled', reason: 'turn_cancelled' })
       }
+    }
+  }
+
+  private cancelParticipantsForInvocations(
+    turnId: string,
+    invocationIds: string[],
+    reason: 'turn_cancelled' | 'agent_cancelled',
+  ): void {
+    const cancelledIds = new Set(invocationIds)
+    const agentIds = new Set(this.repositories.listAgentInvocations(turnId)
+      .filter((invocation) => cancelledIds.has(invocation.id))
+      .map((invocation) => invocation.agentId))
+    for (const participant of this.repositories.listTurnParticipants(turnId)) {
+      if (agentIds.has(participant.agentId) && !isTerminalParticipant(participant)) {
+        this.updateParticipant(turnId, participant.agentId, { status: 'cancelled', reason })
+      }
+    }
+  }
+
+  private clearActivitiesForInvocations(execution: TurnExecution, invocationIds: string[]): void {
+    const cancelledIds = new Set(invocationIds)
+    for (const invocation of this.repositories.listAgentInvocations(execution.turnId)) {
+      if (cancelledIds.has(invocation.id)) execution.activities.delete(invocation.agentId)
     }
   }
 

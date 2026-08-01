@@ -910,12 +910,34 @@ describe('SQLite workspace repositories', () => {
   it('upgrades an existing migration 16 database so partial Turn status is persisted and constrained', async () => {
     const { repositories, databasePath } = await createRepositories()
     const channel = createChannel(repositories)
+    const source = repositories.createAgent({
+      identity: 'Source', mentionName: 'source', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const target = repositories.createAgent({
+      identity: 'Target', mentionName: 'target', runtime: 'opencode', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'opencode', args: [], model: '', env: {},
+    })
     const message = repositories.createMessage({
       channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Legacy parallel Turn.',
     })
     const turn = repositories.createConversationTurn({
       channelId: channel.id, triggerMessageId: message.id, threadRootMessageId: null,
       mode: 'multi_direct', maxRounds: 3,
+    })
+    const participant = repositories.createTurnParticipant({
+      turnId: turn.id, agentId: source.id, source: 'direct', rank: 1, matcherScore: null,
+      decision: 'speak', speakingOrder: 1, status: 'spoken', reason: 'legacy_participant',
+    })
+    const invocation = repositories.createAgentInvocation({
+      turnId: turn.id, agentId: source.id, kind: 'response', priority: 'human_direct', round: 1,
+      idempotencyKey: `${turn.id}:legacy-response`, sourceInvocationId: null, status: 'settled',
+      startedAt: '2026-07-31T00:00:00.000Z', completedAt: '2026-07-31T00:00:01.000Z',
+    })
+    const handoff = repositories.createConversationHandoff({
+      turnId: turn.id, sourceInvocationId: invocation.id, fromAgentId: source.id,
+      requestedTargetAgentId: target.id, toAgentId: target.id, question: 'Legacy handoff.',
+      round: 2, status: 'rejected', reason: 'parallel_handoff_disabled',
     })
     database!.close()
     database = undefined
@@ -927,9 +949,23 @@ describe('SQLite workspace repositories', () => {
     expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 17').get())
       .toEqual({ version: 17 })
     expect(upgraded.getConversationTurn(turn.id)).toMatchObject({ status: 'screening' })
+    expect(upgraded.listTurnParticipants(turn.id)).toEqual([expect.objectContaining({
+      id: participant.id, agentId: source.id, status: 'spoken', reason: 'legacy_participant',
+    })])
+    expect(upgraded.listAgentInvocations(turn.id)).toEqual([expect.objectContaining({
+      id: invocation.id, agentId: source.id, status: 'settled', sourceInvocationId: null,
+    })])
+    expect(upgraded.listConversationHandoffs(turn.id)).toEqual([expect.objectContaining({
+      id: handoff.id, sourceInvocationId: invocation.id, fromAgentId: source.id,
+      toAgentId: target.id, status: 'rejected', reason: 'parallel_handoff_disabled',
+    })])
     expect(upgraded.updateConversationTurn(turn.id, { status: 'partial' }).status).toBe('partial')
     expect(() => database!.database.prepare('UPDATE conversation_turns SET status = ? WHERE id = ?')
       .run('invalid-status', turn.id)).toThrow(/CHECK constraint failed/)
+    expect(database.database.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'index' AND name = 'conversation_turns_status_created_at_idx'
+    `).get()).toEqual({ name: 'conversation_turns_status_created_at_idx' })
     expect(database.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
   })
 

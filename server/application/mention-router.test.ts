@@ -76,10 +76,19 @@ describe('routeMentions', () => {
 
   it('does not treat email addresses or scoped package names as mentions', () => {
     const scope = createAgent('scope', 'Scope', 'scope')
+    const example = createAgent('example', 'Example', 'example')
 
-    expect(routeMentions('联系 foo@example.com，安装 @scope/pkg。', [scope])).toEqual({
+    expect(routeMentions('联系 foo@example.com、用户@example.com 或 用户@例子.公司，安装 @scope/pkg。', [scope, example])).toEqual({
       mode: 'ordinary',
       targetAgentIds: [],
+      unknownMentions: [],
+    })
+  })
+
+  it('routes a known Agent when Chinese text touches the mention on both sides', () => {
+    expect(routeMentions('请@Newton看看', [newton, clawd])).toEqual({
+      mode: 'direct',
+      targetAgentIds: [newton.id],
       unknownMentions: [],
     })
   })

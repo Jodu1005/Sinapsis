@@ -8,7 +8,8 @@ interface MentionMatch {
 }
 
 const mentionLeftBoundary = '(^|[^A-Za-z0-9_])'
-const mentionRightBoundary = '(?=$|[^\\p{L}\\p{N}_/-])'
+const mentionRightBoundary = '(?=$|[^A-Za-z0-9_/-])'
+const emailAddress = /[\p{L}\p{N}][\p{L}\p{N}._%+-]*@[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?(?:\.[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?)+/gu
 
 export class UnknownMentionError extends Error {
   constructor(readonly mentions: string[]) {
@@ -20,9 +21,10 @@ export class UnknownMentionError extends Error {
 }
 
 export function routeMentions(body: string, agents: Agent[]): MentionRoute {
-  const matches = agentMentionMatches(body, agents)
-  const allMention = exactMentionMatches(body, 'all')
-  const unknownMentions = unknownMentionNames(body, [...matches, ...allMention])
+  const routableBody = maskEmailAddresses(body)
+  const matches = agentMentionMatches(routableBody, agents)
+  const allMention = exactMentionMatches(routableBody, 'all')
+  const unknownMentions = unknownMentionNames(routableBody, [...matches, ...allMention])
 
   if (allMention.length > 0) {
     return { mode: 'all', targetAgentIds: [], unknownMentions }
@@ -58,10 +60,14 @@ function unknownMentionNames(body: string, knownMatches: Array<Omit<MentionMatch
   for (const match of body.matchAll(expression)) {
     const start = match.index! + match[1].length
     const end = start + match[0].length - match[1].length
-    if (knownMatches.some((known) => start >= known.start && end <= known.end)) continue
+    if (knownMatches.some((known) => known.start === start || (start >= known.start && end <= known.end))) continue
     if (!unknownMentions.includes(match[2])) unknownMentions.push(match[2])
   }
   return unknownMentions
+}
+
+function maskEmailAddresses(body: string): string {
+  return body.replace(emailAddress, (address) => ' '.repeat(address.length))
 }
 
 function byFirstMention(left: MentionMatch, right: MentionMatch): number {
