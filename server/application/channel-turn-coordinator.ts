@@ -108,6 +108,8 @@ interface ResponseOutcome {
   response: PublicAgentResponse
 }
 
+const duplicateCheckCancelled = Symbol('duplicate_check_cancelled')
+
 const maxParticipationCandidates = 3
 const maxInitialSpeakers = 2
 const maxConversationRounds = 3
@@ -239,6 +241,11 @@ export class ChannelTurnCoordinator {
         if (execution.cancelled) return this.currentTurn(turn.id)
         if (publicResponseCount > 0) {
           const duplicateDecision = await this.duplicateCheck(execution, turn, message, speaker.agent)
+          if (duplicateDecision === duplicateCheckCancelled) {
+            if (execution.cancelled) return this.currentTurn(turn.id)
+            continue
+          }
+          if (execution.cancelled) return this.currentTurn(turn.id)
           if (!duplicateDecision || duplicateDecision.decision === 'silent') {
             this.updateParticipant(turn.id, speaker.agent.id, {
               status: 'skipped',
@@ -407,6 +414,7 @@ export class ChannelTurnCoordinator {
         currentMessage: message.body,
         channelSummary: this.renderContext(message),
       })
+      if (execution.cancelled) return this.currentParticipant(turn.id, agent.id)
       if ('confidence' in result) {
         return this.updateParticipant(turn.id, agent.id, {
           decision: result.decision,
@@ -449,6 +457,9 @@ export class ChannelTurnCoordinator {
         reason: result.reason,
       })
     } catch (error) {
+      if (execution.cancelled || isInvocationCancellation(error)) {
+        return this.currentParticipant(turn.id, agent.id)
+      }
       return this.updateParticipant(turn.id, agent.id, {
         decision: 'skipped',
         status: 'failed',
@@ -525,7 +536,7 @@ export class ChannelTurnCoordinator {
     turn: ConversationTurn,
     message: Message,
     agent: Agent,
-  ): Promise<DuplicateDecision | null> {
+  ): Promise<DuplicateDecision | null | typeof duplicateCheckCancelled> {
     const publicContext = this.renderContext(message)
     try {
       const { result } = await this.runInvocation(execution, turn, message, agent, {
@@ -539,7 +550,8 @@ export class ChannelTurnCoordinator {
         phase: 'judging',
       })
       return isDuplicateDecision(result.parsed) ? result.parsed : null
-    } catch {
+    } catch (error) {
+      if (execution.cancelled || isInvocationCancellation(error)) return duplicateCheckCancelled
       return null
     }
   }
@@ -577,7 +589,7 @@ export class ChannelTurnCoordinator {
       )
       return { invocation: invocationResult.invocation, response: invocationResult.result.parsed }
     } catch (error) {
-      if (!(error instanceof ConversationInvocationCancelledError) && !(error instanceof AgentInvocationQueueCancelledError)) {
+      if (!isInvocationCancellation(error)) {
         this.updateParticipant(turn.id, agent.id, {
           status: 'failed',
           reason: `response_failed:${errorMessage(error)}`,
@@ -698,6 +710,7 @@ export class ChannelTurnCoordinator {
         )
         continue
       }
+      if (execution.cancelled) continue
       this.finishHandoff(item.handoffId, 'completed', null)
       spokenAgentIds.add(agent.id)
       this.updateParticipant(turn.id, agent.id, { status: 'spoken' })
@@ -781,8 +794,7 @@ export class ChannelTurnCoordinator {
         if (current && (current.status === 'queued' || current.status === 'running')) {
           this.repositories.updateAgentInvocation(invocation.id, {
             status: execution.cancelled
-              || error instanceof ConversationInvocationCancelledError
-              || error instanceof AgentInvocationQueueCancelledError
+              || isInvocationCancellation(error)
               ? 'cancelled'
               : 'failed',
             completedAt: this.now().toISOString(),
@@ -811,8 +823,21 @@ export class ChannelTurnCoordinator {
     agentId: string,
     patch: Parameters<WorkspaceRepositories['updateTurnParticipant']>[2],
   ): TurnParticipant {
+    const current = this.currentParticipant(turnId, agentId)
+    if ((current.status === 'cancelled' || current.status === 'failed')
+      && patch.status !== undefined
+      && patch.status !== current.status) {
+      return current
+    }
     const participant = this.repositories.updateTurnParticipant(turnId, agentId, patch)
     this.publish('conversation.participant_decided', 'turn_participant', participant.id)
+    return participant
+  }
+
+  private currentParticipant(turnId: string, agentId: string): TurnParticipant {
+    const participant = this.repositories.listTurnParticipants(turnId)
+      .find((candidate) => candidate.agentId === agentId)
+    if (!participant) throw new DomainError(`Turn participant ${turnId}/${agentId} does not exist.`)
     return participant
   }
 
@@ -1022,4 +1047,11 @@ function isTerminalParticipant(participant: TurnParticipant): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'unknown_error'
+}
+
+function isInvocationCancellation(
+  error: unknown,
+): error is AgentInvocationQueueCancelledError | ConversationInvocationCancelledError {
+  return error instanceof AgentInvocationQueueCancelledError
+    || error instanceof ConversationInvocationCancelledError
 }

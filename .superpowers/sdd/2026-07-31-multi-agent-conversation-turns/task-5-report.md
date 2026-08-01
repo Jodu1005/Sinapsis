@@ -229,3 +229,84 @@
 - `senderId IS NULL` 的历史消息仍只能使用 bootstrap 最近 50 条名字回退；这是旧数据兼容限制，新写入消息不受影响。
 - 若 failed Turn 本身的最终持久化也失败，completion 会拒绝但内部 observer 会阻止 unhandled rejection；当前项目没有独立后台错误日志端口，数据库/事件层故障仍需依赖进程日志与运维监控。
 - `ConversationHandoff.status` 新增 `failed`、`toAgentId` 改为可空；未来新增消费者需覆盖该联合类型。
+
+---
+
+# Task 5 修复轮 2/5
+
+## 状态
+
+已修复取消 queued/running Participation 与 duplicate-check 后，异步 catch 覆写 Participant cancelled 终态的问题。修复基于 `775f10b05bda485d49c341339e8b9deb8df8fe3e`，未修改 `.codex/` 或 `src/.DS_Store`。
+
+## 根因
+
+- `probeCandidate` 捕获 Queue/Session 的 typed cancellation 后，无条件调用 `updateParticipant(... status: 'failed')`。
+- `duplicateCheck` 将所有异常折叠为 `null`，调用方把 cancelled 当作普通 duplicate-check 失败并写成 `skipped/duplicate_check_failed`。
+- `cancelParticipants` 虽先持久化 `cancelled`，上述 Promise continuation 仍可能随后执行，造成 Turn/Invocation 为 cancelled、Participant 为 failed/skipped。
+
+## 实现
+
+- 新增统一 `isInvocationCancellation` type guard，同时识别：
+  - `AgentInvocationQueueCancelledError`
+  - `ConversationInvocationCancelledError`
+- Participation 在 await 返回与 catch 两处检查 execution cancellation；取消时读取并返回当前已持久化 Participant，不再写 failed。
+- duplicate-check 使用独立 cancellation sentinel，不再将 typed cancellation 折叠成普通 `null`；调用方在 Turn 取消时立即返回当前 Turn，在单 Agent 取消时保留 cancelled Participant 并继续处理其他 Agent。
+- response/handoff catch 与 `runInvocation` 状态判断改用同一个 typed guard。
+- Coordinator 的 Participant 更新入口保护 `cancelled/failed`：异步分支不能将其改成其他状态。
+- Handoff 公开回复返回后、写 completed 前再次检查 execution cancellation，避免 Turn 取消流程把已失败的 Handoff 重新完成。
+- Invocation 仍只允许从 queued/running 写失败或取消终态；已有终态不会被异步 catch 覆写。
+- 取消失败逻辑未改：Session 精确取消失败仍恢复 `execution.cancelled=false`、保留 activity 与 active Runtime，允许重试且不发布 apology。
+
+## 回归覆盖
+
+1. **queued Participation**：另一个 Turn 占用同 Agent lane；取消后 queued Invocation 被移除、Session 不取消、Participant 保持 cancelled，lane 释放后不会晚到执行。
+2. **running Participation**：只取消对应 Invocation Session；Turn/Invocation/Participant 一致 cancelled，无公开回复。
+3. **running duplicate-check**：首个公开回复已合法落库；取消只命中 duplicate Invocation，第二位 Participant 保持 cancelled，无第二条/晚到回复。
+4. **queued duplicate-check**：另一 Turn 占用第二 Agent lane；queued duplicate 从未进入 Session，取消不影响 blocker Turn，最终仅保留首个正常回复和另一 Turn 回复。
+5. **取消失败重试**：原有 running Turn 回归继续通过，确认本轮 guard 未改变 active/retry 语义。
+
+## 修改文件
+
+- `server/application/channel-turn-coordinator.ts`
+- `server/application/channel-turn-coordinator.test.ts`
+- `.superpowers/sdd/2026-07-31-multi-agent-conversation-turns/task-5-report.md`
+
+## TDD：真实 RED / GREEN
+
+### Cycle 1：Participation 异步覆写
+
+- RED：`npm test -- --run server/application/channel-turn-coordinator.test.ts`
+- 结果：`2 failed / 18 passed`。queued Participant 被写为 `failed/participation_failed:Invocation ... was cancelled`；running Participant 被写为 `failed/participation_failed:Conversation invocation was cancelled`。
+
+### Cycle 2：duplicate-check 异步覆写
+
+- RED：加入 queued/running duplicate-check 后重跑同一命令。
+- 结果：`4 failed / 18 passed`。两条 Participation 继续失败；queued/running duplicate Participant 均被写为 `skipped/duplicate_check_failed`。
+
+### GREEN
+
+- 实现共同 typed guard、duplicate cancellation sentinel 与 Participant 终态保护后，Coordinator `1 file / 22 tests passed`。
+- 指定聚焦：Coordinator/Queue/Session `3 files / 42 tests passed`，无 warning 或 unhandled rejection。
+
+## 完整验证
+
+- 聚焦：`npm test -- --run server/application/channel-turn-coordinator.test.ts server/application/agent-invocation-queue.test.ts server/application/conversation-session-service.test.ts`
+  - 结果：3 个测试文件、42 项测试通过，退出码 0。
+- 完整测试：`npm test -- --run`
+  - 结果：49 个测试文件、368 项测试通过，0 失败，退出码 0。
+- Build：`npm run build`
+  - 结果：`tsc --noEmit` 通过；Vite 转换 1801 modules 并成功生成产物，退出码 0。
+- `git diff --check`：通过。
+
+## 自审
+
+- 四种 Invocation（Participation、duplicate-check、response、handoff-response）的 Queue/Session typed cancellation 使用同一 guard。
+- Turn cancel 的 Participant/Invocation/Handoff 终态均为单调更新；取消 continuation 不会将 cancelled/failed 改写为 failed/skipped/completed。
+- queued 路径不调用 Session；running 路径只传当前 invocationId；双 Turn 同 Agent 回归证明 ownership 隔离。
+- 首个已落库的合法公开回复不被撤回；被取消 Agent 不发布 apology 或晚到回复。
+- 全局 Queue priority、协议/Policy、migration 16 和 A6 范围均未改动。
+
+## 风险
+
+- typed cancellation 依赖两类本地 Error class 的 `instanceof`；当前 Queue、Session 与 Coordinator 共用同一模块实例，完整构建和测试均覆盖该运行方式。
+- 已完成的首个公开回复在随后 duplicate-check 取消 Turn 时会保留，这是“只从未完成工作停止”的既有语义；被取消的后续 Agent 不会发布回复。

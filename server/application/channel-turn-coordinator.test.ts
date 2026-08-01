@@ -438,6 +438,158 @@ describe('ChannelTurnCoordinator', () => {
     expect(fixture.sessions.calls).toHaveLength(1)
   })
 
+  it('keeps a queued Participation Participant cancelled after its async rejection settles', async () => {
+    const fixture = await createFixture({ realQueue: true })
+    const agent = fixture.createAgent('Solo', ['queued participation topic'])
+    const blocker = deferred<ConversationSessionResult>()
+    let blockerTurnId = ''
+    fixture.sessions.handle = async (input) => input.conversation?.turnId === blockerTurnId
+      ? blocker.promise
+      : participation('speak', 1)
+    const blockerStart = fixture.coordinator.start(fixture.postHuman('@Solo hold the lane'))
+    blockerTurnId = blockerStart.turn.id
+    await waitFor(() => fixture.sessions.calls.length === 1)
+    const message = fixture.postHuman('queued participation topic')
+    const started = fixture.coordinator.start(message)
+    await waitFor(() => fixture.repositories.listAgentInvocations(started.turn.id).length === 1)
+    const invocation = fixture.repositories.listAgentInvocations(started.turn.id)[0]!
+    expect(invocation).toMatchObject({ kind: 'participation', status: 'queued' })
+
+    await fixture.coordinator.cancel(started.turn.id)
+    await expect(started.completion).resolves.toMatchObject({ status: 'cancelled' })
+
+    expect(fixture.repositories.listAgentInvocations(started.turn.id)[0]).toMatchObject({ status: 'cancelled' })
+    expect(fixture.repositories.listTurnParticipants(started.turn.id)[0]).toMatchObject({
+      agentId: agent.id,
+      status: 'cancelled',
+      reason: 'turn_cancelled',
+    })
+    expect(fixture.sessions.cancelledInvocationIds).toEqual([])
+    expect(fixture.agentMessages()).toEqual([])
+
+    blocker.resolve(publicReply('blocker completed'))
+    await expect(blockerStart.completion).resolves.toMatchObject({ status: 'completed' })
+    expect(fixture.sessions.calls).toHaveLength(1)
+  })
+
+  it('keeps a running Participation Participant cancelled after exact Session cancellation', async () => {
+    const fixture = await createFixture({ realQueue: true })
+    const agent = fixture.createAgent('Solo', ['running participation topic'])
+    const gate = deferred<ConversationSessionResult>()
+    fixture.sessions.handle = () => gate.promise
+    const started = fixture.coordinator.start(fixture.postHuman('running participation topic'))
+    await waitFor(() => fixture.sessions.calls.some((call) => call.conversation?.kind === 'participation'))
+    const invocation = fixture.repositories.listAgentInvocations(started.turn.id)[0]!
+    fixture.sessions.onCancelInvocation = (invocationId) => {
+      if (invocationId === invocation.id) gate.reject(new ConversationInvocationCancelledError(invocationId))
+    }
+
+    await fixture.coordinator.cancel(started.turn.id)
+    await expect(started.completion).resolves.toMatchObject({ status: 'cancelled' })
+
+    expect(fixture.repositories.listAgentInvocations(started.turn.id)[0]).toMatchObject({ status: 'cancelled' })
+    expect(fixture.repositories.listTurnParticipants(started.turn.id)[0]).toMatchObject({
+      agentId: agent.id,
+      status: 'cancelled',
+      reason: 'turn_cancelled',
+    })
+    expect(fixture.sessions.cancelledInvocationIds).toEqual([invocation.id])
+    expect(fixture.sessions.coarseCancellationCalls).toEqual([])
+    expect(fixture.agentMessages()).toEqual([])
+  })
+
+  it('keeps a running duplicate-check Participant cancelled after exact Session cancellation', async () => {
+    const fixture = await createFixture({ realQueue: true })
+    fixture.createAgent('Candidate One', ['running duplicate topic'])
+    fixture.createAgent('Candidate Two', ['running duplicate topic'])
+    const duplicateGate = deferred<ConversationSessionResult>()
+    fixture.sessions.handle = async (input) => {
+      if (input.conversation?.kind === 'participation') return participation('speak', 1)
+      if (input.conversation?.kind === 'duplicate_check') return duplicateGate.promise
+      return publicReply('first public reply')
+    }
+    const started = fixture.coordinator.start(fixture.postHuman('running duplicate topic'))
+    await waitFor(() => fixture.sessions.calls.some((call) => call.conversation?.kind === 'duplicate_check'))
+    const duplicateCall = fixture.sessions.calls.find((call) => call.conversation?.kind === 'duplicate_check')!
+    const invocation = fixture.repositories.listAgentInvocations(started.turn.id)
+      .find((candidate) => candidate.kind === 'duplicate_check')!
+    fixture.sessions.onCancelInvocation = (invocationId) => {
+      if (invocationId === invocation.id) {
+        duplicateGate.reject(new ConversationInvocationCancelledError(invocationId))
+      }
+    }
+
+    await fixture.coordinator.cancel(started.turn.id)
+    await expect(started.completion).resolves.toMatchObject({ status: 'cancelled' })
+    duplicateGate.resolve(duplicate('speak'))
+
+    expect(fixture.repositories.listAgentInvocations(started.turn.id)
+      .find((candidate) => candidate.id === invocation.id)).toMatchObject({ status: 'cancelled' })
+    expect(fixture.repositories.listTurnParticipants(started.turn.id)
+      .find((participant) => participant.agentId === duplicateCall.agent.id)).toMatchObject({
+        status: 'cancelled',
+        reason: 'turn_cancelled',
+      })
+    expect(fixture.sessions.cancelledInvocationIds).toEqual([invocation.id])
+    expect(fixture.sessions.coarseCancellationCalls).toEqual([])
+    expect(fixture.agentMessages()).toHaveLength(1)
+    expect(fixture.agentMessages().some((message) => message.senderId === duplicateCall.agent.id)).toBe(false)
+  })
+
+  it('removes a queued duplicate-check without cancelling another Turn or publishing a late reply', async () => {
+    const fixture = await createFixture({ realQueue: true })
+    fixture.createAgent('Candidate One', ['queued duplicate topic'])
+    fixture.createAgent('Candidate Two', ['queued duplicate topic'])
+    const firstResponseGate = deferred<ConversationSessionResult>()
+    const blockerGate = deferred<ConversationSessionResult>()
+    let ordinaryTurnId = ''
+    let blockerTurnId = ''
+    fixture.sessions.handle = async (input) => {
+      if (input.conversation?.kind === 'participation') return participation('speak', 1)
+      if (input.conversation?.kind === 'duplicate_check') return duplicate('speak')
+      if (input.conversation?.turnId === blockerTurnId) return blockerGate.promise
+      if (input.conversation?.turnId === ordinaryTurnId) return firstResponseGate.promise
+      throw new Error(`Unexpected Turn ${input.conversation?.turnId}`)
+    }
+    const ordinaryStart = fixture.coordinator.start(fixture.postHuman('queued duplicate topic'))
+    ordinaryTurnId = ordinaryStart.turn.id
+    await waitFor(() => fixture.sessions.calls.some((call) => (
+      call.conversation?.turnId === ordinaryTurnId && call.conversation.kind === 'response'
+    )))
+    const secondParticipant = fixture.repositories.listTurnParticipants(ordinaryTurnId)
+      .find((participant) => participant.speakingOrder === 2)!
+    const secondAgent = fixture.repositories.getAgent(secondParticipant.agentId)!
+    const blockerStart = fixture.coordinator.start(fixture.postHuman(`@${secondAgent.mentionName} occupy the lane`))
+    blockerTurnId = blockerStart.turn.id
+    await waitFor(() => fixture.sessions.calls.some((call) => call.conversation?.turnId === blockerTurnId))
+
+    firstResponseGate.resolve(publicReply('ordinary first reply'))
+    await waitFor(() => fixture.repositories.listAgentInvocations(ordinaryTurnId)
+      .some((invocation) => invocation.kind === 'duplicate_check' && invocation.status === 'queued'))
+    const duplicateInvocation = fixture.repositories.listAgentInvocations(ordinaryTurnId)
+      .find((invocation) => invocation.kind === 'duplicate_check')!
+
+    await fixture.coordinator.cancel(ordinaryTurnId)
+    await expect(ordinaryStart.completion).resolves.toMatchObject({ status: 'cancelled' })
+
+    expect(fixture.repositories.listAgentInvocations(ordinaryTurnId)
+      .find((invocation) => invocation.id === duplicateInvocation.id)).toMatchObject({ status: 'cancelled' })
+    expect(fixture.repositories.listTurnParticipants(ordinaryTurnId)
+      .find((participant) => participant.agentId === secondAgent.id)).toMatchObject({
+        status: 'cancelled',
+        reason: 'turn_cancelled',
+      })
+    expect(fixture.sessions.cancelledInvocationIds).toEqual([])
+    expect(fixture.sessions.calls.filter((call) => call.conversation?.kind === 'duplicate_check')).toHaveLength(0)
+
+    blockerGate.resolve(publicReply('other Turn reply'))
+    await expect(blockerStart.completion).resolves.toMatchObject({ status: 'completed' })
+    expect(fixture.agentMessages().map((message) => message.body)).toEqual([
+      'ordinary first reply',
+      'other Turn reply',
+    ])
+  })
+
   it('keeps a running Turn active when exact Runtime cancellation fails, then retries without apology', async () => {
     const fixture = await createFixture({ realQueue: true })
     fixture.createAgent('Solo', ['unrelated'])
