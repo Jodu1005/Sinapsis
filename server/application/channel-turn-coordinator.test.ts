@@ -17,7 +17,7 @@ import type {
 import { ChannelMessageService } from './channel-message-service'
 import { parsePublicResponse } from './agent-conversation-protocol'
 import { ConversationInvocationCancelledError } from './conversation-session-service'
-import { ChannelTurnCoordinator, compareTurnSources } from './channel-turn-coordinator'
+import { ChannelTurnCoordinator } from './channel-turn-coordinator'
 import type { HandoffPolicy } from './handoff-policy'
 
 describe('ChannelTurnCoordinator', () => {
@@ -30,12 +30,6 @@ describe('ChannelTurnCoordinator', () => {
     if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true })
     temporaryDirectory = undefined
     database = undefined
-  })
-
-  it('orders same-Turn sources as direct, Handoff, then ordinary without changing global Queue priority', () => {
-    const sources: TurnParticipant['source'][] = ['responsibility', 'handoff', 'direct']
-    expect(sources.sort(compareTurnSources))
-      .toEqual(['direct', 'handoff', 'responsibility'])
   })
 
   it('persists at most three responsibility candidates before probing all three in parallel', async () => {
@@ -73,6 +67,95 @@ describe('ChannelTurnCoordinator', () => {
     expect(fixture.repositories.listTurnParticipants(turn.id)).toEqual([
       expect.objectContaining({ agentId: target.id, source: 'direct', status: 'spoken' }),
     ])
+  })
+
+  it('runs multiple explicit mentions in parallel and persists replies in mention order', async () => {
+    const fixture = await createFixture()
+    const alpha = fixture.createAgent('Alpha', ['shared topic'])
+    const beta = fixture.createAgent('Beta', ['shared topic'])
+    const unmentioned = fixture.createAgent('Unmentioned', ['shared topic'])
+    const gates = new Map([
+      [alpha.id, deferred<ConversationSessionResult>()],
+      [beta.id, deferred<ConversationSessionResult>()],
+    ])
+    fixture.sessions.handle = (input) => gates.get(input.agent.id)!.promise
+
+    const dispatch = fixture.coordinator.dispatch(fixture.postHuman('@Beta @Alpha shared topic'))
+    await waitFor(() => fixture.sessions.calls.length === 2)
+
+    expect(fixture.sessions.calls.map((call) => call.agent.id)).toEqual(expect.arrayContaining([alpha.id, beta.id]))
+    expect(fixture.sessions.calls.some((call) => call.agent.id === unmentioned.id)).toBe(false)
+    expect(fixture.sessions.calls.every((call) => call.conversation?.kind === 'response')).toBe(true)
+    gates.get(alpha.id)!.resolve(publicReply('alpha answer', [{ agentId: unmentioned.id, question: 'continue?' }]))
+    await Promise.resolve()
+    expect(fixture.agentMessages()).toEqual([])
+    gates.get(beta.id)!.resolve(publicReply('beta answer'))
+
+    const turn = await dispatch
+    expect(turn).toMatchObject({ mode: 'multi_direct', status: 'completed', currentRound: 1 })
+    expect(fixture.agentMessages().map((message) => message.senderId)).toEqual([beta.id, alpha.id])
+    expect(fixture.repositories.listTurnParticipants(turn.id).map((participant) => participant.agentId))
+      .toEqual([beta.id, alpha.id])
+    expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({
+        fromAgentId: alpha.id,
+        requestedTargetAgentId: unmentioned.id,
+        status: 'rejected',
+        reason: 'handoff_disabled_for_parallel_mode',
+      }),
+    ])
+    expect(fixture.sessions.calls.some((call) => call.conversation?.kind === 'handoff_response')).toBe(false)
+  })
+
+  it('invokes every @all member, isolates failures, and rejects response handoffs', async () => {
+    const fixture = await createFixture()
+    const agents = Array.from({ length: 4 }, (_, index) => fixture.createAgent(`Agent ${index}`, ['all topic']))
+    const failing = agents[1]!
+    fixture.sessions.handle = async (input) => {
+      if (input.agent.id === failing.id) throw new Error('runtime unavailable')
+      return publicReply(`${input.agent.identity} answer`, [{ agentId: failing.id, question: 'continue?' }])
+    }
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('@all all topic'))
+
+    expect(turn).toMatchObject({ mode: 'all', status: 'completed', currentRound: 1 })
+    expect(fixture.sessions.calls).toHaveLength(4)
+    expect(fixture.sessions.calls.every((call) => call.conversation?.kind === 'response')).toBe(true)
+    expect(fixture.agentMessages().map((message) => message.senderId)).toEqual(
+      agents.filter((agent) => agent.id !== failing.id).map((agent) => agent.id),
+    )
+    expect(fixture.repositories.listTurnParticipants(turn.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ agentId: failing.id, status: 'failed', reason: 'response_failed:runtime unavailable' }),
+    ]))
+    expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'rejected', reason: 'handoff_disabled_for_parallel_mode' }),
+    ]))
+    expect(fixture.sessions.calls.some((call) => call.conversation?.kind === 'handoff_response')).toBe(false)
+  })
+
+  it('resolves summit @all membership dynamically for every Turn', async () => {
+    const fixture = await createFixture({ channelSystemKey: 'summit' })
+    fixture.createAgent('Alpha', [])
+    fixture.createAgent('Beta', [])
+    fixture.sessions.handle = async (input) => publicReply(`${input.agent.identity} answer`)
+
+    await fixture.coordinator.dispatch(fixture.postHuman('@all first'))
+    fixture.createAgent('Gamma', [])
+    fixture.sessions.calls.length = 0
+    await fixture.coordinator.dispatch(fixture.postHuman('@all second'))
+
+    expect(fixture.sessions.calls.map((call) => call.agent.id))
+      .toEqual(fixture.repositories.listAgents().map((agent) => agent.id))
+  })
+
+  it('rejects unknown mentions before creating a Turn', async () => {
+    const fixture = await createFixture()
+    fixture.createAgent('Known', [])
+    const message = fixture.postHuman('@Unknown 请回答')
+
+    expect(() => fixture.coordinator.dispatch(message)).toThrow('Unknown mention @Unknown.')
+    const count = database!.database.prepare('SELECT COUNT(*) AS count FROM conversation_turns').get() as { count: number }
+    expect(count.count).toBe(0)
   })
 
   it('uses the timeout union shape guard and completes when no candidate elects to speak', async () => {
@@ -661,6 +744,7 @@ describe('ChannelTurnCoordinator', () => {
     onCoordinatorEvent?: (event: DomainEvent, repositories: WorkspaceRepositories) => void
     realQueue?: boolean
     handoffPolicy?: HandoffPolicy
+    channelSystemKey?: string
   } = {}) {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-turn-'))
     database = createSqliteDatabase(path.join(temporaryDirectory, 'sinapsis.sqlite'))
@@ -676,7 +760,10 @@ describe('ChannelTurnCoordinator', () => {
       defaultBranch: 'main',
       isClean: true,
     })
-    const channel = repositories.createChannel({ name: 'general' })
+    const channel = repositories.createChannel({
+      name: options.channelSystemKey ?? 'general',
+      systemKey: options.channelSystemKey,
+    })
     const messages = new ChannelMessageService(repositories)
     const sessions = new ScriptedSessions()
     const queueAvailability = new Map<string, boolean>()
@@ -706,7 +793,7 @@ describe('ChannelTurnCoordinator', () => {
         model: '',
         env: {},
       })
-      repositories.addChannelAgent(channel.id, agent.id, new Date())
+      if (!options.channelSystemKey) repositories.addChannelAgent(channel.id, agent.id, new Date())
       repositories.setAgentStatus(agent.id, 'idle', new Date())
       return agent
     }

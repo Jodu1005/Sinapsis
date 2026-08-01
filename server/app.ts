@@ -15,6 +15,7 @@ import { ChannelMessageService } from './application/channel-message-service'
 import { ChannelContextResetService } from './application/channel-context-reset-service'
 import { ChannelWorkspaceService } from './application/channel-workspace-service'
 import { ConversationCoordinator } from './application/conversation-coordinator'
+import { routeMentions, UnknownMentionError } from './application/mention-router'
 import { TaskExecutionCoordinator } from './application/task-execution-coordinator'
 import { TaskReviewService } from './application/task-review-service'
 import { TaskScheduler } from './application/task-scheduler'
@@ -309,7 +310,14 @@ export function createApp(options: CreateAppOptions = {}): Express {
     if (taskId && !task) throw new NotFoundError(`Task ${taskId} does not exist.`)
     if (task && task.channelId !== channelId) throw new DomainError('Task does not belong to this channel.')
     const message = messages.postHuman(channelId, requiredString(body, 'body'), taskId, threadRootMessageId)
-    const mention = findMentionedAgent(repositories, channelId, message.body)
+    const memberIds = new Set(repositories.getChannelAgentIds(channelId))
+    const memberAgents = taskId
+      ? repositories.listAgents().filter((agent) => memberIds.has(agent.id))
+      : []
+    const taskMentionRoute = taskId ? routeMentions(message.body, memberAgents) : undefined
+    const mention = taskMentionRoute?.targetAgentIds[0]
+      ? repositories.getAgent(taskMentionRoute.targetAgentIds[0])
+      : undefined
     let deliveredToActiveTask = false
     if (mention?.status === 'busy') {
       coordinator.queueInputForActiveAgent(mention.id, channelId, message.body)
@@ -367,22 +375,6 @@ export function createApp(options: CreateAppOptions = {}): Express {
   app.use(errorHandler)
 
   return app
-}
-
-function findMentionedAgent(repositories: WorkspaceRepositories, channelId: string, body: string) {
-  const snapshot = repositories.getBootstrap()
-  const channel = snapshot.channels.find((candidate) => candidate.id === channelId)
-  if (!channel) return undefined
-  const agents = snapshot.agents.filter((agent) => channel.memberAgentIds.includes(agent.id))
-  return agents
-    .filter((agent) => exactMention(body, agent.identity))
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))[0]
-    ?? agents.find((agent) => exactMention(body, agent.mentionName))
-}
-
-function exactMention(body: string, mention: string): boolean {
-  const escaped = mention.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`(^|[^A-Za-z0-9_])@${escaped}(?=$|[^A-Za-z0-9_])`, 'i').test(body)
 }
 
 class RepositoryWorkspaceCatalog implements WorkspaceCatalog {
@@ -527,7 +519,7 @@ function sanitizeAgent(agent: ReturnType<WorkspaceRepositories['getBootstrap']>[
 }
 
 const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
-  if (error instanceof ValidationError || error instanceof SyntaxError) {
+  if (error instanceof ValidationError || error instanceof UnknownMentionError || error instanceof SyntaxError) {
     response.status(400).json({ error: error.message })
     return
   }

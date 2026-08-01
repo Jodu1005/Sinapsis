@@ -7,6 +7,15 @@ interface MentionMatch {
   end: number
 }
 
+export class UnknownMentionError extends Error {
+  constructor(readonly mentions: string[]) {
+    super(mentions.length === 1
+      ? `Unknown mention @${mentions[0]}.`
+      : `Unknown mentions ${mentions.map((mention) => `@${mention}`).join(', ')}.`)
+    this.name = 'UnknownMentionError'
+  }
+}
+
 export function routeMentions(body: string, agents: Agent[]): MentionRoute {
   const matches = agentMentionMatches(body, agents)
   const allMention = exactMentionMatches(body, 'all')

@@ -34,7 +34,7 @@ import {
 } from './conversation-session-service'
 import { ContextAssembler } from './context-assembler'
 import { HandoffPolicy } from './handoff-policy'
-import { routeMentions } from './mention-router'
+import { routeMentions, UnknownMentionError } from './mention-router'
 import { ParticipationService } from './participation-service'
 import { matchResponsibilities } from './responsibility-matcher'
 
@@ -155,15 +155,19 @@ export class ChannelTurnCoordinator {
     const memberIds = new Set(this.repositories.getChannelAgentIds(message.channelId))
     const memberAgents = this.repositories.listAgents().filter((agent) => memberIds.has(agent.id))
     const route = routeMentions(message.body, memberAgents)
-    const directAgent = route.mode === 'direct'
-      ? memberAgents.find((agent) => agent.id === route.targetAgentIds[0])
-      : undefined
+    if (route.unknownMentions.length > 0) throw new UnknownMentionError(route.unknownMentions)
+    const targetIds = route.mode === 'all'
+      ? memberAgents.map((agent) => agent.id)
+      : route.targetAgentIds
+    const targetAgents = targetIds
+      .map((agentId) => memberAgents.find((agent) => agent.id === agentId))
+      .filter((agent): agent is Agent => agent !== undefined)
 
     const turn = this.repositories.createConversationTurn({
       channelId: message.channelId,
       triggerMessageId: message.id,
       threadRootMessageId: message.threadRootMessageId ?? null,
-      mode: directAgent ? 'direct' : 'ordinary',
+      mode: route.mode,
       maxRounds: maxConversationRounds,
     })
     this.publish('conversation.turn_created', 'conversation_turn', turn.id)
@@ -178,7 +182,7 @@ export class ChannelTurnCoordinator {
     this.executions.set(turn.id, execution)
     this.setActivity(execution, null, 'screening')
 
-    const completion = this.executeTurn(execution, turn, message, directAgent, memberIds, memberAgents)
+    const completion = this.executeTurn(execution, turn, message, targetAgents, memberIds, memberAgents)
       .finally(() => this.executions.delete(turn.id))
     void completion.catch(() => undefined)
     return { turn, completion }
@@ -188,13 +192,18 @@ export class ChannelTurnCoordinator {
     execution: TurnExecution,
     initialTurn: ConversationTurn,
     message: Message,
-    directAgent: Agent | undefined,
+    targetAgents: Agent[],
     memberIds: Set<string>,
     memberAgents: Agent[],
   ): Promise<ConversationTurn> {
     let turn = initialTurn
     try {
-      if (directAgent) return await this.runDirectTurn(execution, turn, message, directAgent, memberIds)
+      if (turn.mode === 'direct') {
+        return await this.runDirectTurn(execution, turn, message, targetAgents[0]!, memberIds)
+      }
+      if (turn.mode === 'multi_direct' || turn.mode === 'all') {
+        return await this.runParallelExplicitTurn(execution, turn, message, targetAgents, memberIds)
+      }
       const agents = memberAgents.filter((agent) => agent.status !== 'offline' && agent.status !== 'error')
       const candidates = matchResponsibilities(message.body, agents, maxParticipationCandidates)
       const participants = candidates.map((candidate, index) => {
@@ -387,6 +396,64 @@ export class ChannelTurnCoordinator {
     return execution.cancelled ? this.currentTurn(turn.id) : this.completeTurn(turn.id)
   }
 
+  private async runParallelExplicitTurn(
+    execution: TurnExecution,
+    initialTurn: ConversationTurn,
+    message: Message,
+    agents: Agent[],
+    memberIds: Set<string>,
+  ): Promise<ConversationTurn> {
+    const source = initialTurn.mode === 'all' ? 'all' : 'direct'
+    const availableAgents: Agent[] = []
+    for (const [index, agent] of agents.entries()) {
+      const unavailable = agent.status === 'offline' || agent.status === 'error'
+      const participant = this.repositories.createTurnParticipant({
+        turnId: initialTurn.id,
+        agentId: agent.id,
+        source,
+        rank: index + 1,
+        matcherScore: null,
+        decision: 'speak',
+        speakingOrder: index + 1,
+        status: unavailable ? 'failed' : 'selected',
+        reason: unavailable ? 'agent_unavailable' : null,
+      })
+      this.publish('conversation.participant_decided', 'turn_participant', participant.id)
+      if (!unavailable) availableAgents.push(agent)
+    }
+    if (availableAgents.length === 0) return this.completeTurn(initialTurn.id)
+
+    const turn = this.transitionTurn(initialTurn.id, { status: 'responding', currentRound: 1 })
+    const settled = await Promise.allSettled(availableAgents.map((agent) => this.generateResponse(
+      execution,
+      turn,
+      message,
+      agent,
+      'response',
+      'human_direct',
+      1,
+      null,
+    )))
+    if (execution.cancelled) return this.currentTurn(turn.id)
+
+    for (const [index, result] of settled.entries()) {
+      const agent = availableAgents[index]!
+      if (result.status === 'rejected') {
+        this.updateParticipant(turn.id, agent.id, {
+          status: 'failed',
+          reason: `response_failed:${errorMessage(result.reason)}`,
+        })
+        continue
+      }
+      const outcome = result.value
+      if (!outcome) continue
+      this.persistPublicReply(turn, agent, outcome.response.reply)
+      this.updateParticipant(turn.id, agent.id, { status: 'spoken' })
+      this.rejectParallelHandoffs(turn, outcome, agent.id, memberIds)
+    }
+    return this.completeTurn(turn.id)
+  }
+
   private async probeCandidate(
     execution: TurnExecution,
     turn: ConversationTurn,
@@ -567,6 +634,32 @@ export class ChannelTurnCoordinator {
     sourceInvocationId: string | null,
     handoffQuestion?: string,
   ): Promise<ResponseOutcome | null> {
+    const outcome = await this.generateResponse(
+      execution,
+      turn,
+      message,
+      agent,
+      kind,
+      priority,
+      round,
+      sourceInvocationId,
+      handoffQuestion,
+    )
+    if (outcome) this.persistPublicReply(turn, agent, outcome.response.reply)
+    return outcome
+  }
+
+  private async generateResponse(
+    execution: TurnExecution,
+    turn: ConversationTurn,
+    message: Message,
+    agent: Agent,
+    kind: Extract<InvocationKind, 'response' | 'handoff_response'>,
+    priority: Extract<InvocationPriority, 'human_direct' | 'human_ordinary' | 'automatic_handoff'>,
+    round: number,
+    sourceInvocationId: string | null,
+    handoffQuestion?: string,
+  ): Promise<ResponseOutcome | null> {
     try {
       const invocationResult = await this.runInvocation(execution, turn, message, agent, {
         kind,
@@ -579,14 +672,6 @@ export class ChannelTurnCoordinator {
         phase: kind === 'handoff_response' ? 'handoff' : 'preparing',
       })
       if (!isPublicResponse(invocationResult.result.parsed)) throw new Error('Runtime returned no public response.')
-      this.messages.postAgent(
-        turn.channelId,
-        null,
-        agent.id,
-        agent.identity,
-        invocationResult.result.parsed.reply,
-        turn.threadRootMessageId,
-      )
       return { invocation: invocationResult.invocation, response: invocationResult.result.parsed }
     } catch (error) {
       if (!isInvocationCancellation(error)) {
@@ -596,6 +681,39 @@ export class ChannelTurnCoordinator {
         })
       }
       return null
+    }
+  }
+
+  private persistPublicReply(turn: ConversationTurn, agent: Agent, reply: string): void {
+    this.messages.postAgent(
+      turn.channelId,
+      null,
+      agent.id,
+      agent.identity,
+      reply,
+      turn.threadRootMessageId,
+    )
+  }
+
+  private rejectParallelHandoffs(
+    turn: ConversationTurn,
+    outcome: ResponseOutcome,
+    fromAgentId: string,
+    memberIds: Set<string>,
+  ): void {
+    for (const target of outcome.response.handoffTo) {
+      const handoff = this.repositories.createConversationHandoff({
+        turnId: turn.id,
+        sourceInvocationId: outcome.invocation.id,
+        fromAgentId,
+        requestedTargetAgentId: target.agentId,
+        toAgentId: memberIds.has(target.agentId) ? target.agentId : null,
+        question: target.question,
+        round: turn.currentRound + 1,
+        status: 'rejected',
+        reason: 'handoff_disabled_for_parallel_mode',
+      })
+      this.publish('conversation.handoff_created', 'conversation_handoff', handoff.id)
     }
   }
 
@@ -980,16 +1098,6 @@ function compareOrdinarySpeakers(left: RankedSpeaker, right: RankedSpeaker): num
     || Number(right.queueAvailable) - Number(left.queueAvailable)
     || compareLastSpokenAt(left.lastSpokenAt, right.lastSpokenAt)
     || left.agent.id.localeCompare(right.agent.id)
-}
-
-export function compareTurnSources(left: TurnParticipant['source'], right: TurnParticipant['source']): number {
-  const rank: Record<TurnParticipant['source'], number> = {
-    direct: 0,
-    all: 0,
-    handoff: 1,
-    responsibility: 2,
-  }
-  return rank[left] - rank[right]
 }
 
 function compareLastSpokenAt(left: string | null, right: string | null): number {

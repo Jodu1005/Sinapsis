@@ -42,6 +42,14 @@ describe('routeMentions', () => {
     })
   })
 
+  it('still reports unknown handles when @all is present', () => {
+    expect(routeMentions('@all @Outsider 一起回答', [newton, clawd])).toEqual({
+      mode: 'all',
+      targetAgentIds: [],
+      unknownMentions: ['Outsider'],
+    })
+  })
+
   it('leaves non-member names in unknown mentions', () => {
     expect(routeMentions('@Newton @Outsider 回答', [newton])).toEqual({
       mode: 'direct',

@@ -5,6 +5,7 @@ import type { WorkspaceRepositories } from './ports/repositories'
 import { ConversationCoordinator } from './application/conversation-coordinator'
 import type { ChannelTurnCoordinator } from './application/channel-turn-coordinator'
 import type { ConversationTurn } from './domain/conversation'
+import type { TaskExecutionCoordinator } from './application/task-execution-coordinator'
 
 describe('local service API', () => {
   let closeServer: (() => Promise<void>) | undefined
@@ -443,8 +444,44 @@ describe('local service API', () => {
     expect(response.status).toBe(201)
   })
 
-  it('does not inject a Channel message or foreign task reference into another Channel active task', async () => {
+  it('returns HTTP 400 for an unknown mention without creating a partial Turn', async () => {
     const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'routing' })
+    const known = createTestAgent(repositories, 'Known', 'known')
+    repositories.addChannelAgent(channel.id, known.id, new Date())
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/channels/${channel.id}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ body: '@Unknown 请回答。' }),
+    })
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: 'Unknown mention @Unknown.' })
+    const triggerMessage = repositories.getBootstrap().recentMessages.find((message) => message.body.includes('@Unknown'))!
+    expect(() => repositories.createConversationTurn({
+      channelId: channel.id,
+      triggerMessageId: triggerMessage.id,
+      threadRootMessageId: null,
+      mode: 'ordinary',
+      maxRounds: 3,
+    })).not.toThrow()
+  })
+
+  it('routes a non-Task mention to channel conversation and rejects a foreign Task reference', async () => {
+    const dispatched: Array<{ channelId: string; body: string }> = []
+    const app = createApp({
+      conversationCoordinator: {
+        dispatch: async (channelId, message) => {
+          dispatched.push({ channelId, body: message.body })
+        },
+      },
+    })
     const repositories = app.locals.repositories as WorkspaceRepositories
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
@@ -478,9 +515,56 @@ describe('local service API', () => {
       body: JSON.stringify({ body: '错误的任务引用。', taskId: task.id }),
     })
 
-    expect(busyMention.status).toBe(409)
+    expect(busyMention.status).toBe(201)
     expect(foreignTask.status).toBe(409)
+    expect(dispatched).toEqual([{ channelId: support.id, body: '@Build 这条消息属于 support。' }])
     expect(repositories.getTaskDetails(task.id)?.inputs).toEqual([])
+  })
+
+  it('keeps an explicitly Task-bound mention on the existing Task input path', async () => {
+    const queuedInputs: Array<{ agentId: string; channelId: string; body: string }> = []
+    const conversationMessages: string[] = []
+    const executionCoordinator = {
+      queueInputForActiveAgent: (agentId: string, channelId: string, body: string) => {
+        queuedInputs.push({ agentId, channelId, body })
+      },
+    } as unknown as TaskExecutionCoordinator
+    const app = createApp({
+      executionCoordinator,
+      conversationCoordinator: {
+        dispatch: async (_channelId, message) => {
+          conversationMessages.push(message.body)
+        },
+      },
+    })
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'delivery' })
+    const agent = createTestAgent(repositories, 'Build', 'build')
+    repositories.addChannelAgent(channel.id, agent.id, new Date())
+    repositories.setAgentStatus(agent.id, 'busy', new Date())
+    const task = repositories.createTask({
+      repositoryId: repository.id,
+      channelId: channel.id,
+      directAgentId: agent.id,
+      title: 'Delivery task',
+      description: 'Keep Task input routing.',
+      acceptanceCriteria: 'The active Agent receives the input.',
+      labels: ['general'],
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/channels/${channel.id}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ body: '@Build 继续执行。', taskId: task.id }),
+    })
+
+    expect(response.status).toBe(201)
+    expect(queuedInputs).toEqual([{ agentId: agent.id, channelId: channel.id, body: '@Build 继续执行。' }])
+    expect(conversationMessages).toEqual([])
   })
 
   it('refreshes a persisted runtime and returns a sanitized Agent payload', async () => {
