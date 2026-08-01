@@ -676,8 +676,16 @@ export class ChannelTurnCoordinator {
       const existing = this.repositories.listTurnParticipants(turn.id).find((participant) => participant.agentId === agent.id)
       const participant = existing
         ? this.updateParticipant(turn.id, agent.id, {
-            source: 'handoff', decision: 'speak', status: 'selected', speakingOrder: nextSpeakingOrder(this.repositories, turn.id),
-          })
+            source: 'handoff',
+            matcherScore: null,
+            decision: 'speak',
+            confidence: null,
+            proposedAngle: null,
+            dependsOnAgentId: null,
+            status: 'selected',
+            speakingOrder: nextSpeakingOrder(this.repositories, turn.id),
+            reason: null,
+          }, { failedRecoverySource: 'handoff' })
         : this.repositories.createTurnParticipant({
             turnId: turn.id,
             agentId: agent.id,
@@ -822,11 +830,22 @@ export class ChannelTurnCoordinator {
     turnId: string,
     agentId: string,
     patch: Parameters<WorkspaceRepositories['updateTurnParticipant']>[2],
+    options: { failedRecoverySource?: 'handoff' } = {},
   ): TurnParticipant {
     const current = this.currentParticipant(turnId, agentId)
-    if ((current.status === 'cancelled' || current.status === 'failed')
+    if (current.status === 'cancelled'
       && patch.status !== undefined
       && patch.status !== current.status) {
+      return current
+    }
+    const recoversFailedThroughHandoff = current.status === 'failed'
+      && patch.status === 'selected'
+      && patch.source === 'handoff'
+      && options.failedRecoverySource === 'handoff'
+    if (current.status === 'failed'
+      && patch.status !== undefined
+      && patch.status !== current.status
+      && !recoversFailedThroughHandoff) {
       return current
     }
     const participant = this.repositories.updateTurnParticipant(turnId, agentId, patch)

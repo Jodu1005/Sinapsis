@@ -310,3 +310,74 @@
 
 - typed cancellation 依赖两类本地 Error class 的 `instanceof`；当前 Queue、Session 与 Coordinator 共用同一模块实例，完整构建和测试均覆盖该运行方式。
 - 已完成的首个公开回复在随后 duplicate-check 取消 Turn 时会保留，这是“只从未完成工作停止”的既有语义；被取消的后续 Agent 不会发布回复。
+
+---
+
+# Task 5 修复轮 3/5
+
+## 状态
+
+已修复 Participation 失败的候选无法被后续有效 Handoff 重新选中并完成回复的问题。修复基于 `c112ac65f3d2bc102cb9cd71eef4a2288773c5ec`，未修改 `.codex/` 或 `src/.DS_Store`。
+
+## 根因
+
+- 修复轮 2 的 Participant 终态保护同时冻结了 `cancelled` 与 `failed`。
+- 某 Agent 的 Participation 写成 `failed` 后，即使另一 Agent 产生了已接受的有效 Handoff，Handoff work item 对该 Participant 的 `selected` 与后续 `spoken` 更新也会被保护逻辑直接丢弃。
+- Handoff Invocation 和公开回复仍会成功，因此形成 Participant 保持旧 `responsibility/failed`、Handoff 已 completed 的不一致状态。
+
+## 实现
+
+- `cancelled` 继续作为绝对冻结终态，任何异步 continuation 都不能将其恢复为其他状态。
+- `failed` 仅允许一次受控恢复：当前 Participant 为 `failed`、目标状态为 `selected`、新来源为 `handoff`，并且调用方显式传入 `failedRecoverySource: 'handoff'`。
+- 该授权只由当前 accepted Handoff work item 的处理路径传入；Participation、duplicate-check、普通 response 及其他旧 continuation 均无法触发恢复。
+- 恢复时清理旧 Participation 的 matcher、confidence、proposed angle、dependency 与 failure reason，明确写入 `source=handoff`、`decision=speak`、`status=selected`；目标公开回复落库后再按既有路径写为 `spoken` 并完成 Handoff。
+
+## 回归覆盖
+
+新增端到端回归：候选 B 的 Participation 抛错并落为 failed；候选 A 正常公开回复且结构化 Handoff 给 B；B 的 handoff-response 成功落库。最终断言：
+
+- B Participant 为 `source=handoff`、`decision=speak`、`status=spoken`，旧失败原因已清除；
+- Handoff 为 `completed`；
+- Turn 为 `completed` 且进入第 2 轮；
+- A、B 两条公开回复均携带精确 sender attribution。
+
+修复轮 2 的 queued/running Participation 与 queued/running duplicate-check 四条取消竞态回归继续通过，证明 `cancelled` 不会被新 Handoff 或旧 continuation 恢复，且仍无 apology 或晚到回复。
+
+## 修改文件
+
+- `server/application/channel-turn-coordinator.ts`
+- `server/application/channel-turn-coordinator.test.ts`
+- `.superpowers/sdd/2026-07-31-multi-agent-conversation-turns/task-5-report.md`
+
+## TDD：真实 RED / GREEN
+
+### RED
+
+- 先新增“Participation failed 后由有效 Handoff 恢复”的端到端回归，再运行：`npm test -- --run server/application/channel-turn-coordinator.test.ts`。
+- 结果：`1 failed / 22 passed`。B 的实际 Participant 仍为 `source=responsibility`、`decision=skipped`、`status=failed`、`reason=participation_failed:participation unavailable`，准确复现问题。
+
+### GREEN
+
+- 加入 Handoff 专属恢复授权与字段重置后，重跑同一命令：`1 file / 23 tests passed`。
+- 指定聚焦：Coordinator/Queue/Session `3 files / 43 tests passed`；四条取消竞态回归全部保持绿色。
+
+## 完整验证
+
+- 聚焦：`npm test -- --run server/application/channel-turn-coordinator.test.ts server/application/agent-invocation-queue.test.ts server/application/conversation-session-service.test.ts`
+  - 结果：3 个测试文件、43 项测试通过，退出码 0。
+- 第一次完整测试出现 1 项既有 SQLite 时间边界抖动：`hides pre-reset channel messages and tasks from the current bootstrap context` 预期 reset 后 task、实际为空；本轮未修改 SQLite 代码。
+- 随即单独运行 `server/adapters/sqlite/sqlite-repositories.test.ts`：26 项全部通过；再次运行完整测试：49 个测试文件、369 项测试通过，0 失败，退出码 0。
+- Build：`npm run build`，`tsc --noEmit` 通过；Vite 转换 1801 modules 并成功生成产物，退出码 0。
+- 报告写入后的最终工作树验证：聚焦仍为 `3 files / 43 tests passed`；build 与 `git diff --check` 通过。完整测试第一次尝试再次命中上述同一 SQLite 时间边界抖动（`368 passed / 1 failed`），隔离复跑 SQLite 文件为 `26/26 passed`，随后单独重跑完整命令为 `49 files / 369 tests passed`、退出码 0。
+
+## 自审
+
+- 恢复条件同时校验当前状态、目标状态、目标来源和私有调用授权；仅修改 source 或仅请求 selected 均不能恢复 failed。
+- `cancelled` guard 位于 failed 恢复判定之前，仍是绝对冻结终态。
+- Handoff 从 selected 到 spoken/failed 使用既有正常状态流；accepted Handoff 不会因 Participant 恢复而遗漏终态。
+- 未修改 Queue 全局优先级、Session ownership、协议/Policy、schema/migration 或 A6 多提及范围。
+
+## 风险
+
+- 恢复授权是 Coordinator 内部私有参数，后续若新增 Handoff 执行入口，必须复用当前 worklist 路径或显式加入同等约束，不能开放给普通 continuation。
+- SQLite reset 回归使用毫秒级时间边界，首次完整测试曾出现一次抖动；隔离复跑和后续完整复跑均通过，本轮未触碰该测试及其持久化实现。

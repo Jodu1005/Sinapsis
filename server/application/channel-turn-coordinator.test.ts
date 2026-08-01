@@ -254,6 +254,42 @@ describe('ChannelTurnCoordinator', () => {
     ])
   })
 
+  it('recovers a failed Participation Participant only through a valid Handoff and records it as spoken', async () => {
+    const fixture = await createFixture()
+    const source = fixture.createAgent('Source', ['recovery handoff topic'])
+    const target = fixture.createAgent('Target', ['recovery handoff topic'])
+    fixture.sessions.handle = async (input) => {
+      if (input.conversation?.kind === 'participation') {
+        if (input.agent.id === target.id) throw new Error('participation unavailable')
+        return participation('speak', 1)
+      }
+      if (input.conversation?.kind === 'response') {
+        return publicReply('source answer', [{ agentId: target.id, question: 'Recover through this Handoff.' }])
+      }
+      if (input.conversation?.kind === 'handoff_response') return publicReply('target recovered answer')
+      throw new Error(`Unexpected invocation ${input.conversation?.kind}`)
+    }
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('recovery handoff topic'))
+    const targetParticipant = fixture.repositories.listTurnParticipants(turn.id)
+      .find((participant) => participant.agentId === target.id)
+
+    expect(turn).toMatchObject({ status: 'completed', currentRound: 2 })
+    expect(targetParticipant).toMatchObject({
+      source: 'handoff',
+      decision: 'speak',
+      status: 'spoken',
+      reason: null,
+    })
+    expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({ fromAgentId: source.id, toAgentId: target.id, status: 'completed' }),
+    ])
+    expect(fixture.agentMessages()).toEqual([
+      expect.objectContaining({ senderId: source.id, body: 'source answer' }),
+      expect.objectContaining({ senderId: target.id, body: 'target recovered answer' }),
+    ])
+  })
+
   it('marks an accepted Handoff failed when its target response fails and leaves no accepted work', async () => {
     const fixture = await createFixture()
     const source = fixture.createAgent('Source', ['handoff failure topic'])
