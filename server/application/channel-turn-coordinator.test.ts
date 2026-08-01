@@ -682,24 +682,47 @@ describe('ChannelTurnCoordinator', () => {
     ])
   })
 
-  it('publishes coordinator events only after the referenced state is persisted', async () => {
+  it('publishes the public coordinator lifecycle events only after the referenced state is persisted', async () => {
     const observed: string[] = []
     const fixture = await createFixture({
       onCoordinatorEvent: (event, repositories) => {
         if (!event.type.startsWith('conversation.')) return
         if (event.entityType === 'conversation_turn') {
           expect(repositories.getConversationTurn(event.entityId)).toBeDefined()
+          if (event.type === 'conversation.turn_created') turnId = event.entityId
+        }
+        if (event.entityType === 'turn_participant') {
+          expect(repositories.listTurnParticipants(turnId).some((participant) => participant.id === event.entityId)).toBe(true)
+        }
+        if (event.entityType === 'agent_invocation') {
+          expect(repositories.listAgentInvocations(turnId).some((invocation) => invocation.id === event.entityId)).toBe(true)
+        }
+        if (event.entityType === 'conversation_handoff') {
+          expect(repositories.listConversationHandoffs(turnId).some((handoff) => handoff.id === event.entityId)).toBe(true)
         }
         observed.push(event.type)
       },
     })
-    fixture.createAgent('Quiet', ['event topic'])
-    fixture.sessions.handle = async () => participation('silent', 0)
+    const source = fixture.createAgent('Source', ['event topic'])
+    const target = fixture.createAgent('Target', ['other topic'])
+    let turnId = ''
+    fixture.sessions.handle = async (input) => input.agent.id === source.id
+      ? publicReply('source reply', [{ agentId: target.id, question: 'Please add detail.' }])
+      : publicReply('target reply')
 
-    await fixture.coordinator.dispatch(fixture.postHuman('event topic'))
+    const message = fixture.postHuman('@Source event topic')
+    await fixture.coordinator.dispatch(message)
 
     expect(observed[0]).toBe('conversation.turn_created')
     expect(observed.at(-1)).toBe('conversation.turn_completed')
+    expect(new Set(observed)).toEqual(new Set([
+      'conversation.turn_created',
+      'conversation.turn_updated',
+      'conversation.participant_updated',
+      'conversation.invocation_updated',
+      'conversation.handoff_created',
+      'conversation.turn_completed',
+    ]))
   })
 
   it('persists a partial Turn and the system reason when policy fails after a public reply', async () => {

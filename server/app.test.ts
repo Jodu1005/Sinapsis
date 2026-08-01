@@ -444,6 +444,101 @@ describe('local service API', () => {
     expect(response.status).toBe(201)
   })
 
+  it('returns a channel-scoped public Turn detail without Runtime-private material', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const { channel, agent, message, turn, invocation } = createPersistedTurn(repositories)
+    const target = createTestAgent(repositories, 'Target', 'target')
+    repositories.addChannelAgent(channel.id, target.id, new Date())
+    repositories.createConversationHandoff({
+      turnId: turn.id,
+      sourceInvocationId: invocation.id,
+      fromAgentId: agent.id,
+      requestedTargetAgentId: target.id,
+      toAgentId: target.id,
+      question: '请补充测试。',
+      round: 2,
+      status: 'accepted',
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/channels/${channel.id}/turns/${turn.id}`)
+    const raw = await response.text()
+    const detail = JSON.parse(raw) as Record<string, unknown>
+
+    expect(response.status).toBe(200)
+    expect(detail).toEqual({
+      turn: expect.objectContaining({ id: turn.id, triggerMessageId: message.id }),
+      participants: [expect.objectContaining({ agentId: agent.id, proposedAngle: '从公开信息回答' })],
+      invocations: [expect.objectContaining({ id: invocation.id, agentId: agent.id })],
+      handoffs: [expect.objectContaining({ fromAgentId: agent.id, toAgentId: target.id })],
+    })
+    expect(raw).not.toMatch(/runtimeRawLog|privatePrompt|environment|API_TOKEN|secret/i)
+  })
+
+  it('does not expose a Turn through a different Channel', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const { turn } = createPersistedTurn(repositories)
+    const foreignChannel = repositories.createChannel({ name: 'foreign' })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/channels/${foreignChannel.id}/turns/${turn.id}`)
+
+    expect(response.status).toBe(404)
+    await expect(response.json()).resolves.toEqual({ error: `Conversation turn ${turn.id} does not exist in channel ${foreignChannel.id}.` })
+  })
+
+  it('cancels an inactive persisted Turn idempotently and settles its pending records', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const { channel, turn, agent } = createPersistedTurn(repositories)
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const first = await fetch(`${server.baseUrl}/api/channels/${channel.id}/turns/${turn.id}/cancel`, { method: 'POST' })
+    const second = await fetch(`${server.baseUrl}/api/channels/${channel.id}/turns/${turn.id}/cancel`, { method: 'POST' })
+
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(200)
+    await expect(second.json()).resolves.toMatchObject({ id: turn.id, status: 'cancelled' })
+    expect(repositories.listAgentInvocations(turn.id)).toEqual([
+      expect.objectContaining({ agentId: agent.id, status: 'cancelled', errorCode: 'cancelled' }),
+    ])
+    expect(repositories.listTurnParticipants(turn.id)).toEqual([
+      expect.objectContaining({ agentId: agent.id, status: 'cancelled', reason: 'turn_cancelled' }),
+    ])
+  })
+
+  it('reports persisted running Invocations as queued after restart in bootstrap activity', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const { channel, turn, invocation, agent } = createPersistedTurn(repositories)
+    repositories.updateConversationTurn(turn.id, { status: 'responding', currentRound: 1 })
+    repositories.updateAgentInvocation(invocation.id, {
+      status: 'running',
+      startedAt: '2026-07-31T08:01:00.000Z',
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/bootstrap`)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      activeTurnsByChannel: {
+        [channel.id]: [{
+          turnId: turn.id,
+          agentId: agent.id,
+          phase: 'queued',
+          queuePosition: null,
+        }],
+      },
+    })
+  })
+
   it('returns HTTP 400 for an unknown mention without creating a partial Turn', async () => {
     const app = createApp()
     const repositories = app.locals.repositories as WorkspaceRepositories
@@ -834,6 +929,61 @@ function createTestAgent(repositories: WorkspaceRepositories, identity: string, 
     model: '',
     env: {},
   })
+}
+
+function createPersistedTurn(repositories: WorkspaceRepositories) {
+  const workspace = repositories.createWorkspace({ name: 'Conversation workspace' })
+  repositories.createRepository({ workspaceId: workspace.id, name: 'conversation', path: '/projects/conversation' })
+  const channel = repositories.createChannel({ name: 'turn-detail' })
+  const agent = repositories.createAgent({
+    identity: 'Safe Agent',
+    mentionName: 'safe-agent',
+    runtime: 'pi',
+    capabilityTags: ['general'],
+    responsibilities: ['公开回答'],
+    maxConcurrentTasks: 1,
+    command: 'pi',
+    args: [],
+    model: '',
+    env: { API_TOKEN: 'secret' },
+  })
+  repositories.addChannelAgent(channel.id, agent.id, new Date())
+  const message = repositories.createMessage({
+    channelId: channel.id,
+    taskId: null,
+    senderType: 'human',
+    senderId: null,
+    authorName: '你',
+    body: '请说明当前状态。',
+  })
+  const turn = repositories.createConversationTurn({
+    channelId: channel.id,
+    triggerMessageId: message.id,
+    threadRootMessageId: null,
+    mode: 'ordinary',
+    maxRounds: 3,
+  })
+  repositories.createTurnParticipant({
+    turnId: turn.id,
+    agentId: agent.id,
+    source: 'responsibility',
+    rank: 1,
+    matcherScore: 10,
+    decision: 'speak',
+    confidence: 0.9,
+    proposedAngle: '从公开信息回答',
+    status: 'selected',
+  })
+  const invocation = repositories.createAgentInvocation({
+    turnId: turn.id,
+    agentId: agent.id,
+    kind: 'response',
+    priority: 'human_ordinary',
+    round: 1,
+    idempotencyKey: `${turn.id}:response:${agent.id}`,
+    sourceInvocationId: null,
+  })
+  return { workspace, channel, agent, message, turn, invocation }
 }
 
 function conversationTurn(overrides: Partial<ConversationTurn> = {}): ConversationTurn {

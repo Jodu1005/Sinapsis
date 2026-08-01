@@ -4,7 +4,7 @@ import { DomainError } from '../domain/task'
 import type { WorkspaceRepositories } from '../ports/repositories'
 import type { RuntimeAdapter } from '../ports/runtime'
 import { ChannelMessageService } from './channel-message-service'
-import { ChannelTurnCoordinator } from './channel-turn-coordinator'
+import { ChannelTurnCoordinator, type TurnActivity } from './channel-turn-coordinator'
 import { ContextAssembler } from './context-assembler'
 import { ConversationSessionService } from './conversation-session-service'
 
@@ -43,8 +43,16 @@ export class ConversationCoordinator {
   }
 
   getTypingAgentIds(channelId: string): string[] {
-    return [...new Set(this.turnCoordinator.getActiveStates(channelId)
+    return [...new Set(this.getActiveStates(channelId)
       .flatMap((activity) => activity.agentId ? [activity.agentId] : []))]
+  }
+
+  getActiveStates(channelId: string): TurnActivity[] {
+    return this.turnCoordinator.getActiveStates(channelId)
+  }
+
+  cancel(turnId: string) {
+    return this.turnCoordinator.cancel(turnId)
   }
 
   async cancelChannel(channelId: string): Promise<void> {

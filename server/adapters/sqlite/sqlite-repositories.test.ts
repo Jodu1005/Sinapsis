@@ -675,6 +675,7 @@ describe('SQLite workspace repositories', () => {
 
       expect(response.status).toBe(200)
       await expect(response.json()).resolves.toEqual({
+        activeTurnsByChannel: {},
         agents: [],
         channels: [],
         workspaces: [],

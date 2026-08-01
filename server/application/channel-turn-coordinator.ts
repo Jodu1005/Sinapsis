@@ -219,7 +219,7 @@ export class ChannelTurnCoordinator {
           rank: index + 1,
           matcherScore: candidate.score,
         })
-        this.publish('conversation.participant_decided', 'turn_participant', participant.id)
+        this.publish('conversation.participant_updated', 'turn_participant', participant.id)
         return { candidate, participant }
       })
 
@@ -313,6 +313,19 @@ export class ChannelTurnCoordinator {
       execution.cancelled = true
       this.cancelParticipants(turnId)
       execution.activities.clear()
+    } else {
+      const activeInvocations = this.repositories.listAgentInvocations(turnId)
+        .filter((invocation) => invocation.status === 'queued' || invocation.status === 'running')
+      for (const invocation of activeInvocations) {
+        this.repositories.updateAgentInvocation(invocation.id, {
+          status: 'cancelled',
+          completedAt: this.now().toISOString(),
+          errorCode: 'cancelled',
+        })
+        this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
+      }
+      this.cancelParticipantsForInvocations(turnId, activeInvocations.map((invocation) => invocation.id), 'turn_cancelled')
+      this.cancelParticipants(turnId)
     }
     this.failAcceptedHandoffs(turnId, 'turn_cancelled')
     const cancelled = this.repositories.updateConversationTurn(turnId, {
@@ -324,9 +337,28 @@ export class ChannelTurnCoordinator {
   }
 
   getActiveStates(channelId: string): TurnActivity[] {
-    return [...this.executions.values()]
-      .filter((execution) => execution.channelId === channelId)
-      .flatMap((execution) => [...execution.activities.values()])
+    return this.repositories.listActiveConversationTurns(channelId).flatMap((turn) => {
+      const execution = this.executions.get(turn.id)
+      if (execution && execution.activities.size > 0) return [...execution.activities.values()]
+
+      const invocations = this.repositories.listAgentInvocations(turn.id)
+        .filter((invocation) => invocation.status === 'queued' || invocation.status === 'running')
+      if (invocations.length > 0) {
+        return invocations.map((invocation) => ({
+          turnId: turn.id,
+          agentId: invocation.agentId,
+          phase: 'queued' as const,
+          queuePosition: null,
+        }))
+      }
+
+      return [{
+        turnId: turn.id,
+        agentId: null,
+        phase: phaseForTurnStatus(turn.status),
+        queuePosition: null,
+      }]
+    })
   }
 
   async cancelChannel(channelId: string): Promise<void> {
@@ -366,7 +398,7 @@ export class ChannelTurnCoordinator {
       speakingOrder: 1,
       status: 'selected',
     })
-    this.publish('conversation.participant_decided', 'turn_participant', participant.id)
+    this.publish('conversation.participant_updated', 'turn_participant', participant.id)
     if (agent.status === 'offline' || agent.status === 'error') {
       this.updateParticipant(initialTurn.id, agent.id, { status: 'failed', reason: 'agent_unavailable' })
       return this.finishTurn(initialTurn.id)
@@ -420,7 +452,7 @@ export class ChannelTurnCoordinator {
         status: unavailable ? 'failed' : 'selected',
         reason: unavailable ? 'agent_unavailable' : null,
       })
-      this.publish('conversation.participant_decided', 'turn_participant', participant.id)
+      this.publish('conversation.participant_updated', 'turn_participant', participant.id)
       if (!unavailable) availableAgents.push(agent)
     }
     if (availableAgents.length === 0) return this.finishTurn(initialTurn.id)
@@ -513,7 +545,7 @@ export class ChannelTurnCoordinator {
             completedAt: this.now().toISOString(),
             errorCode: 'timeout',
           })
-          this.publish('conversation.invocation_completed', 'agent_invocation', invocation.id)
+          this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
         }
         execution.activities.delete(agent.id)
       }
@@ -816,7 +848,7 @@ export class ChannelTurnCoordinator {
             status: 'selected',
             speakingOrder: nextSpeakingOrder(this.repositories, turn.id),
           })
-      if (!existing) this.publish('conversation.participant_decided', 'turn_participant', participant.id)
+      if (!existing) this.publish('conversation.participant_updated', 'turn_participant', participant.id)
       const outcome = await this.respond(
         execution,
         turn,
@@ -879,7 +911,7 @@ export class ChannelTurnCoordinator {
     })
     onInvocationCreated?.(invocation.id)
     execution.invocationIds.add(invocation.id)
-    this.publish('conversation.invocation_queued', 'agent_invocation', invocation.id)
+    this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
     const snapshot = this.queue.snapshot(agent.id)
     this.setActivity(execution, agent.id, 'queued', snapshot.queued + (snapshot.running ? 1 : 0) + 1)
 
@@ -892,7 +924,7 @@ export class ChannelTurnCoordinator {
         run: async () => {
           if (execution.cancelled) throw new ConversationInvocationCancelledError(invocation.id)
           this.repositories.updateAgentInvocation(invocation.id, { status: 'running', startedAt: this.now().toISOString() })
-          this.publish('conversation.invocation_started', 'agent_invocation', invocation.id)
+          this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
           this.setActivity(execution, agent.id, input.phase)
           return this.sessions.invoke({
             channelId: turn.channelId,
@@ -914,7 +946,7 @@ export class ChannelTurnCoordinator {
       if (execution.cancelled) throw new ConversationInvocationCancelledError(invocation.id)
       if (execution.timedOutInvocationIds.has(invocation.id)) throw new Error('timeout')
       this.repositories.updateAgentInvocation(invocation.id, { status: 'settled', completedAt: this.now().toISOString() })
-      this.publish('conversation.invocation_completed', 'agent_invocation', invocation.id)
+      this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
       return { invocation, result }
     } catch (error) {
       if (!execution.timedOutInvocationIds.has(invocation.id)) {
@@ -929,7 +961,7 @@ export class ChannelTurnCoordinator {
             completedAt: this.now().toISOString(),
             errorCode: errorMessage(error),
           })
-          this.publish('conversation.invocation_completed', 'agent_invocation', invocation.id)
+          this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
         }
       }
       throw error
@@ -970,7 +1002,7 @@ export class ChannelTurnCoordinator {
       return current
     }
     const participant = this.repositories.updateTurnParticipant(turnId, agentId, patch)
-    this.publish('conversation.participant_decided', 'turn_participant', participant.id)
+    this.publish('conversation.participant_updated', 'turn_participant', participant.id)
     return participant
   }
 
@@ -983,7 +1015,7 @@ export class ChannelTurnCoordinator {
 
   private transitionTurn(turnId: string, patch: Parameters<WorkspaceRepositories['updateConversationTurn']>[1]): ConversationTurn {
     const turn = this.repositories.updateConversationTurn(turnId, patch)
-    this.publish('conversation.phase_changed', 'conversation_turn', turn.id)
+    this.publish('conversation.turn_updated', 'conversation_turn', turn.id)
     return turn
   }
 
@@ -1041,12 +1073,7 @@ export class ChannelTurnCoordinator {
     status: Extract<ReturnType<WorkspaceRepositories['updateConversationHandoff']>['status'], 'completed' | 'failed'>,
     reason: string | null,
   ): void {
-    const handoff = this.repositories.updateConversationHandoff(handoffId, { status, reason })
-    this.publish(
-      status === 'completed' ? 'conversation.handoff_completed' : 'conversation.handoff_failed',
-      'conversation_handoff',
-      handoff.id,
-    )
+    this.repositories.updateConversationHandoff(handoffId, { status, reason })
   }
 
   private failAcceptedHandoffs(turnId: string, reason: string): void {
@@ -1086,7 +1113,7 @@ export class ChannelTurnCoordinator {
       completedAt: this.now().toISOString(),
       errorCode,
     })
-    this.publish('conversation.invocation_completed', 'agent_invocation', invocationId)
+    this.publish('conversation.invocation_updated', 'agent_invocation', invocationId)
   }
 
   private cancelParticipants(turnId: string): void {
@@ -1190,6 +1217,13 @@ function dependencyCycleAgentIds(dependencies: Map<string, string | null>): Set<
 
 function queueIsAvailable(snapshot: { running: boolean; queued: number }): boolean {
   return !snapshot.running && snapshot.queued === 0
+}
+
+function phaseForTurnStatus(status: ConversationTurn['status']): TurnActivity['phase'] {
+  if (status === 'screening') return 'screening'
+  if (status === 'judging') return 'judging'
+  if (status === 'handoff') return 'handoff'
+  return 'queued'
 }
 
 function isDuplicateDecision(value: ConversationSessionResult['parsed']): value is DuplicateDecision {

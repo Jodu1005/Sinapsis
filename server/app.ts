@@ -15,6 +15,7 @@ import { ChannelMessageService } from './application/channel-message-service'
 import { ChannelContextResetService } from './application/channel-context-reset-service'
 import { ChannelWorkspaceService } from './application/channel-workspace-service'
 import { ConversationCoordinator } from './application/conversation-coordinator'
+import type { TurnActivity } from './application/channel-turn-coordinator'
 import { routeMentions, UnknownMentionError } from './application/mention-router'
 import { TaskExecutionCoordinator } from './application/task-execution-coordinator'
 import { TaskReviewService } from './application/task-review-service'
@@ -33,7 +34,10 @@ export interface CreateAppOptions {
   gitClient?: GitClient
   runtimeAvailabilityDetector?: RuntimeAvailabilityDetector
   executionCoordinator?: TaskExecutionCoordinator
-  conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'> & Partial<Pick<ConversationCoordinator, 'getTypingAgentIds' | 'cancelChannel' | 'cancelAgentInChannel'>>
+  conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'> & Partial<Pick<
+    ConversationCoordinator,
+    'getTypingAgentIds' | 'getActiveStates' | 'cancel' | 'cancelChannel' | 'cancelAgentInChannel'
+  >>
   scheduler?: TaskScheduler
   reviewService?: TaskReviewService
 }
@@ -96,9 +100,17 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   app.get('/api/bootstrap', (_request, response) => {
     const snapshot = repositories.getBootstrap()
-    const typingAgentIdsByChannel = Object.fromEntries(snapshot.channels
-      .map((channel) => [channel.id, conversationCoordinator.getTypingAgentIds?.(channel.id) ?? []]))
-    response.json(sanitizeBootstrap(snapshot, typingAgentIdsByChannel))
+    const activeTurnsByChannel = Object.fromEntries(snapshot.channels.map((channel) => [
+      channel.id,
+      conversationCoordinator.getActiveStates?.(channel.id) ?? persistedTurnActivity(repositories, channel.id),
+    ]))
+    const typingAgentIdsByChannel = Object.fromEntries(snapshot.channels.map((channel) => [
+      channel.id,
+      conversationCoordinator.getTypingAgentIds?.(channel.id)
+        ?? [...new Set(activeTurnsByChannel[channel.id]
+          .flatMap((activity) => activity.agentId ? [activity.agentId] : []))],
+    ]))
+    response.json(sanitizeBootstrap(snapshot, typingAgentIdsByChannel, activeTurnsByChannel))
   })
 
   app.post('/api/workspaces', asyncRoute((request, response) => {
@@ -335,6 +347,27 @@ export function createApp(options: CreateAppOptions = {}): Express {
     response.status(201).json(message)
   }))
 
+  app.get('/api/channels/:channelId/turns/:turnId', asyncRoute((request, response) => {
+    const channelId = requiredParam(request.params.channelId, 'channelId')
+    const turnId = requiredParam(request.params.turnId, 'turnId')
+    const details = repositories.getConversationTurnDetails(turnId)
+    if (!details || details.turn.channelId !== channelId) {
+      throw new NotFoundError(`Conversation turn ${turnId} does not exist in channel ${channelId}.`)
+    }
+    response.json(details)
+  }))
+
+  app.post('/api/channels/:channelId/turns/:turnId/cancel', asyncRoute(async (request, response) => {
+    const channelId = requiredParam(request.params.channelId, 'channelId')
+    const turnId = requiredParam(request.params.turnId, 'turnId')
+    const turn = repositories.getConversationTurn(turnId)
+    if (!turn || turn.channelId !== channelId) {
+      throw new NotFoundError(`Conversation turn ${turnId} does not exist in channel ${channelId}.`)
+    }
+    if (!conversationCoordinator.cancel) throw new DomainError('Conversation cancellation is unavailable.')
+    response.json(await conversationCoordinator.cancel(turnId))
+  }))
+
   app.post('/api/tasks/:taskId/review', asyncRoute(async (request, response) => {
     const body = objectBody(request.body)
     assertOnlyKeys(body, ['action', 'message'])
@@ -506,12 +539,40 @@ function requiredParam(value: unknown, name: string): string {
   return value
 }
 
-function sanitizeBootstrap(snapshot: ReturnType<WorkspaceRepositories['getBootstrap']>, typingAgentIdsByChannel: Record<string, string[]>) {
+function sanitizeBootstrap(
+  snapshot: ReturnType<WorkspaceRepositories['getBootstrap']>,
+  typingAgentIdsByChannel: Record<string, string[]>,
+  activeTurnsByChannel: Record<string, TurnActivity[]>,
+) {
   return {
     ...snapshot,
     agents: snapshot.agents.map(sanitizeAgent),
     typingAgentIdsByChannel,
+    activeTurnsByChannel,
   }
+}
+
+function persistedTurnActivity(repositories: WorkspaceRepositories, channelId: string): TurnActivity[] {
+  return repositories.listActiveConversationTurns(channelId).flatMap<TurnActivity>((turn) => {
+    const invocations = repositories.listAgentInvocations(turn.id)
+      .filter((invocation) => invocation.status === 'queued' || invocation.status === 'running')
+    if (invocations.length > 0) {
+      return invocations.map((invocation) => ({
+        turnId: turn.id,
+        agentId: invocation.agentId,
+        phase: 'queued' as const,
+        queuePosition: null,
+      }))
+    }
+    const phase: TurnActivity['phase'] = turn.status === 'screening'
+      ? 'screening'
+      : turn.status === 'judging'
+        ? 'judging'
+        : turn.status === 'handoff'
+          ? 'handoff'
+          : 'queued'
+    return [{ turnId: turn.id, agentId: null, phase, queuePosition: null }]
+  })
 }
 
 function sanitizeAgent(agent: ReturnType<WorkspaceRepositories['getBootstrap']>['agents'][number]) {

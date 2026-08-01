@@ -41,6 +41,13 @@ export interface BootstrapSnapshot {
   maxWorkspaceBindingsPerChannel: number
 }
 
+export interface ConversationTurnDetails {
+  turn: ConversationTurn
+  participants: TurnParticipant[]
+  invocations: AgentInvocation[]
+  handoffs: ConversationHandoff[]
+}
+
 export interface TaskClaim {
   task: Task
   lease: TaskLease
@@ -121,6 +128,8 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   getMessage(messageId: string): Message | undefined
   createConversationTurn(input: CreateConversationTurnInput): ConversationTurn
   getConversationTurn(turnId: string): ConversationTurn | undefined
+  getConversationTurnDetails(turnId: string): ConversationTurnDetails | undefined
+  listActiveConversationTurns(channelId?: string): ConversationTurn[]
   updateConversationTurn(turnId: string, patch: ConversationTurnPatch): ConversationTurn
   createTurnParticipant(input: CreateTurnParticipantInput): TurnParticipant
   updateTurnParticipant(turnId: string, agentId: string, patch: ParticipantPatch): TurnParticipant

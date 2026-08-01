@@ -968,6 +968,33 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return readConversationTurn(this.sqlite.database, turnId)
   }
 
+  getConversationTurnDetails(turnId: string) {
+    const turn = this.getConversationTurn(turnId)
+    if (!turn) return undefined
+    return {
+      turn,
+      participants: this.listTurnParticipants(turnId),
+      invocations: this.listAgentInvocations(turnId),
+      handoffs: this.listConversationHandoffs(turnId),
+    }
+  }
+
+  listActiveConversationTurns(channelId?: string): ConversationTurn[] {
+    const terminalStatuses = "'completed', 'partial', 'cancelled', 'failed'"
+    const rows = channelId === undefined
+      ? this.sqlite.database.prepare(`
+          SELECT * FROM conversation_turns
+          WHERE status NOT IN (${terminalStatuses})
+          ORDER BY created_at, id
+        `).all()
+      : this.sqlite.database.prepare(`
+          SELECT * FROM conversation_turns
+          WHERE channel_id = ? AND status NOT IN (${terminalStatuses})
+          ORDER BY created_at, id
+        `).all(channelId)
+    return (rows as unknown as ConversationTurnRow[]).map(mapConversationTurn)
+  }
+
   updateConversationTurn(turnId: string, patch: ConversationTurnPatch): ConversationTurn {
     return this.inTransaction(() => {
       const turn = readConversationTurn(this.sqlite.database, turnId)
