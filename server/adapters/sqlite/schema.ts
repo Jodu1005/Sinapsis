@@ -382,6 +382,57 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(15, new Date().toISOString())
     }
 
+    const sixteenthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 16').get()
+    if (!sixteenthMigration) {
+      database.exec(`
+        ALTER TABLE turn_participants RENAME TO turn_participants_v15;
+        CREATE TABLE turn_participants (
+          id TEXT NOT NULL UNIQUE,
+          turn_id TEXT NOT NULL REFERENCES conversation_turns(id),
+          agent_id TEXT NOT NULL REFERENCES agents(id),
+          source TEXT NOT NULL CHECK(source IN ('responsibility', 'direct', 'all', 'handoff')),
+          rank INTEGER NOT NULL CHECK(rank >= 0),
+          matcher_score REAL,
+          decision TEXT NOT NULL CHECK(decision IN ('pending', 'speak', 'silent', 'skipped')),
+          confidence REAL,
+          proposed_angle TEXT,
+          depends_on_agent_id TEXT REFERENCES agents(id),
+          speaking_order INTEGER CHECK(speaking_order IS NULL OR speaking_order >= 0),
+          status TEXT NOT NULL CHECK(status IN ('candidate', 'selected', 'spoken', 'failed', 'skipped', 'cancelled')),
+          reason TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (turn_id, agent_id)
+        );
+        INSERT INTO turn_participants SELECT * FROM turn_participants_v15;
+        DROP TABLE turn_participants_v15;
+
+        ALTER TABLE conversation_handoffs RENAME TO conversation_handoffs_v15;
+        CREATE TABLE conversation_handoffs (
+          id TEXT PRIMARY KEY,
+          turn_id TEXT NOT NULL REFERENCES conversation_turns(id),
+          source_invocation_id TEXT NOT NULL REFERENCES agent_invocations(id),
+          from_agent_id TEXT NOT NULL REFERENCES agents(id),
+          requested_target_agent_id TEXT NOT NULL,
+          to_agent_id TEXT REFERENCES agents(id),
+          question TEXT NOT NULL,
+          round INTEGER NOT NULL CHECK(round >= 0),
+          status TEXT NOT NULL CHECK(status IN ('queued', 'accepted', 'rejected', 'completed', 'failed')),
+          reason TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO conversation_handoffs (
+          id, turn_id, source_invocation_id, from_agent_id, requested_target_agent_id,
+          to_agent_id, question, round, status, reason, created_at, updated_at
+        ) SELECT id, turn_id, source_invocation_id, from_agent_id, to_agent_id,
+          to_agent_id, question, round, status, reason, created_at, created_at
+        FROM conversation_handoffs_v15;
+        DROP TABLE conversation_handoffs_v15;
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(16, new Date().toISOString())
+    }
+
     database.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS conversation_sessions_grain_unique_idx
         ON conversation_sessions(channel_id, COALESCE(thread_root_message_id, ''), agent_id);

@@ -20,6 +20,20 @@ interface AgentLane {
   queued: QueueEntry[]
 }
 
+export type AgentInvocationCancellationState = 'queued' | 'running' | 'not_found'
+
+export interface AgentInvocationCancellationResult {
+  invocationId: string
+  state: AgentInvocationCancellationState
+}
+
+export class AgentInvocationQueueCancelledError extends Error {
+  constructor(readonly invocationId: string) {
+    super(`Invocation ${invocationId} was cancelled.`)
+    this.name = 'AgentInvocationQueueCancelledError'
+  }
+}
+
 const priorityRank: Record<InvocationPriority, number> = {
   human_direct: 0,
   human_ordinary: 1,
@@ -53,7 +67,7 @@ export class AgentInvocationQueue {
       const retained: QueueEntry[] = []
       for (const entry of lane.queued) {
         if (predicate(entry.invocation)) {
-          entry.reject(new Error(`Invocation ${entry.invocation.id} was cancelled.`))
+          entry.reject(new AgentInvocationQueueCancelledError(entry.invocation.id))
         } else {
           retained.push(entry)
         }
@@ -61,6 +75,21 @@ export class AgentInvocationQueue {
       lane.queued = retained
       if (!lane.running && lane.queued.length === 0) this.lanes.delete(agentId)
     }
+  }
+
+  cancelInvocation(invocationId: string): AgentInvocationCancellationResult {
+    for (const [agentId, lane] of this.lanes) {
+      if (lane.running?.invocation.id === invocationId) {
+        return { invocationId, state: 'running' }
+      }
+      const index = lane.queued.findIndex((entry) => entry.invocation.id === invocationId)
+      if (index < 0) continue
+      const [entry] = lane.queued.splice(index, 1)
+      entry!.reject(new AgentInvocationQueueCancelledError(invocationId))
+      if (!lane.running && lane.queued.length === 0) this.lanes.delete(agentId)
+      return { invocationId, state: 'queued' }
+    }
+    return { invocationId, state: 'not_found' }
   }
 
   snapshot(agentId: string): { running: boolean; queued: number } {

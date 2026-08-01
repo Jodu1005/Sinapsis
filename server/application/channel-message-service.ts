@@ -8,8 +8,10 @@ export class ChannelMessageService {
     return this.repositories.createMessage({ channelId, taskId, threadRootMessageId, senderType: 'human', authorName: 'You', body })
   }
 
-  postAgent(channelId: string, taskId: string | null | undefined, authorName: string, body: string, threadRootMessageId?: string | null): Message {
-    return this.repositories.createMessage({ channelId, taskId, threadRootMessageId, senderType: 'agent', authorName, body })
+  postAgent(channelId: string, taskId: string | null | undefined, agentId: string, authorName: string, body: string, threadRootMessageId?: string | null): Message {
+    return this.repositories.createMessage({
+      channelId, taskId, threadRootMessageId, senderType: 'agent', senderId: agentId, authorName, body,
+    })
   }
 
   postMilestone(channelId: string, taskId: string, body: string, threadRootMessageId?: string | null): Message {

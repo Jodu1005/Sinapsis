@@ -249,6 +249,7 @@ describe('SQLite workspace repositories', () => {
       turnId: turn.id,
       sourceInvocationId: secondInvocation.id,
       fromAgentId: secondAgent.id,
+      requestedTargetAgentId: firstAgent.id,
       toAgentId: firstAgent.id,
       question: 'Can you verify the queue boundary?',
       round: 1,
@@ -806,6 +807,106 @@ describe('SQLite workspace repositories', () => {
       .toMatchObject({ version: 15 })
   })
 
+  it('persists a rejected raw Handoff target without an Agent FK and updates valid Handoffs to terminal status', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const source = repositories.createAgent({
+      identity: 'Source', mentionName: 'source', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const target = repositories.createAgent({
+      identity: 'Target', mentionName: 'target', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const message = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Please delegate.',
+    })
+    const turn = repositories.createConversationTurn({
+      channelId: channel.id, triggerMessageId: message.id, threadRootMessageId: null, mode: 'ordinary', maxRounds: 3,
+    })
+    const invocation = repositories.createAgentInvocation({
+      turnId: turn.id, agentId: source.id, kind: 'response', priority: 'human_ordinary', round: 1,
+      idempotencyKey: `${turn.id}:source`, sourceInvocationId: null,
+    })
+
+    const rejected = repositories.createConversationHandoff({
+      turnId: turn.id,
+      sourceInvocationId: invocation.id,
+      fromAgentId: source.id,
+      requestedTargetAgentId: 'missing-agent-id',
+      toAgentId: null,
+      question: 'Can you check this?',
+      round: 2,
+      status: 'rejected',
+      reason: 'target_not_channel_member',
+    })
+    const accepted = repositories.createConversationHandoff({
+      turnId: turn.id,
+      sourceInvocationId: invocation.id,
+      fromAgentId: source.id,
+      requestedTargetAgentId: target.id,
+      toAgentId: target.id,
+      question: 'Can you check this?',
+      round: 2,
+      status: 'accepted',
+    })
+
+    expect(rejected).toMatchObject({ requestedTargetAgentId: 'missing-agent-id', toAgentId: null })
+    expect(repositories.updateConversationHandoff(accepted.id, { status: 'completed', reason: null }))
+      .toMatchObject({ status: 'completed', toAgentId: target.id })
+    expect(repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({ id: rejected.id, requestedTargetAgentId: 'missing-agent-id', toAgentId: null }),
+      expect.objectContaining({ id: accepted.id, status: 'completed' }),
+    ])
+    expect(database!.database.prepare('SELECT version FROM schema_migrations WHERE version = 16').get())
+      .toMatchObject({ version: 16 })
+  })
+
+  it('safely upgrades an existing migration 15 database and preserves conversation rows', async () => {
+    const { repositories, databasePath } = await createRepositories()
+    const channel = createChannel(repositories)
+    const source = repositories.createAgent({
+      identity: 'Legacy Source', mentionName: 'legacy-source', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const target = repositories.createAgent({
+      identity: 'Legacy Target', mentionName: 'legacy-target', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const message = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Legacy turn.',
+    })
+    const turn = repositories.createConversationTurn({
+      channelId: channel.id, triggerMessageId: message.id, threadRootMessageId: null, mode: 'ordinary', maxRounds: 3,
+    })
+    repositories.createTurnParticipant({
+      turnId: turn.id, agentId: source.id, source: 'responsibility', rank: 1, matcherScore: 1,
+    })
+    const invocation = repositories.createAgentInvocation({
+      turnId: turn.id, agentId: source.id, kind: 'response', priority: 'human_ordinary', round: 1,
+      idempotencyKey: `${turn.id}:legacy`, sourceInvocationId: null,
+    })
+    const handoff = repositories.createConversationHandoff({
+      turnId: turn.id, sourceInvocationId: invocation.id, fromAgentId: source.id,
+      requestedTargetAgentId: target.id, toAgentId: target.id, question: 'Continue.', round: 2, status: 'accepted',
+    })
+    database!.close()
+    database = undefined
+    downgradeConversationTablesToVersion15(databasePath)
+
+    database = createSqliteDatabase(databasePath)
+    const upgraded = new SqliteRepositories(database, new RecordingPublisher())
+
+    expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 16').get())
+      .toEqual({ version: 16 })
+    expect(upgraded.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({ id: handoff.id, requestedTargetAgentId: target.id, toAgentId: target.id, status: 'accepted' }),
+    ])
+    expect(upgraded.updateTurnParticipant(turn.id, source.id, { status: 'cancelled' }).status).toBe('cancelled')
+    expect(upgraded.updateConversationHandoff(handoff.id, { status: 'failed', reason: 'legacy_failed' }))
+      .toMatchObject({ status: 'failed', reason: 'legacy_failed' })
+  })
+
   it('restores the conversation session grain index for an already-migrated version 15 database', async () => {
     const { repositories, databasePath } = await createRepositories()
     const channel = createChannel(repositories)
@@ -943,6 +1044,59 @@ describe('SQLite workspace repositories', () => {
     `).run(fixture.taskId, fixture.repositoryId, fixture.ordinaryChannelId, null, 'Legacy task', 'Description', 'Done', '[]', 'queued', createdAt, 0, 2, 900000, null, null, null, createdAt, createdAt, null)
     legacy.close()
     return fixture
+  }
+
+  function downgradeConversationTablesToVersion15(databasePath: string): void {
+    const legacy = new DatabaseSync(databasePath)
+    legacy.exec(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN;
+      ALTER TABLE turn_participants RENAME TO turn_participants_v16;
+      CREATE TABLE turn_participants (
+        id TEXT NOT NULL UNIQUE,
+        turn_id TEXT NOT NULL REFERENCES conversation_turns(id),
+        agent_id TEXT NOT NULL REFERENCES agents(id),
+        source TEXT NOT NULL CHECK(source IN ('responsibility', 'direct', 'all', 'handoff')),
+        rank INTEGER NOT NULL CHECK(rank >= 0),
+        matcher_score REAL,
+        decision TEXT NOT NULL CHECK(decision IN ('pending', 'speak', 'silent', 'skipped')),
+        confidence REAL,
+        proposed_angle TEXT,
+        depends_on_agent_id TEXT REFERENCES agents(id),
+        speaking_order INTEGER CHECK(speaking_order IS NULL OR speaking_order >= 0),
+        status TEXT NOT NULL CHECK(status IN ('candidate', 'selected', 'spoken', 'failed', 'skipped')),
+        reason TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (turn_id, agent_id)
+      );
+      INSERT INTO turn_participants SELECT * FROM turn_participants_v16;
+      DROP TABLE turn_participants_v16;
+
+      ALTER TABLE conversation_handoffs RENAME TO conversation_handoffs_v16;
+      CREATE TABLE conversation_handoffs (
+        id TEXT PRIMARY KEY,
+        turn_id TEXT NOT NULL REFERENCES conversation_turns(id),
+        source_invocation_id TEXT NOT NULL REFERENCES agent_invocations(id),
+        from_agent_id TEXT NOT NULL REFERENCES agents(id),
+        to_agent_id TEXT NOT NULL REFERENCES agents(id),
+        question TEXT NOT NULL,
+        round INTEGER NOT NULL CHECK(round >= 0),
+        status TEXT NOT NULL CHECK(status IN ('queued', 'accepted', 'rejected', 'completed')),
+        reason TEXT,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO conversation_handoffs (
+        id, turn_id, source_invocation_id, from_agent_id, to_agent_id,
+        question, round, status, reason, created_at
+      ) SELECT id, turn_id, source_invocation_id, from_agent_id, to_agent_id,
+        question, round, status, reason, created_at
+      FROM conversation_handoffs_v16;
+      DROP TABLE conversation_handoffs_v16;
+      DELETE FROM schema_migrations WHERE version = 16;
+      COMMIT;
+    `)
+    legacy.close()
   }
 
   function createVersion14Fixture(databasePath: string) {

@@ -2,6 +2,7 @@ import type { Agent, AgentStatus, CreateAgentInput } from '../domain/agent'
 import type {
   AgentInvocation,
   ConversationHandoff,
+  ConversationHandoffPatch,
   ConversationSession,
   ConversationTurn,
   ConversationTurnPatch,
@@ -128,6 +129,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   updateAgentInvocation(invocationId: string, patch: InvocationPatch): AgentInvocation
   listAgentInvocations(turnId: string): AgentInvocation[]
   createConversationHandoff(input: CreateConversationHandoffInput): ConversationHandoff
+  updateConversationHandoff(handoffId: string, patch: ConversationHandoffPatch): ConversationHandoff
   listConversationHandoffs(turnId: string): ConversationHandoff[]
   getConversationSession(key: string): ConversationSession | undefined
   upsertConversationSession(input: UpsertConversationSessionInput): ConversationSession

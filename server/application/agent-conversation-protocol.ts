@@ -2,7 +2,7 @@ import type { InvocationKind } from '../domain/conversation'
 
 const maxDecisionTextLength = 500
 const maxReplyLength = 20_000
-const maxHandoffTargets = 2
+const maxHandoffTargets = 20
 
 export interface ParticipationDecision {
   decision: 'speak' | 'silent'
@@ -150,7 +150,7 @@ function handoffTargets(value: unknown): Array<{ agentId: string; question: stri
     assertOnlyKeys(target, ['agentId', 'question'])
     return {
       agentId: boundedString(target.agentId, 'handoff agentId', maxDecisionTextLength),
-      question: boundedString(target.question, 'handoff question', maxReplyLength),
+      question: boundedString(target.question, 'handoff question', maxReplyLength, true),
     }
   })
 }

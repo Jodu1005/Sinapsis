@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createApp } from './app'
 import { startHttpTestServer } from './test/http-test-server'
 import type { WorkspaceRepositories } from './ports/repositories'
+import { ConversationCoordinator } from './application/conversation-coordinator'
+import type { ChannelTurnCoordinator } from './application/channel-turn-coordinator'
+import type { ConversationTurn } from './domain/conversation'
 
 describe('local service API', () => {
   let closeServer: (() => Promise<void>) | undefined
@@ -410,6 +413,36 @@ describe('local service API', () => {
     expect(repositories.getTasksForRepository(repository.id)).toEqual([])
   })
 
+  it('returns HTTP 201 after the facade starts a persisted Turn without waiting for background completion', async () => {
+    const completion = new Promise<ConversationTurn>(() => undefined)
+    const turnCoordinator = {
+      start: () => ({
+        turn: conversationTurn({ status: 'screening', completedAt: null }),
+        completion,
+      }),
+      getActiveStates: () => [],
+      cancelChannel: async () => undefined,
+      cancelAgentInChannel: async () => undefined,
+    } as unknown as ChannelTurnCoordinator
+    const app = createApp({
+      conversationCoordinator: new ConversationCoordinator({ turnCoordinator }),
+    })
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'fast-response' })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/channels/${channel.id}/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ body: 'background turn' }),
+    })
+
+    expect(response.status).toBe(201)
+  })
+
   it('does not inject a Channel message or foreign task reference into another Channel active task', async () => {
     const app = createApp()
     const repositories = app.locals.repositories as WorkspaceRepositories
@@ -691,4 +724,14 @@ function createTestAgent(repositories: WorkspaceRepositories, identity: string, 
     model: '',
     env: {},
   })
+}
+
+function conversationTurn(overrides: Partial<ConversationTurn> = {}): ConversationTurn {
+  return {
+    id: 'turn-1', channelId: 'channel-1', triggerMessageId: 'message-1', threadRootMessageId: null,
+    mode: 'ordinary', status: 'completed', currentRound: 0, maxRounds: 3,
+    createdAt: '2026-07-31T08:00:00.000Z', updatedAt: '2026-07-31T08:00:00.000Z',
+    completedAt: '2026-07-31T08:00:01.000Z',
+    ...overrides,
+  }
 }

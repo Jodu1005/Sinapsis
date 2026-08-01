@@ -4,6 +4,7 @@ import type { Agent, AgentStatus, CreateAgentInput } from '../../domain/agent'
 import type {
   AgentInvocation,
   ConversationHandoff,
+  ConversationHandoffPatch,
   ConversationSession,
   ConversationTurn,
   ConversationTurnPatch,
@@ -239,12 +240,14 @@ interface ConversationHandoffRow {
   turn_id: string
   source_invocation_id: string
   from_agent_id: string
-  to_agent_id: string
+  requested_target_agent_id: string
+  to_agent_id: string | null
   question: string
   round: number
   status: ConversationHandoff['status']
   reason: string | null
   created_at: string
+  updated_at: string
 }
 
 interface ConversationSessionRow {
@@ -1066,24 +1069,45 @@ export class SqliteRepositories implements WorkspaceRepositories {
         turnId: input.turnId,
         sourceInvocationId: input.sourceInvocationId,
         fromAgentId: input.fromAgentId,
+        requestedTargetAgentId: input.requestedTargetAgentId,
         toAgentId: input.toAgentId,
         question: input.question,
         round: input.round,
         status: input.status ?? 'queued',
         reason: input.reason ?? null,
         createdAt: now(),
+        updatedAt: now(),
       }
       this.sqlite.database.prepare(`
         INSERT INTO conversation_handoffs (
-          id, turn_id, source_invocation_id, from_agent_id, to_agent_id,
-          question, round, status, reason, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, turn_id, source_invocation_id, from_agent_id, requested_target_agent_id, to_agent_id,
+          question, round, status, reason, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         handoff.id, handoff.turnId, handoff.sourceInvocationId, handoff.fromAgentId,
-        handoff.toAgentId, handoff.question, handoff.round, handoff.status, handoff.reason,
-        handoff.createdAt,
+        handoff.requestedTargetAgentId, handoff.toAgentId, handoff.question, handoff.round,
+        handoff.status, handoff.reason, handoff.createdAt, handoff.updatedAt,
       )
       return handoff
+    })
+  }
+
+  updateConversationHandoff(handoffId: string, patch: ConversationHandoffPatch): ConversationHandoff {
+    return this.inTransaction(() => {
+      const row = this.sqlite.database.prepare('SELECT * FROM conversation_handoffs WHERE id = ?')
+        .get(handoffId) as ConversationHandoffRow | undefined
+      if (!row) throw new Error(`Conversation handoff ${handoffId} does not exist.`)
+      const handoff = mapConversationHandoff(row)
+      const updated: ConversationHandoff = {
+        ...handoff,
+        status: patch.status ?? handoff.status,
+        reason: patch.reason === undefined ? handoff.reason : patch.reason,
+        updatedAt: now(),
+      }
+      this.sqlite.database.prepare(`
+        UPDATE conversation_handoffs SET status = ?, reason = ?, updated_at = ? WHERE id = ?
+      `).run(updated.status, updated.reason, updated.updatedAt, updated.id)
+      return updated
     })
   }
 
@@ -1833,12 +1857,14 @@ function mapConversationHandoff(row: ConversationHandoffRow): ConversationHandof
     turnId: row.turn_id,
     sourceInvocationId: row.source_invocation_id,
     fromAgentId: row.from_agent_id,
+    requestedTargetAgentId: row.requested_target_agent_id,
     toAgentId: row.to_agent_id,
     question: row.question,
     round: row.round,
     status: row.status,
     reason: row.reason,
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
   }
 }
 

@@ -98,3 +98,134 @@
 - 现有 `ChannelMessageService.postAgent` 没有 `senderId` 参数，且该文件不在 Task 5 允许修改范围内。Coordinator 仍严格通过该服务写公开回复，并在 `getLastAgentSpokenAt` 返回空时，使用已持久化 bootstrap 公开消息的 `authorName` 做 recency 回退。该回退受每频道最近 50 条 bootstrap 窗口限制；长期精确 recency 最好在后续允许修改消息服务时补充 Agent sender attribution。
 - 单直接提及为保持既有入口与 brief 的跨来源优先级而保留；多提及与 `@all` 仍未实现，留给 A6。
 - Handoff 记录当前仓储接口只有 create、没有 update，因此已接受记录保持 `accepted`，目标回复结果由 Invocation、Participant 与 Turn 终态表达；若后续 UI 要显示独立 `completed` Handoff 状态，需要由后续任务扩展仓储 patch 接口。
+
+---
+
+# Task 5 修复轮 1/5
+
+## 状态
+
+已完成本轮 7 项 Critical/Important 修复。修复基于 Task 5 提交 `57ca2742cf5995ecf3c1fb000729c61c7d4048f4`，未修改或暂存 `.codex/`、`src/.DS_Store`，未实现 A6 多提及或 `@all`。
+
+## 逐项实现
+
+1. **Invocation 级取消**
+   - `AgentInvocationQueue.cancelInvocation(id)` 精确返回 `queued/running/not_found`；queued 项立即移除并以 `AgentInvocationQueueCancelledError` 拒绝，之后不会执行。
+   - `ConversationSessionService.cancelInvocation(id)` 只定位 `active.input.conversation.invocationId` 的 Session generation，并以带 `invocationId` 的 `ConversationInvocationCancelledError` 结束该 Invocation。
+   - Turn、Agent、Participation timeout 全部按 Invocation ownership 取消，不再用频道/Agent 粒度取消普通 Turn 工作。
+2. **非成员 Handoff 持久化与 migration 16**
+   - `ConversationHandoff` 新增 `requestedTargetAgentId`；`toAgentId` 改为可空，只保存验证通过且存在的 Agent FK。
+   - migration 16 重建 `conversation_handoffs`，回填旧数据的 raw target，新增 `updated_at` 和 `failed` 状态；同时重建 `turn_participants` 以支持 `cancelled`。
+   - 真实 version 15 文件重开升级回归验证旧 Participant/Handoff 数据不丢失。
+   - 本任务占用 migration 16；尚未实现的 Dream migration 必须顺延为 migration 17 或更高。
+3. **协议/Policy 分层**
+   - `parsePublicResponse` 只执行结构校验与 20 个目标的绝对安全上限，允许空 `question`。
+   - `HandoffPolicy` 保持业务上限 2，并负责 `max_targets_exceeded`、`question_required`；公开 reply 先落库，拒绝项随后逐条持久化。
+4. **Agent sender attribution**
+   - `ChannelMessageService.postAgent` 必须接收 `agentId` 并写 `messages.sender_id`；Conversation 与 Task 的全部 Agent 公开消息均传真实 ID。
+   - 排序优先使用 `getLastAgentSpokenAt(channelId, agentId)`；按 `authorName` 的 50 条回退只读取 `senderId IS NULL` 的历史消息，避免改名和重名误归属。
+5. **Handoff 终态**
+   - 仓储新增 `updateConversationHandoff`；work item 携带 `handoffId`。
+   - 目标公开回复成功落库后，先更新 Handoff 为 `completed`，再发布 `conversation.handoff_completed`；失败/目标缺失/Turn 终止更新为 `failed` 后发布 `conversation.handoff_failed`。
+   - Turn completed/cancelled/failed 前清算所有遗留 `accepted`，不会留下半终态。
+6. **取消状态一致性**
+   - Session 取消成功后才清 activity；失败恢复 `execution.cancelled=false`，保留 active Session 与活动状态供重试，不发布 apology 或 Turn 终态。
+   - Invocation 与非终态 Participant 均持久化为 `cancelled` 后，才发布 Turn completed 事件。
+7. **兼容门面时序**
+   - `ChannelTurnCoordinator.start(message)` 同步持久化初始 Turn，返回 `{ turn, completion }`；原 `dispatch` 仍可等待完整终态。
+   - `ConversationCoordinator.dispatch` 只调用 start，因此 HTTP POST 不等待 Probe、多轮回复或 Handoff。
+   - 后台流程统一将意外错误持久化为 failed Turn；completion 带内部 rejection observer，避免 unhandled rejection。
+
+## 排序裁定
+
+- 全局 Queue priority 保持 `human_direct > human_ordinary > participation > duplicate_check > automatic_handoff`；新的人类普通消息仍先于未开始的自动 Handoff。
+- 同一 Turn 来源比较单独固定并测试为 `direct > handoff > responsibility(ordinary)`，没有借此实现 A6 分支。
+
+## 修改文件
+
+- `server/application/agent-invocation-queue.ts` / `.test.ts`
+- `server/application/conversation-session-service.ts` / `.test.ts`
+- `server/application/agent-conversation-protocol.ts` / `.test.ts`
+- `server/application/channel-message-service.ts`
+- `server/application/channel-turn-coordinator.ts` / `.test.ts`
+- `server/application/conversation-coordinator.ts` / `.test.ts`
+- `server/application/context-assembler.test.ts`
+- `server/application/task-execution-coordinator.ts`
+- `server/adapters/sqlite/schema.ts`
+- `server/adapters/sqlite/sqlite-repositories.ts` / `.test.ts`
+- `server/domain/conversation.ts`
+- `server/ports/repositories.ts`
+- `server/app.test.ts`
+- `.superpowers/sdd/2026-07-31-multi-agent-conversation-turns/task-5-report.md`
+
+## TDD：真实 RED / GREEN
+
+### Cycle 1：Queue 与 Session 精确取消
+
+- RED：聚焦 Queue/Session 测试退出码 1，新增 2 项分别因 `queue.cancelInvocation`、`service.cancelInvocation` 不存在而失败；17 项旧测试通过。
+- 首次实现后 19 项断言通过，但 Vitest 捕获测试观察代码派生的 unhandled rejection，退出码仍为 1。
+- GREEN：修正 Promise 观察方式后，`2 files / 19 tests passed`，无 unhandled error。
+
+### Cycle 2：Handoff schema 与仓储终态
+
+- RED：SQLite 聚焦测试 `1 failed / 24 passed`，未知目标命中 `NOT NULL constraint failed: conversation_handoffs.to_agent_id`。
+- GREEN：migration 16 与仓储 patch 实现后 `25 tests passed`；补真实 migration 15 重开升级后 `26 tests passed`。
+
+### Cycle 3：协议到 Policy
+
+- RED：协议/Policy/Coordinator 聚焦测试 `2 failed / 27 passed`；解析器报 `handoffTo must contain at most 2 targets`，端到端公开回复未发布。
+- GREEN：绝对上限 20、空问题下沉 Policy 后 `3 files / 29 tests passed`。
+
+### Cycle 4：sender attribution 与精确 recency
+
+- RED：Coordinator `1 failed / 12 passed`，两条公开回复 `senderId` 均为 null。
+- 中间 RED：补 senderId 后 39 项中仅改名/重名排序失败，定位到名字回退仍读取已归属的新消息。
+- GREEN：名字回退限定 `senderId IS NULL` 后，Coordinator/Context/Task `3 files / 39 tests passed`；超过 50 条窗口回归通过。
+
+### Cycle 5：Handoff 终态
+
+- RED：Coordinator `2 failed / 12 passed`，成功与失败目标都遗留 `accepted`。
+- GREEN：work item 携带 handoffId 并补 terminal update 后 `14 tests passed`。
+
+### Cycle 6：Turn 取消一致性
+
+- RED：Coordinator `2 failed / 14 passed`；queued Turn 调用了粗粒度 Agent cancel，running 取消失败被 `allSettled` 吞掉并错误完成 Turn。
+- 中间 RED：精确取消后仅 queued Participant 仍被通用错误路径标成 failed。
+- GREEN：Queue typed cancellation 纳入取消分支后 `16 tests passed`；双 Turn、晚到不执行、失败保留 activity、重试与无 apology 均通过。
+
+### Cycle 7：start/completion 与 HTTP 时序
+
+- RED：门面 2 项因未调用 start 失败；HTTP 测试首次还暴露夹具缺少 Repository 前置条件。
+- GREEN：引入 start/completion、修正 HTTP 夹具后，Facade/App/Coordinator `3 files / 46 tests passed`。
+
+### 补充审查回归
+
+- Queue 的 human ordinary 优先于 automatic handoff、同 Turn 来源排序、后台 Policy 异常持久化为 failed 首次合并执行即 GREEN：`2 files / 23 tests passed`。
+- 首次 build 因测试字符串数组推断为 `string[]` 失败；显式标注 `TurnParticipant['source'][]` 后 build 通过。
+
+## 完整验证
+
+- 最终覆盖文件聚焦测试：10 个测试文件、138 项测试通过，0 失败，退出码 0。
+- Queue/Session 聚焦：`2 files / 19 tests passed`。
+- Protocol/Policy/Coordinator 聚焦：`3 files / 29 tests passed`。
+- Facade/App/Coordinator 聚焦：`3 files / 46 tests passed`。
+- SQLite migration/repository 聚焦：`1 file / 26 tests passed`。
+- 完整测试：`49 files / 364 tests passed`，0 失败，退出码 0。
+- Build：`tsc --noEmit` 与 Vite build 通过，1801 modules transformed，退出码 0。
+- `git diff --check`：通过。
+
+## 自审
+
+- 所有普通 Turn 取消路径按 Invocation ID 处理；SessionService 原粗粒度 API 仅保留给既有显式管理能力，不再用于 Participation timeout 或 Turn/Agent 普通回合取消。
+- queued 删除、running Runtime ownership、取消失败重试、Invocation/Participant/Turn 终态和事件发布顺序均有回归。
+- Handoff 只从已落库公开回复进入 Policy；accepted 只在对应公开目标回复落库后 completed。
+- 非成员 raw target 不进入 Agent FK；migration 15 到 16 在开启当前 schema 后通过真实文件重开测试。
+- `getLastAgentSpokenAt` 是新消息精确来源；历史回退不能覆盖已有 sender attribution。
+- 没有修改全局 Queue priority，没有实现多提及或 `@all`。
+
+## 风险
+
+- migration 16 重建两张 conversation 表；已覆盖现有 migration 15 数据升级，但部署前仍应按常规流程备份本地 SQLite 文件。后续 Dream schema 必须从 17 起编号。
+- `senderId IS NULL` 的历史消息仍只能使用 bootstrap 最近 50 条名字回退；这是旧数据兼容限制，新写入消息不受影响。
+- 若 failed Turn 本身的最终持久化也失败，completion 会拒绝但内部 observer 会阻止 unhandled rejection；当前项目没有独立后台错误日志端口，数据库/事件层故障仍需依赖进程日志与运维监控。
+- `ConversationHandoff.status` 新增 `failed`、`toAgentId` 改为可空；未来新增消费者需覆盖该联合类型。

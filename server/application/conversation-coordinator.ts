@@ -39,7 +39,7 @@ export class ConversationCoordinator {
 
   async dispatch(channelId: string, message: Message): Promise<void> {
     if (message.channelId !== channelId) throw new DomainError('Message does not belong to this channel.')
-    await this.turnCoordinator.dispatch(message)
+    this.turnCoordinator.start(message)
   }
 
   getTypingAgentIds(channelId: string): string[] {

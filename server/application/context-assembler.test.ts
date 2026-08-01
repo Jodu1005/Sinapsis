@@ -25,7 +25,7 @@ describe('ContextAssembler', () => {
     const beforeReset = fixture.messages.postHuman(fixture.channelId, 'before reset')
     const oldest = fixture.messages.postHuman(fixture.channelId, 'oldest retained candidate')
     const middle = fixture.messages.postHuman(fixture.channelId, 'middle retained')
-    const newest = fixture.messages.postAgent(fixture.channelId, null, 'Build', 'newest retained')
+    const newest = fixture.messages.postAgent(fixture.channelId, null, fixture.agentId, 'Build', 'newest retained')
     const current = fixture.messages.postHuman(fixture.channelId, 'current message')
     fixture.at(beforeReset.id, '2026-07-31T08:00:00.000Z')
     fixture.resetAt('2026-07-31T08:00:30.000Z')
@@ -49,7 +49,7 @@ describe('ContextAssembler', () => {
     const fixture = await createFixture()
     const root = fixture.messages.postHuman(fixture.channelId, 'deployment root')
     fixture.messages.postHuman(fixture.channelId, 'unrelated Timeline message')
-    const reply = fixture.messages.postAgent(fixture.channelId, null, 'Build', 'thread reply', root.id)
+    const reply = fixture.messages.postAgent(fixture.channelId, null, fixture.agentId, 'Build', 'thread reply', root.id)
     const otherRoot = fixture.messages.postHuman(fixture.channelId, 'other root')
     fixture.messages.postHuman(fixture.channelId, 'other thread reply', null, otherRoot.id)
     const current = fixture.messages.postHuman(fixture.channelId, 'current thread message', null, root.id)
@@ -136,11 +136,16 @@ describe('ContextAssembler', () => {
       isClean: true,
     })
     const channel = repositories.createChannel({ name: 'general' })
+    const agent = repositories.createAgent({
+      identity: 'Build', mentionName: 'build-context', runtime: 'opencode', capabilityTags: [],
+      responsibilities: ['构建'], maxConcurrentTasks: 1, command: 'opencode', args: [], model: '', env: {},
+    })
     const messages = new ChannelMessageService(repositories)
     const assembler = new ContextAssembler(repositories)
     return {
       repositories,
       channelId: channel.id,
+      agentId: agent.id,
       messages,
       assembler,
       at(messageId: string, createdAt: string) {

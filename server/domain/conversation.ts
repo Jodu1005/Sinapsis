@@ -47,7 +47,7 @@ export interface TurnParticipant {
   proposedAngle: string | null
   dependsOnAgentId: string | null
   speakingOrder: number | null
-  status: 'candidate' | 'selected' | 'spoken' | 'failed' | 'skipped'
+  status: 'candidate' | 'selected' | 'spoken' | 'failed' | 'skipped' | 'cancelled'
   reason: string | null
   createdAt: string
   updatedAt: string
@@ -105,18 +105,22 @@ export interface ConversationHandoff {
   turnId: string
   sourceInvocationId: string
   fromAgentId: string
-  toAgentId: string
+  requestedTargetAgentId: string
+  toAgentId: string | null
   question: string
   round: number
-  status: 'queued' | 'accepted' | 'rejected' | 'completed'
+  status: 'queued' | 'accepted' | 'rejected' | 'completed' | 'failed'
   reason: string | null
   createdAt: string
+  updatedAt: string
 }
 
 export type CreateConversationHandoffInput = Pick<
   ConversationHandoff,
-  'turnId' | 'sourceInvocationId' | 'fromAgentId' | 'toAgentId' | 'question' | 'round'
+  'turnId' | 'sourceInvocationId' | 'fromAgentId' | 'requestedTargetAgentId' | 'toAgentId' | 'question' | 'round'
 > & Partial<Pick<ConversationHandoff, 'status' | 'reason'>>
+
+export type ConversationHandoffPatch = Partial<Pick<ConversationHandoff, 'status' | 'reason'>>
 
 export interface ConversationSession {
   id: string

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AgentInvocationQueue } from './agent-invocation-queue'
+import { AgentInvocationQueue, AgentInvocationQueueCancelledError } from './agent-invocation-queue'
 
 describe('AgentInvocationQueue', () => {
   it('serializes calls for one Agent while allowing different Agents to overlap', async () => {
@@ -66,6 +66,26 @@ describe('AgentInvocationQueue', () => {
     expect(order).toEqual(['running', 'direct', 'handoff'])
   })
 
+  it('keeps a new human ordinary call ahead of an unstarted automatic handoff', async () => {
+    const queue = new AgentInvocationQueue()
+    const blocker = deferred<void>()
+    const order: string[] = []
+    const running = queue.enqueue(invocation('running', 'agent-a', 'participation', 1, async () => {
+      await blocker.promise
+    }))
+    const handoff = queue.enqueue(invocation('handoff', 'agent-a', 'automatic_handoff', 2, async () => {
+      order.push('handoff')
+    }))
+    const ordinary = queue.enqueue(invocation('ordinary', 'agent-a', 'human_ordinary', 3, async () => {
+      order.push('ordinary')
+    }))
+
+    blocker.resolve()
+    await Promise.all([running, ordinary, handoff])
+
+    expect(order).toEqual(['ordinary', 'handoff'])
+  })
+
   it('uses ascending global sequence as FIFO within the same priority', async () => {
     const queue = new AgentInvocationQueue()
     const blocker = deferred<void>()
@@ -87,7 +107,7 @@ describe('AgentInvocationQueue', () => {
     expect(order).toEqual([20, 30])
   })
 
-  it('cancels only queued matches without preempting a running call', async () => {
+  it('cancels one queued invocation with a typed error and never runs it later', async () => {
     const queue = new AgentInvocationQueue()
     const blocker = deferred<void>()
     const running = queue.enqueue(invocation('running', 'agent-a', 'automatic_handoff', 1, async () => {
@@ -95,9 +115,11 @@ describe('AgentInvocationQueue', () => {
       return 'completed'
     }))
     const queued = queue.enqueue(invocation('queued', 'agent-a', 'automatic_handoff', 2, async () => 'not-run'))
-    const cancelled = expect(queued).rejects.toThrow('Invocation queued was cancelled.')
+    const cancelled = expect(queued).rejects.toBeInstanceOf(AgentInvocationQueueCancelledError)
 
-    queue.cancel((candidate) => candidate.id === 'running' || candidate.id === 'queued')
+    expect(queue.cancelInvocation('queued')).toEqual({ state: 'queued', invocationId: 'queued' })
+    expect(queue.cancelInvocation('running')).toEqual({ state: 'running', invocationId: 'running' })
+    expect(queue.cancelInvocation('missing')).toEqual({ state: 'not_found', invocationId: 'missing' })
 
     expect(queue.snapshot('agent-a')).toEqual({ running: true, queued: 0 })
     blocker.resolve()

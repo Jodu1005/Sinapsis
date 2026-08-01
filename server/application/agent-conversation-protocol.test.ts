@@ -43,9 +43,16 @@ describe('agent conversation protocol', () => {
     })
   })
 
-  it('parses a strict structured public response', () => {
-    expect(parsePublicResponse('{"reply":"Complete","handoffTo":[{"agentId":"a2","question":"Please review"}]}'))
-      .toEqual({ reply: 'Complete', handoffTo: [{ agentId: 'a2', question: 'Please review' }] })
+  it('parses policy-invalid Handoff candidates within the absolute protocol limit', () => {
+    expect(parsePublicResponse('{"reply":"Complete","handoffTo":[{"agentId":"a2","question":""},{"agentId":"a3","question":"two"},{"agentId":"a4","question":"three"}]}'))
+      .toEqual({
+        reply: 'Complete',
+        handoffTo: [
+          { agentId: 'a2', question: '' },
+          { agentId: 'a3', question: 'two' },
+          { agentId: 'a4', question: 'three' },
+        ],
+      })
   })
 
   it('rejects unsafe structured public responses', () => {
@@ -54,7 +61,8 @@ describe('agent conversation protocol', () => {
     expect(() => parsePublicResponse('{"reply":"","handoffTo":[]}')).toThrow()
     expect(() => parsePublicResponse('{"reply":"Complete","handoffTo":[],"extra":true}')).toThrow()
     expect(() => parsePublicResponse(`{"reply":"${'x'.repeat(20_001)}","handoffTo":[]}`)).toThrow()
-    expect(() => parsePublicResponse('{"reply":"Complete","handoffTo":[{"agentId":"a1","question":"one"},{"agentId":"a2","question":"two"},{"agentId":"a3","question":"three"}]}')).toThrow()
+    const twentyOneTargets = Array.from({ length: 21 }, (_, index) => ({ agentId: `a${index}`, question: '' }))
+    expect(() => parsePublicResponse(JSON.stringify({ reply: 'Complete', handoffTo: twentyOneTargets }))).toThrow()
   })
 
   it('parses and validates duplicate decisions', () => {

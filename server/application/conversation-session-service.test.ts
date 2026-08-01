@@ -10,7 +10,10 @@ import type { DomainEvent } from '../domain/events'
 import type { DomainEventPublisher } from '../ports/domain-event-publisher'
 import type { RuntimeAdapter, RuntimeEventSink, RuntimeSession, RuntimeTaskRequest } from '../ports/runtime'
 import type { RuntimeAvailability } from '../adapters/runtime/runtime-profile'
-import { ConversationSessionService } from './conversation-session-service'
+import {
+  ConversationInvocationCancelledError,
+  ConversationSessionService,
+} from './conversation-session-service'
 
 describe('ConversationSessionService', () => {
   let temporaryDirectory: string | undefined
@@ -159,6 +162,46 @@ describe('ConversationSessionService', () => {
 
     expect(fixture.runtime.cancellations).toHaveLength(1)
     await expect(invocationFailure).resolves.toMatchObject({ message: 'Conversation invocation was cancelled.' })
+  })
+
+  it('cancels only the Runtime owned by one invocation when the same Agent has two active Turns', async () => {
+    const fixture = await createFixture()
+    fixture.runtime.autoSettle = false
+    const inputA = {
+      ...fixture.invocation('turn A'),
+      conversation: conversation('turn-a', 'invocation-a'),
+    }
+    const inputB = {
+      ...fixture.invocation('turn B'),
+      threadRootMessageId: inputA.currentMessageId,
+      conversation: conversation('turn-b', 'invocation-b'),
+    }
+    const invocationA = fixture.service.invoke(inputA)
+    const invocationB = fixture.service.invoke(inputB)
+    const failureA = invocationA.catch((error: unknown) => error)
+    let invocationBSettled = false
+    void invocationB.then(
+      () => { invocationBSettled = true },
+      () => { invocationBSettled = true },
+    )
+    await nextTurn()
+
+    await expect(fixture.service.cancelInvocation('invocation-a')).resolves.toEqual({
+      invocationId: 'invocation-a',
+      cancelledSessionKeys: [`${fixture.channelId}:timeline:${fixture.agent.id}`],
+    })
+
+    await expect(failureA).resolves.toEqual(expect.objectContaining({
+      name: 'ConversationInvocationCancelledError',
+      invocationId: 'invocation-a',
+    }))
+    expect(fixture.runtime.cancellations.map((session) => session.taskId)).toEqual([
+      fixture.runtime.starts[0]!.taskId,
+    ])
+    expect(invocationBSettled).toBe(false)
+
+    await fixture.service.cancelInvocation('invocation-b')
+    await expect(invocationB).rejects.toBeInstanceOf(ConversationInvocationCancelledError)
   })
 
   it('returns cancellation intent without waiting for a pending Runtime start', async () => {
@@ -534,4 +577,13 @@ function deferred<T>() {
     reject = rejectPromise
   })
   return { promise, resolve, reject }
+}
+
+function conversation(turnId: string, invocationId: string) {
+  return {
+    turnId,
+    invocationId,
+    kind: 'response' as const,
+    expectedOutput: 'public_response' as const,
+  }
 }

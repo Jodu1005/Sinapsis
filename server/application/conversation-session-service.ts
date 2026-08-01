@@ -78,8 +78,12 @@ export interface ConversationCancellationResult {
   cancelledSessionKeys: string[]
 }
 
+export interface ConversationInvocationCancellationResult extends ConversationCancellationResult {
+  invocationId: string
+}
+
 export class ConversationInvocationCancelledError extends Error {
-  constructor() {
+  constructor(readonly invocationId: string | null = null) {
     super('Conversation invocation was cancelled.')
     this.name = 'ConversationInvocationCancelledError'
   }
@@ -168,6 +172,11 @@ export class ConversationSessionService {
 
   async cancelAgentInChannel(channelId: string, agentId: string): Promise<ConversationCancellationResult> {
     return this.cancelSessions((state) => state.channelId === channelId && state.agent.id === agentId)
+  }
+
+  async cancelInvocation(invocationId: string): Promise<ConversationInvocationCancellationResult> {
+    const result = this.cancelSessions((state) => state.active?.input.conversation?.invocationId === invocationId)
+    return { invocationId, ...result }
   }
 
   private redispatch(state: SessionState, input: ConversationSessionInvocation): Promise<ConversationSessionResult> {
@@ -384,7 +393,7 @@ export class ConversationSessionService {
     } catch (error) {
       persistenceFailure = error
     }
-    active.reject(new ConversationInvocationCancelledError())
+    active.reject(new ConversationInvocationCancelledError(active.input.conversation?.invocationId ?? null))
     return persistenceFailure
   }
 

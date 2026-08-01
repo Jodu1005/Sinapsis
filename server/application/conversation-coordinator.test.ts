@@ -6,16 +6,28 @@ import type { ChannelTurnCoordinator, TurnActivity } from './channel-turn-coordi
 
 describe('ConversationCoordinator compatibility facade', () => {
   it('validates the legacy channel argument before delegating with only the persisted message', async () => {
-    const dispatch = vi.fn(async () => turn())
-    const coordinator = createCoordinator({ dispatch })
+    const start = vi.fn(() => ({ turn: turn({ status: 'screening' }), completion: Promise.resolve(turn()) }))
+    const coordinator = createCoordinator({ start })
     const message = humanMessage()
 
     await coordinator.dispatch(message.channelId, message)
 
-    expect(dispatch).toHaveBeenCalledOnce()
-    expect(dispatch).toHaveBeenCalledWith(message)
+    expect(start).toHaveBeenCalledOnce()
+    expect(start).toHaveBeenCalledWith(message)
     await expect(coordinator.dispatch('another-channel', message)).rejects.toThrow('Message does not belong to this channel.')
-    expect(dispatch).toHaveBeenCalledOnce()
+    expect(start).toHaveBeenCalledOnce()
+  })
+
+  it('returns after start without waiting for the Turn completion boundary', async () => {
+    const pending = deferred<ConversationTurn>()
+    const start = vi.fn(() => ({ turn: turn({ status: 'screening' }), completion: pending.promise }))
+    const coordinator = createCoordinator({ start })
+
+    await coordinator.dispatch('channel-1', humanMessage())
+
+    expect(start).toHaveBeenCalledOnce()
+    expect(await promiseState(pending.promise)).toBe('pending')
+    pending.resolve(turn())
   })
 
   it('derives legacy typing Agent IDs from active turn states without duplicates', () => {
@@ -46,6 +58,7 @@ describe('ConversationCoordinator compatibility facade', () => {
 
 function createCoordinator(overrides: Partial<ChannelTurnCoordinator>): ConversationCoordinator {
   const turnCoordinator = {
+    start: () => ({ turn: turn({ status: 'screening' }), completion: Promise.resolve(turn()) }),
     dispatch: async () => turn(),
     cancel: async () => turn({ status: 'cancelled' }),
     getActiveStates: () => [],
@@ -54,6 +67,19 @@ function createCoordinator(overrides: Partial<ChannelTurnCoordinator>): Conversa
     ...overrides,
   } as ChannelTurnCoordinator
   return new ConversationCoordinator({ turnCoordinator })
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise })
+  return { promise, resolve }
+}
+
+async function promiseState(promise: Promise<unknown>): Promise<'pending' | 'settled'> {
+  return Promise.race([
+    promise.then(() => 'settled' as const, () => 'settled' as const),
+    new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 0)),
+  ])
 }
 
 function humanMessage(): Message {

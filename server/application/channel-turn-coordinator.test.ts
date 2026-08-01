@@ -5,6 +5,7 @@ import path from 'node:path'
 import { createSqliteDatabase, type SqliteDatabase } from '../adapters/sqlite/database'
 import { SqliteRepositories } from '../adapters/sqlite/sqlite-repositories'
 import type { Agent } from '../domain/agent'
+import type { TurnParticipant } from '../domain/conversation'
 import type { DomainEvent } from '../domain/events'
 import type { Message } from '../domain/message'
 import type { DomainEventPublisher } from '../ports/domain-event-publisher'
@@ -14,7 +15,10 @@ import type {
   ConversationSessionResult,
 } from './conversation-session-service'
 import { ChannelMessageService } from './channel-message-service'
-import { ChannelTurnCoordinator } from './channel-turn-coordinator'
+import { parsePublicResponse } from './agent-conversation-protocol'
+import { ConversationInvocationCancelledError } from './conversation-session-service'
+import { ChannelTurnCoordinator, compareTurnSources } from './channel-turn-coordinator'
+import type { HandoffPolicy } from './handoff-policy'
 
 describe('ChannelTurnCoordinator', () => {
   let temporaryDirectory: string | undefined
@@ -26,6 +30,12 @@ describe('ChannelTurnCoordinator', () => {
     if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true })
     temporaryDirectory = undefined
     database = undefined
+  })
+
+  it('orders same-Turn sources as direct, Handoff, then ordinary without changing global Queue priority', () => {
+    const sources: TurnParticipant['source'][] = ['responsibility', 'handoff', 'direct']
+    expect(sources.sort(compareTurnSources))
+      .toEqual(['direct', 'handoff', 'responsibility'])
   })
 
   it('persists at most three responsibility candidates before probing all three in parallel', async () => {
@@ -230,8 +240,8 @@ describe('ChannelTurnCoordinator', () => {
 
     expect(turn).toMatchObject({ status: 'completed', currentRound: 2 })
     expect(fixture.agentMessages()).toEqual([
-      expect.objectContaining({ authorName: source.identity, body: 'source answer', threadRootMessageId: root.id }),
-      expect.objectContaining({ authorName: target.identity, body: 'target answer', threadRootMessageId: root.id }),
+      expect.objectContaining({ senderId: source.id, authorName: source.identity, body: 'source answer', threadRootMessageId: root.id }),
+      expect.objectContaining({ senderId: target.id, authorName: target.identity, body: 'target answer', threadRootMessageId: root.id }),
     ])
     expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual([
       expect.objectContaining({
@@ -239,7 +249,119 @@ describe('ChannelTurnCoordinator', () => {
         toAgentId: target.id,
         question: 'Please verify.',
         round: 2,
-        status: 'accepted',
+        status: 'completed',
+      }),
+    ])
+  })
+
+  it('marks an accepted Handoff failed when its target response fails and leaves no accepted work', async () => {
+    const fixture = await createFixture()
+    const source = fixture.createAgent('Source', ['handoff failure topic'])
+    const target = fixture.createAgent('Target', ['unrelated'])
+    fixture.sessions.handle = async (input) => {
+      if (input.conversation?.kind === 'participation') return participation('speak', 0.9)
+      if (input.conversation?.kind === 'response') {
+        return publicReply('source persisted', [{ agentId: target.id, question: 'Please fail.' }])
+      }
+      throw new Error('target runtime failed')
+    }
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('handoff failure topic'))
+
+    expect(turn.status).toBe('completed')
+    expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({
+        toAgentId: target.id,
+        status: 'failed',
+        reason: expect.stringContaining('response_failed'),
+      }),
+    ])
+    expect(fixture.repositories.listConversationHandoffs(turn.id).some((handoff) => handoff.status === 'accepted')).toBe(false)
+  })
+
+  it('uses sender IDs for recency after an Agent rename and duplicate historical display name', async () => {
+    const fixture = await createFixture()
+    const renamed = fixture.createAgent('Original Name', ['identity topic'])
+    const reusedName = fixture.createAgent('Other Name', ['identity topic'])
+    const neverSpoke = fixture.createAgent('Never Spoke', ['identity topic'])
+    fixture.setLastSpokenAt(renamed.id, '2026-07-31T09:00:00.000Z')
+    database!.database.prepare('UPDATE agents SET identity = ? WHERE id = ?').run('Renamed Agent', renamed.id)
+    database!.database.prepare('UPDATE agents SET identity = ? WHERE id = ?').run('Original Name', reusedName.id)
+    fixture.sessions.handle = async (input) => {
+      if (input.conversation?.kind === 'participation') return participation('speak', 0.8)
+      if (input.conversation?.kind === 'duplicate_check') return duplicate('speak')
+      return publicReply(`${input.agent.id} answer`)
+    }
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('identity topic'))
+    const spoken = fixture.repositories.listTurnParticipants(turn.id)
+      .filter((participant) => participant.status === 'spoken')
+      .map((participant) => participant.agentId)
+
+    expect(spoken).toContain(reusedName.id)
+    expect(spoken).toContain(neverSpoke.id)
+    expect(spoken).not.toContain(renamed.id)
+  })
+
+  it('uses exact sender recency after the attributed reply falls outside the 50-message bootstrap window', async () => {
+    const fixture = await createFixture()
+    const agents = [
+      fixture.createAgent('Candidate A', ['window topic']),
+      fixture.createAgent('Candidate B', ['window topic']),
+      fixture.createAgent('Candidate C', ['window topic']),
+    ]
+    const oldestById = [...agents].sort((left, right) => left.id.localeCompare(right.id))[0]!
+    fixture.setLastSpokenAt(oldestById.id, '2026-07-31T09:00:00.000Z')
+    for (let index = 0; index < 55; index += 1) fixture.postHuman(`filler ${index}`)
+    fixture.sessions.handle = async (input) => {
+      if (input.conversation?.kind === 'participation') return participation('speak', 0.8)
+      if (input.conversation?.kind === 'duplicate_check') return duplicate('speak')
+      return publicReply(`${input.agent.id} answer`)
+    }
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('window topic'))
+    const spoken = fixture.repositories.listTurnParticipants(turn.id)
+      .filter((participant) => participant.status === 'spoken')
+      .map((participant) => participant.agentId)
+
+    expect(spoken).not.toContain(oldestById.id)
+  })
+
+  it('publishes a valid reply and persists Policy rejections for an empty question and third target', async () => {
+    const fixture = await createFixture()
+    const source = fixture.createAgent('Source', ['unrelated'])
+    const target = fixture.createAgent('Target', ['unrelated'])
+    fixture.sessions.handle = async () => {
+      const raw = JSON.stringify({
+        reply: 'reply survives policy rejection',
+        handoffTo: [
+          { agentId: target.id, question: '' },
+          { agentId: source.id, question: 'self target' },
+          { agentId: 'raw-missing-agent', question: 'third target' },
+        ],
+      })
+      const parsed = parsePublicResponse(raw)
+      return { text: parsed.reply, parsed }
+    }
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('@Source route this'))
+
+    expect(fixture.agentMessages()).toEqual([
+      expect.objectContaining({ body: 'reply survives policy rejection' }),
+    ])
+    expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({
+        requestedTargetAgentId: target.id,
+        toAgentId: target.id,
+        status: 'rejected',
+        reason: 'question_required',
+      }),
+      expect.objectContaining({ status: 'rejected', reason: 'self_handoff' }),
+      expect.objectContaining({
+        requestedTargetAgentId: 'raw-missing-agent',
+        toAgentId: null,
+        status: 'rejected',
+        reason: 'max_targets_exceeded',
       }),
     ])
   })
@@ -264,9 +386,93 @@ describe('ChannelTurnCoordinator', () => {
     expect(observed.at(-1)).toBe('conversation.turn_completed')
   })
 
+  it('persists a failed Turn when an unexpected background policy error occurs', async () => {
+    const fixture = await createFixture({
+      handoffPolicy: {
+        validate: () => { throw new Error('policy infrastructure failed') },
+      } as HandoffPolicy,
+    })
+    const source = fixture.createAgent('Source', ['unrelated'])
+    const target = fixture.createAgent('Target', ['unrelated'])
+    fixture.sessions.handle = async () => publicReply('persisted before policy', [
+      { agentId: target.id, question: 'Review.' },
+    ])
+    const message = fixture.postHuman('@Source trigger policy')
+
+    const started = fixture.coordinator.start(message)
+
+    expect(started.turn.status).toBe('screening')
+    await expect(started.completion).resolves.toMatchObject({ status: 'failed' })
+    expect(fixture.repositories.getConversationTurn(started.turn.id)).toMatchObject({ status: 'failed' })
+    expect(fixture.agentMessages()).toEqual([expect.objectContaining({ senderId: source.id })])
+  })
+
+  it('cancels a queued Invocation without affecting another Turn for the same Agent or running it later', async () => {
+    const fixture = await createFixture({ realQueue: true })
+    const agent = fixture.createAgent('Solo', ['unrelated'])
+    const firstGate = deferred<ConversationSessionResult>()
+    fixture.sessions.handle = async (input) => input.conversation?.turnId === fixture.turnFor(firstMessage).id
+      ? firstGate.promise
+      : publicReply('late reply must not run')
+    const firstMessage = fixture.postHuman('@Solo first')
+    const firstCompletion = fixture.coordinator.dispatch(firstMessage)
+    await waitFor(() => fixture.sessions.calls.length === 1)
+    const secondMessage = fixture.postHuman('@Solo second')
+    const secondCompletion = fixture.coordinator.dispatch(secondMessage)
+    await waitFor(() => fixture.repositories.listAgentInvocations(fixture.turnFor(secondMessage).id).length === 1)
+    const secondTurn = fixture.turnFor(secondMessage)
+
+    await fixture.coordinator.cancel(secondTurn.id)
+    await expect(secondCompletion).resolves.toMatchObject({ status: 'cancelled' })
+
+    expect(fixture.sessions.cancelledInvocationIds).toEqual([])
+    expect(fixture.sessions.coarseCancellationCalls).toEqual([])
+    expect(fixture.repositories.listAgentInvocations(secondTurn.id)).toEqual([
+      expect.objectContaining({ status: 'cancelled' }),
+    ])
+    expect(fixture.repositories.listTurnParticipants(secondTurn.id)).toEqual([
+      expect.objectContaining({ agentId: agent.id, status: 'cancelled' }),
+    ])
+    firstGate.resolve(publicReply('first survives'))
+    await expect(firstCompletion).resolves.toMatchObject({ status: 'completed' })
+    expect(fixture.sessions.calls).toHaveLength(1)
+  })
+
+  it('keeps a running Turn active when exact Runtime cancellation fails, then retries without apology', async () => {
+    const fixture = await createFixture({ realQueue: true })
+    fixture.createAgent('Solo', ['unrelated'])
+    const gate = deferred<ConversationSessionResult>()
+    fixture.sessions.handle = () => gate.promise
+    const message = fixture.postHuman('@Solo cancel me')
+    const completion = fixture.coordinator.dispatch(message)
+    await waitFor(() => fixture.sessions.calls.length === 1)
+    const turn = fixture.turnFor(message)
+    const invocationId = fixture.repositories.listAgentInvocations(turn.id)[0]!.id
+    fixture.sessions.cancellationFailure = new Error('runtime cancellation failed')
+
+    await expect(fixture.coordinator.cancel(turn.id)).rejects.toThrow('runtime cancellation failed')
+
+    expect(fixture.repositories.getConversationTurn(turn.id)?.status).toBe('responding')
+    expect(fixture.coordinator.getActiveStates(fixture.channel.id)).not.toEqual([])
+    expect(fixture.agentMessages()).toEqual([])
+
+    fixture.sessions.cancellationFailure = undefined
+    fixture.sessions.onCancelInvocation = (cancelledId) => {
+      if (cancelledId === invocationId) gate.reject(new ConversationInvocationCancelledError(cancelledId))
+    }
+    await fixture.coordinator.cancel(turn.id)
+    await expect(completion).resolves.toMatchObject({ status: 'cancelled' })
+    expect(fixture.sessions.cancelledInvocationIds).toEqual([invocationId])
+    expect(fixture.sessions.coarseCancellationCalls).toEqual([])
+    expect(fixture.repositories.listAgentInvocations(turn.id)[0]).toMatchObject({ status: 'cancelled' })
+    expect(fixture.repositories.listTurnParticipants(turn.id)[0]).toMatchObject({ status: 'cancelled' })
+  })
+
   async function createFixture(options: {
     participationProbeTimeoutMs?: number
     onCoordinatorEvent?: (event: DomainEvent, repositories: WorkspaceRepositories) => void
+    realQueue?: boolean
+    handoffPolicy?: HandoffPolicy
   } = {}) {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-turn-'))
     database = createSqliteDatabase(path.join(temporaryDirectory, 'sinapsis.sqlite'))
@@ -291,11 +497,13 @@ describe('ChannelTurnCoordinator', () => {
       messages,
       sessions,
       participationProbeTimeoutMs: options.participationProbeTimeoutMs ?? 50,
-      queue: {
+      handoffPolicy: options.handoffPolicy,
+      ...(options.realQueue ? {} : { queue: {
         enqueue: (invocation) => invocation.run(),
         cancel: () => undefined,
+        cancelInvocation: (invocationId) => ({ invocationId, state: 'not_found' as const }),
         snapshot: (agentId) => ({ running: queueAvailability.get(agentId) === false, queued: 0 }),
-      },
+      } }),
     })
     const createAgent = (identity: string, responsibilities: string[]): Agent => {
       const agent = repositories.createAgent({
@@ -323,7 +531,7 @@ describe('ChannelTurnCoordinator', () => {
     }
     const setLastSpokenAt = (agentId: string, createdAt: string) => {
       const agent = repositories.getAgent(agentId)!
-      const message = messages.postAgent(channel.id, null, agent.identity, 'earlier reply')
+      const message = messages.postAgent(channel.id, null, agent.id, agent.identity, 'earlier reply')
       database!.database.prepare('UPDATE messages SET sender_id = ?, created_at = ?, updated_at = ? WHERE id = ?')
         .run(agentId, createdAt, createdAt, message.id)
     }
@@ -345,6 +553,10 @@ describe('ChannelTurnCoordinator', () => {
 
 class ScriptedSessions {
   calls: ConversationSessionInvocation[] = []
+  cancelledInvocationIds: string[] = []
+  coarseCancellationCalls: string[] = []
+  cancellationFailure: Error | undefined
+  onCancelInvocation: ((invocationId: string) => void) | undefined
   handle: (input: ConversationSessionInvocation) => Promise<ConversationSessionResult> = async () => participation('silent', 0)
 
   invoke(input: ConversationSessionInvocation): Promise<ConversationSessionResult> {
@@ -353,11 +565,20 @@ class ScriptedSessions {
   }
 
   cancelChannel(): Promise<{ cancelledSessionKeys: string[] }> {
+    this.coarseCancellationCalls.push('channel')
     return Promise.resolve({ cancelledSessionKeys: [] })
   }
 
-  cancelAgentInChannel(): Promise<{ cancelledSessionKeys: string[] }> {
+  cancelAgentInChannel(_channelId: string, agentId: string): Promise<{ cancelledSessionKeys: string[] }> {
+    this.coarseCancellationCalls.push(`agent:${agentId}`)
     return Promise.resolve({ cancelledSessionKeys: [] })
+  }
+
+  cancelInvocation(invocationId: string): Promise<{ invocationId: string; cancelledSessionKeys: string[] }> {
+    if (this.cancellationFailure) return Promise.reject(this.cancellationFailure)
+    this.cancelledInvocationIds.push(invocationId)
+    this.onCancelInvocation?.(invocationId)
+    return Promise.resolve({ invocationId, cancelledSessionKeys: [] })
   }
 }
 
