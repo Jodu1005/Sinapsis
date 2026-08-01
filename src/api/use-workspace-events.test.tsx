@@ -1,4 +1,5 @@
 import { act, render } from '@testing-library/react'
+import { afterEach } from 'vitest'
 import { useWorkspaceEvents } from './use-workspace-events'
 
 class FakeEventSource {
@@ -17,6 +18,10 @@ function Harness({ refresh }: { refresh(): void }) {
 }
 
 describe('useWorkspaceEvents', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('refreshes the workspace when a channel message is created', () => {
     const originalEventSource = window.EventSource
     Object.defineProperty(window, 'EventSource', { configurable: true, value: FakeEventSource })
@@ -24,6 +29,26 @@ describe('useWorkspaceEvents', () => {
     render(<Harness refresh={refresh} />)
 
     act(() => FakeEventSource.current?.listeners.get('message.created')?.(new Event('message.created')))
+
+    expect(refresh).toHaveBeenCalledOnce()
+    Object.defineProperty(window, 'EventSource', { configurable: true, value: originalEventSource })
+  })
+
+  it('subscribes to conversation events and coalesces them into one throttled refresh', () => {
+    vi.useFakeTimers()
+    const originalEventSource = window.EventSource
+    Object.defineProperty(window, 'EventSource', { configurable: true, value: FakeEventSource })
+    const refresh = vi.fn()
+    render(<Harness refresh={refresh} />)
+
+    act(() => {
+      FakeEventSource.current?.listeners.get('conversation.turn_created')?.(new Event('conversation.turn_created'))
+      FakeEventSource.current?.listeners.get('conversation.invocation_updated')?.(new Event('conversation.invocation_updated'))
+      FakeEventSource.current?.listeners.get('conversation.turn_completed')?.(new Event('conversation.turn_completed'))
+    })
+    expect(refresh).not.toHaveBeenCalled()
+
+    act(() => vi.advanceTimersByTime(200))
 
     expect(refresh).toHaveBeenCalledOnce()
     Object.defineProperty(window, 'EventSource', { configurable: true, value: originalEventSource })

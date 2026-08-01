@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiClient, type WorkspaceApi } from '../api/client'
-import type { TaskDetailView, TaskView, WorkspaceSnapshot } from '../domain/workspace-view'
+import type { ConversationTurnDetailView, TaskDetailView, TaskView, WorkspaceSnapshot } from '../domain/workspace-view'
 import { WorkspaceShell } from './WorkspaceShell'
 
 const snapshot: WorkspaceSnapshot = {
@@ -72,6 +72,8 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     queueTaskInput: vi.fn(),
     reviewTask: vi.fn(),
     requeueTask: vi.fn(),
+    getConversationTurn: vi.fn(),
+    cancelConversationTurn: vi.fn(),
     readArtifact: vi.fn(),
     ...overrides,
   }
@@ -92,6 +94,54 @@ const createdTaskDetails: TaskDetailView = {
   decisions: [],
   artifacts: [{ id: 'artifact-1', taskId: 'task-new', kind: 'test-results', createdAt: '2026-07-25T09:01:00.000Z' }],
   events: [],
+}
+
+const turnDetail: ConversationTurnDetailView = {
+  turn: {
+    id: 'turn-1',
+    channelId: 'channel-general',
+    triggerMessageId: 'message-1',
+    threadRootMessageId: null,
+    mode: 'ordinary',
+    status: 'responding',
+    currentRound: 1,
+    maxRounds: 3,
+    createdAt: '2026-07-31T08:00:00.000Z',
+    updatedAt: '2026-07-31T08:01:00.000Z',
+    completedAt: null,
+  },
+  participants: [{
+    id: 'participant-1',
+    turnId: 'turn-1',
+    agentId: 'agent-1',
+    source: 'responsibility',
+    rank: 0,
+    matcherScore: 18,
+    decision: 'speak',
+    confidence: 0.88,
+    proposedAngle: '检查频道状态渲染',
+    dependsOnAgentId: null,
+    speakingOrder: 1,
+    status: 'selected',
+    reason: '职责命中 frontend',
+    createdAt: '2026-07-31T08:00:00.000Z',
+    updatedAt: '2026-07-31T08:01:00.000Z',
+  }],
+  invocations: [{
+    id: 'invocation-1',
+    turnId: 'turn-1',
+    agentId: 'agent-1',
+    kind: 'response',
+    priority: 'human_ordinary',
+    round: 1,
+    status: 'running',
+    sourceInvocationId: null,
+    queuedAt: '2026-07-31T08:00:00.000Z',
+    startedAt: '2026-07-31T08:01:00.000Z',
+    completedAt: null,
+    errorCategory: null,
+  }],
+  handoffs: [],
 }
 
 describe('WorkspaceShell', () => {
@@ -312,6 +362,27 @@ describe('WorkspaceShell', () => {
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
     expect(api.postMessage).toHaveBeenCalledWith('channel-general', { body: '大家同步一下。' })
+  })
+
+  it('opens public turn details from timeline activity in the context panel', async () => {
+    const activeSnapshot = structuredClone(snapshot)
+    activeSnapshot.activeTurnsByChannel = {
+      'channel-general': [{ turnId: 'turn-1', agentId: 'agent-1', phase: 'preparing', queuePosition: null }],
+      'channel-build': [],
+    }
+    const getConversationTurn = vi.fn().mockResolvedValue(turnDetail)
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={makeApi({ getBootstrap: vi.fn().mockResolvedValue(activeSnapshot), getConversationTurn })} />)
+
+    await user.click(await screen.findByRole('button', { name: '查看 Turn turn-1 活动详情' }))
+
+    expect(getConversationTurn).toHaveBeenCalledWith('channel-general', 'turn-1')
+    expect(await screen.findByRole('heading', { name: 'Turn turn-1' })).toBeInTheDocument()
+    const context = screen.getByRole('complementary', { name: '任务与上下文' })
+    expect(within(context).getByText('候选 Agent')).toBeInTheDocument()
+    expect(within(context).getByText('职责命中 frontend')).toBeInTheDocument()
+    expect(within(context).queryByText(/Prompt/)).not.toBeInTheDocument()
+    expect(within(context).queryByText(/Runtime raw output/)).not.toBeInTheDocument()
   })
 
   it('opens a Thread and sends replies under its root message', async () => {

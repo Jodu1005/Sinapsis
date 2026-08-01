@@ -1,4 +1,4 @@
-import type { AgentView, ChannelMessage, ChannelView, RepositoryView, TaskDetailView, TaskInputView, TaskView, WorkspaceSnapshot, WorkspaceView } from '../domain/workspace-view'
+import type { AgentView, ChannelMessage, ChannelView, ConversationTurnDetailView, RepositoryView, TaskDetailView, TaskInputView, TaskView, WorkspaceSnapshot, WorkspaceView } from '../domain/workspace-view'
 
 export interface WorkspaceApi {
   getBootstrap(): Promise<WorkspaceSnapshot>
@@ -17,6 +17,8 @@ export interface WorkspaceApi {
   bindChannelWorkspace(channelId: string, workspaceId: string): Promise<WorkspaceView[]>
   unbindChannelWorkspace(channelId: string, workspaceId: string): Promise<WorkspaceView[]>
   createTask(channelId: string, input: CreateTaskRequest): Promise<TaskView>
+  getConversationTurn(channelId: string, turnId: string): Promise<ConversationTurnDetailView>
+  cancelConversationTurn(channelId: string, turnId: string): Promise<void>
   getTaskDetails(taskId: string): Promise<TaskDetailView>
   queueTaskInput(taskId: string, body: string): Promise<TaskInputView>
   reviewTask(taskId: string, action: 'accept' | 'return', message: string): Promise<TaskView>
@@ -87,6 +89,12 @@ export class ApiClient implements WorkspaceApi {
   }
   async createTask(channelId: string, input: CreateTaskRequest): Promise<TaskView> {
     return this.request(`/api/channels/${channelId}/tasks`, { method: 'POST', body: JSON.stringify(input) })
+  }
+  async getConversationTurn(channelId: string, turnId: string): Promise<ConversationTurnDetailView> {
+    return this.request(`/api/channels/${channelId}/turns/${turnId}`)
+  }
+  async cancelConversationTurn(channelId: string, turnId: string): Promise<void> {
+    await this.request(`/api/channels/${channelId}/turns/${turnId}/cancel`, { method: 'POST' })
   }
   async getTaskDetails(taskId: string): Promise<TaskDetailView> { return this.request(`/api/tasks/${taskId}`) }
   async queueTaskInput(taskId: string, body: string): Promise<TaskInputView> {

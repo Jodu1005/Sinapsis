@@ -17,11 +17,38 @@ describe('MessageComposer', () => {
     const composer = screen.getByRole('textbox', { name: '发送消息' })
     await user.type(composer, '@')
 
+    expect(screen.getByRole('option', { name: /@all/ })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: /@newton/ })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: /@clawd/ })).toBeInTheDocument()
     await user.click(screen.getByRole('option', { name: /@newton/ }))
 
     expect(composer).toHaveValue('@newton ')
+  })
+
+  it('offers @all once and lets keyboard selection insert it without sending', async () => {
+    const user = userEvent.setup()
+    const onSend = vi.fn().mockResolvedValue(undefined)
+    render(<MessageComposer channelName="general" agents={agents} onSend={onSend} />)
+
+    const composer = screen.getByRole('textbox', { name: '发送消息' })
+    await user.type(composer, '@a')
+
+    expect(screen.getAllByRole('option', { name: /@all/ })).toHaveLength(1)
+    await user.keyboard('{Enter}')
+
+    expect(composer).toHaveValue('@all ')
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('closes mention suggestions with Escape', async () => {
+    const user = userEvent.setup()
+    render(<MessageComposer channelName="general" agents={agents} onSend={vi.fn()} />)
+
+    const composer = screen.getByRole('textbox', { name: '发送消息' })
+    await user.type(composer, '@')
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByRole('listbox', { name: '可提及 Agent' })).not.toBeInTheDocument()
   })
 
   it('sends on Enter and keeps a newline on Shift+Enter', async () => {

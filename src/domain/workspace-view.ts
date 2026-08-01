@@ -9,6 +9,7 @@ export interface WorkspaceSnapshot {
   recentMessages: ChannelMessage[]
   maxWorkspaceBindingsPerChannel: number
   typingAgentIdsByChannel?: Record<string, string[]>
+  activeTurnsByChannel?: Record<string, TurnActivityView[]>
 }
 
 export interface WorkspaceView {
@@ -111,6 +112,82 @@ export interface TaskInputView { id: string; taskId: string; body: string; creat
 export interface ReviewDecisionView { id: string; taskId: string; decision: string; reason: string; createdAt: string }
 export interface TaskArtifactView { id: string; taskId: string; kind: string; createdAt: string }
 export interface TaskEventView { id: string; taskId: string; type: string; payload: Record<string, unknown>; createdAt: string }
+
+export interface TurnActivityView {
+  turnId: string
+  agentId: string | null
+  phase: 'screening' | 'judging' | 'queued' | 'preparing' | 'handoff'
+  queuePosition: number | null
+}
+
+export interface ConversationTurnDetailView {
+  turn: ConversationTurnView
+  participants: TurnParticipantView[]
+  invocations: AgentInvocationView[]
+  handoffs: ConversationHandoffView[]
+}
+
+export interface ConversationTurnView {
+  id: string
+  channelId: string
+  triggerMessageId: string
+  threadRootMessageId: string | null
+  mode: 'ordinary' | 'direct' | 'multi_direct' | 'all'
+  status: 'screening' | 'judging' | 'responding' | 'handoff' | 'completed' | 'partial' | 'cancelled' | 'failed' | 'interrupted'
+  currentRound: number
+  maxRounds: number
+  createdAt: string
+  updatedAt: string
+  completedAt: string | null
+}
+
+export interface TurnParticipantView {
+  id: string
+  turnId: string
+  agentId: string
+  source: 'responsibility' | 'direct' | 'all' | 'handoff'
+  rank: number
+  matcherScore: number | null
+  decision: 'pending' | 'speak' | 'silent' | 'skipped'
+  confidence: number | null
+  proposedAngle: string | null
+  dependsOnAgentId: string | null
+  speakingOrder: number | null
+  status: 'candidate' | 'selected' | 'spoken' | 'failed' | 'skipped' | 'cancelled'
+  reason: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentInvocationView {
+  id: string
+  turnId: string
+  agentId: string
+  kind: 'participation' | 'response' | 'duplicate_check' | 'handoff_response'
+  priority: 'human_direct' | 'human_ordinary' | 'participation' | 'duplicate_check' | 'automatic_handoff'
+  round: number
+  status: 'queued' | 'running' | 'settled' | 'failed' | 'cancelled'
+  sourceInvocationId: string | null
+  queuedAt: string
+  startedAt: string | null
+  completedAt: string | null
+  errorCategory: 'timeout' | 'cancelled' | 'runtime_failure' | null
+}
+
+export interface ConversationHandoffView {
+  id: string
+  turnId: string
+  sourceInvocationId: string
+  fromAgentId: string
+  requestedTargetAgentId: string
+  toAgentId: string | null
+  question: string
+  round: number
+  status: 'queued' | 'accepted' | 'rejected' | 'completed' | 'failed'
+  reason: string | null
+  createdAt: string
+  updatedAt: string
+}
 
 export function snapshotChannelMessages(snapshot: WorkspaceSnapshot, channelId: string): ChannelMessage[] {
   return snapshot.recentMessages.filter((message) => message.channelId === channelId)
