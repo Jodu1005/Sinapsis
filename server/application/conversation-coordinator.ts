@@ -42,15 +42,6 @@ export class ConversationCoordinator {
     this.turnCoordinator.start(message)
   }
 
-  getTypingAgentIds(channelId: string): string[] {
-    return [...new Set(this.getActiveStates(channelId)
-      .flatMap((activity) => activity.agentId ? [activity.agentId] : []))]
-  }
-
-  getActiveStates(channelId: string): TurnActivity[] {
-    return this.turnCoordinator.getActiveStates(channelId)
-  }
-
   getActiveStatesByChannel(): Record<string, TurnActivity[]> {
     return this.turnCoordinator.getActiveStatesByChannel()
   }

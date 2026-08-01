@@ -111,7 +111,7 @@ export interface CreateAppOptions {
   executionCoordinator?: TaskExecutionCoordinator
   conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'> & Partial<Pick<
     ConversationCoordinator,
-    'getTypingAgentIds' | 'getActiveStates' | 'getActiveStatesByChannel' | 'cancel' | 'cancelChannel' | 'cancelAgentInChannel'
+    'getActiveStatesByChannel' | 'cancel' | 'cancelChannel' | 'cancelAgentInChannel'
   >>
   scheduler?: TaskScheduler
   reviewService?: TaskReviewService

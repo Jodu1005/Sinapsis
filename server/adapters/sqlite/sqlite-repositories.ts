@@ -245,6 +245,7 @@ interface ActiveConversationTurnRow extends ConversationTurnRow {
   invocation_status: AgentInvocation['status'] | null
   invocation_idempotency_key: string | null
   invocation_source_id: string | null
+  invocation_sequence: number | null
   invocation_queued_at: string | null
   invocation_started_at: string | null
   invocation_completed_at: string | null
@@ -1009,6 +1010,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
         invocations.status AS invocation_status,
         invocations.idempotency_key AS invocation_idempotency_key,
         invocations.source_invocation_id AS invocation_source_id,
+        invocations.sequence AS invocation_sequence,
         invocations.queued_at AS invocation_queued_at,
         invocations.started_at AS invocation_started_at,
         invocations.completed_at AS invocation_completed_at,
@@ -1019,7 +1021,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
         AND invocations.status IN ('queued', 'running')
       WHERE turns.status NOT IN (${terminalStatuses})
         ${channelFilter}
-      ORDER BY turns.created_at, turns.id, invocations.queued_at, invocations.id
+      ORDER BY turns.created_at, turns.id, invocations.sequence, invocations.id
     `).all(...(channelId === undefined ? [] : [channelId])) as unknown as ActiveConversationTurnRow[]
 
     const projections = new Map<string, ActiveConversationTurnProjection>()
@@ -1036,7 +1038,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
           status: row.invocation_status!,
           idempotency_key: row.invocation_idempotency_key!,
           source_invocation_id: row.invocation_source_id,
-          sequence: 0,
+          sequence: row.invocation_sequence!,
           queued_at: row.invocation_queued_at!,
           started_at: row.invocation_started_at,
           completed_at: row.invocation_completed_at,

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ConversationTurn } from '../domain/conversation'
 import type { Message } from '../domain/message'
 import { ConversationCoordinator } from './conversation-coordinator'
-import type { ChannelTurnCoordinator, TurnActivity } from './channel-turn-coordinator'
+import type { ChannelTurnCoordinator } from './channel-turn-coordinator'
 
 describe('ConversationCoordinator compatibility facade', () => {
   it('validates the legacy channel argument before delegating with only the persisted message', async () => {
@@ -30,19 +30,6 @@ describe('ConversationCoordinator compatibility facade', () => {
     pending.resolve(turn())
   })
 
-  it('derives legacy typing Agent IDs from active turn states without duplicates', () => {
-    const coordinator = createCoordinator({
-      getActiveStates: () => [
-        activity('a1', 'judging'),
-        activity('a1', 'queued'),
-        activity('a2', 'preparing'),
-        activity(null, 'screening'),
-      ],
-    })
-
-    expect(coordinator.getTypingAgentIds('channel-1')).toEqual(['a1', 'a2'])
-  })
-
   it('delegates legacy channel and Agent cancellation methods', async () => {
     const cancelChannel = vi.fn(async () => undefined)
     const cancelAgentInChannel = vi.fn(async () => undefined)
@@ -61,7 +48,6 @@ function createCoordinator(overrides: Partial<ChannelTurnCoordinator>): Conversa
     start: () => ({ turn: turn({ status: 'screening' }), completion: Promise.resolve(turn()) }),
     dispatch: async () => turn(),
     cancel: async () => turn({ status: 'cancelled' }),
-    getActiveStates: () => [],
     cancelChannel: async () => undefined,
     cancelAgentInChannel: async () => undefined,
     ...overrides,
@@ -113,8 +99,4 @@ function turn(overrides: Partial<ConversationTurn> = {}): ConversationTurn {
     completedAt: '2026-07-31T08:00:01.000Z',
     ...overrides,
   }
-}
-
-function activity(agentId: string | null, phase: TurnActivity['phase']): TurnActivity {
-  return { turnId: 'turn-1', agentId, phase, queuePosition: null }
 }

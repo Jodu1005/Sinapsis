@@ -4,6 +4,7 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp } from '../../app'
+import { ChannelTurnCoordinator } from '../../application/channel-turn-coordinator'
 import { DomainError, transitionTask, type Task } from '../../domain/task'
 import type { DomainEvent } from '../../domain/events'
 import type { DomainEventPublisher } from '../../ports/domain-event-publisher'
@@ -861,6 +862,54 @@ describe('SQLite workspace repositories', () => {
     ])
     expect(database!.database.prepare('SELECT version FROM schema_migrations WHERE version = 16').get())
       .toMatchObject({ version: 16 })
+  })
+
+  it('keeps active Invocation projection order stable by sequence across repository reconstruction', () => {
+    database = createSqliteDatabase(':memory:')
+    const repositories = new SqliteRepositories(database, new RecordingPublisher())
+    const channel = createChannel(repositories)
+    const firstAgent = repositories.createAgent({
+      identity: 'First', mentionName: 'first', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const secondAgent = repositories.createAgent({
+      identity: 'Second', mentionName: 'second', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const message = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Stable order.',
+    })
+    const turn = repositories.createConversationTurn({
+      channelId: channel.id, triggerMessageId: message.id, threadRootMessageId: null,
+      mode: 'multi_direct', maxRounds: 3,
+    })
+    const first = repositories.createAgentInvocation({
+      turnId: turn.id, agentId: firstAgent.id, kind: 'response', priority: 'human_direct', round: 1,
+      idempotencyKey: `${turn.id}:first`, sourceInvocationId: null,
+    })
+    const second = repositories.createAgentInvocation({
+      turnId: turn.id, agentId: secondAgent.id, kind: 'response', priority: 'human_direct', round: 1,
+      idempotencyKey: `${turn.id}:second`, sourceInvocationId: null,
+    })
+    const sameQueuedAt = '2026-07-31T08:00:00.000Z'
+    database.database.prepare('UPDATE agent_invocations SET id = ?, queued_at = ? WHERE id = ?')
+      .run('zzzz-sequence-0', sameQueuedAt, first.id)
+    database.database.prepare('UPDATE agent_invocations SET id = ?, queued_at = ? WHERE id = ?')
+      .run('aaaa-sequence-1', sameQueuedAt, second.id)
+
+    const expectedAgentOrder = [firstAgent.id, secondAgent.id]
+    expect(repositories.listAgentInvocations(turn.id).map((invocation) => invocation.agentId))
+      .toEqual(expectedAgentOrder)
+    expect(repositories.listActiveConversationActivity(channel.id)[0]!.invocations
+      .map((invocation) => invocation.agentId)).toEqual(expectedAgentOrder)
+
+    const rebuilt = new SqliteRepositories(database, new RecordingPublisher())
+    expect(rebuilt.listActiveConversationActivity(channel.id)[0]!.invocations
+      .map((invocation) => invocation.agentId)).toEqual(expectedAgentOrder)
+    expect(new ChannelTurnCoordinator({ repositories: rebuilt }).getActiveStatesByChannel()[channel.id]
+      .map((activity) => activity.agentId)).toEqual(expectedAgentOrder)
+    expect(rebuilt.listActiveConversationActivity(channel.id)[0]!.invocations[0])
+      .not.toHaveProperty('sequence')
   })
 
   it('safely upgrades an existing migration 15 database and preserves conversation rows', async () => {

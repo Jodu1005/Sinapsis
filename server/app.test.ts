@@ -422,7 +422,6 @@ describe('local service API', () => {
         turn: conversationTurn({ status: 'screening', completedAt: null }),
         completion,
       }),
-      getActiveStates: () => [],
       cancelChannel: async () => undefined,
       cancelAgentInChannel: async () => undefined,
     } as unknown as ChannelTurnCoordinator
