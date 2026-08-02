@@ -45,6 +45,8 @@ import type { DomainEventPublisher } from '../../ports/domain-event-publisher'
 import type {
   BootstrapSnapshot,
   ActiveConversationTurnProjection,
+  CancelConversationTurnInput,
+  CancelConversationTurnResult,
   ConversationTurnClaimResult,
   ExpiredLease,
   LeaseRecovery,
@@ -1198,6 +1200,73 @@ export class SqliteRepositories implements WorkspaceRepositories {
         WHERE id = ? AND recovery_owner_id = ?
       `).run(turnId, ownerId)
       return released.changes === 1
+    })
+  }
+
+  cancelConversationTurn(input: CancelConversationTurnInput): CancelConversationTurnResult {
+    return this.inTransaction(() => {
+      const turnRow = this.sqlite.database.prepare('SELECT * FROM conversation_turns WHERE id = ?')
+        .get(input.turnId) as ConversationTurnRow | undefined
+      if (!turnRow) throw new Error(`Conversation turn ${input.turnId} does not exist.`)
+      const turn = mapConversationTurn(turnRow)
+      const terminal = turn.status === 'completed' || turn.status === 'partial'
+        || turn.status === 'cancelled' || turn.status === 'failed'
+      const ownsTurn = input.expectedRecoveryOwnerId === undefined
+        || turnRow.recovery_owner_id === input.expectedRecoveryOwnerId
+      if (terminal || !ownsTurn) {
+        return { applied: false, turn, invocationIds: [], participantIds: [], handoffIds: [] }
+      }
+
+      const invocationIds = (this.sqlite.database.prepare(`
+        SELECT id FROM agent_invocations
+        WHERE turn_id = ? AND status IN ('queued', 'running')
+        ORDER BY sequence, id
+      `).all(input.turnId) as Array<{ id: string }>).map(({ id }) => id)
+      const participantIds = (this.sqlite.database.prepare(`
+        SELECT id FROM turn_participants
+        WHERE turn_id = ? AND status IN ('candidate', 'selected')
+        ORDER BY rank, id
+      `).all(input.turnId) as Array<{ id: string }>).map(({ id }) => id)
+      const handoffIds = (this.sqlite.database.prepare(`
+        SELECT id FROM conversation_handoffs
+        WHERE turn_id = ? AND status IN ('queued', 'accepted')
+        ORDER BY created_at, id
+      `).all(input.turnId) as Array<{ id: string }>).map(({ id }) => id)
+      const occurredAt = input.occurredAt.toISOString()
+
+      this.sqlite.database.prepare(`
+        UPDATE agent_invocations
+        SET status = 'cancelled', completed_at = ?, error_code = 'cancelled'
+        WHERE turn_id = ? AND status IN ('queued', 'running')
+      `).run(occurredAt, input.turnId)
+      this.sqlite.database.prepare(`
+        UPDATE turn_participants
+        SET status = 'cancelled', reason = ?, updated_at = ?
+        WHERE turn_id = ? AND status IN ('candidate', 'selected')
+      `).run(input.reason, occurredAt, input.turnId)
+      this.sqlite.database.prepare(`
+        UPDATE conversation_handoffs
+        SET status = 'failed', reason = ?, updated_at = ?
+        WHERE turn_id = ? AND status IN ('queued', 'accepted')
+      `).run(input.reason, occurredAt, input.turnId)
+      this.sqlite.database.prepare(`
+        UPDATE conversation_turns
+        SET status = 'cancelled', completed_at = ?, updated_at = ?
+        WHERE id = ?
+      `).run(occurredAt, occurredAt, input.turnId)
+
+      return {
+        applied: true,
+        turn: mapConversationTurn({
+          ...turnRow,
+          status: 'cancelled',
+          completed_at: occurredAt,
+          updated_at: occurredAt,
+        }),
+        invocationIds,
+        participantIds,
+        handoffIds,
+      }
     })
   }
 

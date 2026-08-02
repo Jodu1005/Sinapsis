@@ -69,6 +69,21 @@ export interface SettleConversationInvocationResult {
   message?: Message
 }
 
+export interface CancelConversationTurnInput {
+  turnId: string
+  expectedRecoveryOwnerId?: string
+  occurredAt: Date
+  reason: string
+}
+
+export interface CancelConversationTurnResult {
+  applied: boolean
+  turn: ConversationTurn
+  invocationIds: string[]
+  participantIds: string[]
+  handoffIds: string[]
+}
+
 export type ConversationTurnClaimResult<T> =
   | { applied: true; value: T }
   | { applied: false }
@@ -169,6 +184,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   ): ConversationTurnClaimResult<T>
   renewConversationTurnClaim(turnId: string, ownerId: string, occurredAt: Date): boolean
   releaseConversationTurnClaim(turnId: string, ownerId: string): boolean
+  cancelConversationTurn(input: CancelConversationTurnInput): CancelConversationTurnResult
   updateConversationTurn(turnId: string, patch: ConversationTurnPatch): ConversationTurn
   createTurnParticipant(input: CreateTurnParticipantInput): TurnParticipant
   updateTurnParticipant(turnId: string, agentId: string, patch: ParticipantPatch): TurnParticipant

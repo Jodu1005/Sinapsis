@@ -172,6 +172,26 @@ describe('ChannelTurnCoordinator', () => {
     expect(fixture.agentMessages()).toEqual([])
   })
 
+  it('returns an already terminal Turn from cancellation without changing its persisted chain', async () => {
+    const fixture = await createFixture()
+    const agent = fixture.createAgent('Terminal Agent', [])
+    fixture.sessions.handle = async () => publicReply('already complete')
+    const completed = await fixture.coordinator.dispatch(fixture.postHuman('@Terminal Agent answer'))
+    const invocation = fixture.repositories.listAgentInvocations(completed.id)[0]!
+    const participant = fixture.repositories.listTurnParticipants(completed.id)[0]!
+
+    const cancelled = await fixture.coordinator.cancel(completed.id)
+
+    expect(cancelled).toEqual(completed)
+    expect(fixture.repositories.listAgentInvocations(completed.id)).toEqual([
+      expect.objectContaining({ id: invocation.id, status: 'settled' }),
+    ])
+    expect(fixture.repositories.listTurnParticipants(completed.id)).toEqual([
+      expect.objectContaining({ id: participant.id, agentId: agent.id, status: 'spoken' }),
+    ])
+    expect(fixture.agentMessages().map((message) => message.body)).toEqual(['already complete'])
+  })
+
   it('marks an ordinary Turn partial when one public reply succeeds and another fails', async () => {
     const fixture = await createFixture()
     fixture.createAgent('Alpha', ['partial topic'])
@@ -191,7 +211,7 @@ describe('ChannelTurnCoordinator', () => {
     expect(fixture.agentMessages()).toHaveLength(1)
   })
 
-  it('keeps a partially failed cancellation retryable and only retries the still-running Invocation', async () => {
+  it('keeps a failed full cancellation atomic and retries Runtime cancellation before committing', async () => {
     const fixture = await createFixture({ realQueue: true })
     fixture.createAgent('Alpha', [])
     fixture.createAgent('Beta', [])
@@ -215,11 +235,11 @@ describe('ChannelTurnCoordinator', () => {
 
     expect(fixture.repositories.getConversationTurn(started.turn.id)).toMatchObject({ status: 'responding', completedAt: null })
     expect(fixture.repositories.listAgentInvocations(started.turn.id)).toEqual([
-      expect.objectContaining({ id: first.id, status: 'cancelled' }),
+      expect.objectContaining({ id: first.id, status: 'running', completedAt: null }),
       expect.objectContaining({ id: second.id, status: 'running', completedAt: null }),
     ])
     expect(fixture.repositories.listTurnParticipants(started.turn.id)).toEqual([
-      expect.objectContaining({ agentId: first.agentId, status: 'cancelled' }),
+      expect.objectContaining({ agentId: first.agentId, status: 'selected' }),
       expect.objectContaining({ agentId: second.agentId, status: 'selected' }),
     ])
     expect(fixture.agentMessages()).toEqual([])
@@ -228,8 +248,8 @@ describe('ChannelTurnCoordinator', () => {
     await expect(fixture.coordinator.cancel(started.turn.id)).resolves.toMatchObject({ status: 'cancelled' })
     await expect(started.completion).resolves.toMatchObject({ status: 'cancelled' })
 
-    expect(fixture.sessions.cancelledInvocationIds).toEqual([first.id, second.id])
-    expect(fixture.sessions.cancellationAttempts).toEqual([first.id, second.id, second.id])
+    expect(fixture.sessions.cancelledInvocationIds).toEqual([first.id, first.id, second.id])
+    expect(fixture.sessions.cancellationAttempts).toEqual([first.id, second.id, first.id, second.id])
     expect(fixture.repositories.listAgentInvocations(started.turn.id))
       .toEqual(invocations.map((invocation) => expect.objectContaining({ id: invocation.id, status: 'cancelled' })))
     expect(fixture.repositories.listTurnParticipants(started.turn.id)
@@ -266,11 +286,11 @@ describe('ChannelTurnCoordinator', () => {
     await expect(started.completion).resolves.toMatchObject({ status: 'responding' })
 
     expect(fixture.repositories.listAgentInvocations(started.turn.id)).toEqual([
-      expect.objectContaining({ id: first.id, status: 'cancelled' }),
-      expect.objectContaining({ id: second.id, status: 'cancelled' }),
+      expect.objectContaining({ id: first.id, status: 'running', completedAt: null }),
+      expect.objectContaining({ id: second.id, status: 'running', completedAt: null }),
     ])
     expect(fixture.repositories.listTurnParticipants(started.turn.id)).toEqual([
-      expect.objectContaining({ agentId: first.agentId, status: 'cancelled' }),
+      expect.objectContaining({ agentId: first.agentId, status: 'selected' }),
       expect.objectContaining({ agentId: second.agentId, status: 'selected' }),
     ])
     expect(fixture.agentMessages()).toEqual([])
@@ -1198,6 +1218,125 @@ describe('ChannelTurnCoordinator', () => {
     ]))
   })
 
+  it('does not let recover take over a live Turn started by another Coordinator before its lease expires', async () => {
+    const fixture = await createFixture()
+    fixture.createAgent('Live Owner', ['live'])
+    const responseGate = deferred<ConversationSessionResult>()
+    const firstSessions = new ScriptedSessions()
+    const secondSessions = new ScriptedSessions()
+    firstSessions.handle = () => responseGate.promise
+    secondSessions.handle = async () => publicReply('must not run')
+    let firstNow = new Date('2026-08-02T00:00:00.000Z')
+    const first = new ChannelTurnCoordinator({
+      repositories: fixture.repositories,
+      sessions: firstSessions,
+      recoveryOwnerId: 'live-owner',
+      recoveryClaimTtlMs: 30_000,
+      recoveryHeartbeatMs: 5,
+      now: () => firstNow,
+    })
+    const secondDatabase = createSqliteDatabase(path.join(temporaryDirectory!, 'sinapsis.sqlite'))
+    const secondRepositories = new SqliteRepositories(secondDatabase, new RecordingPublisher())
+    const second = new ChannelTurnCoordinator({
+      repositories: secondRepositories,
+      sessions: secondSessions,
+      recoveryOwnerId: 'recovery-owner',
+      recoveryClaimTtlMs: 30_000,
+      recoveryHeartbeatMs: 1_000_000,
+      now: () => new Date('2026-08-02T00:00:11.000Z'),
+    })
+
+    try {
+      const started = first.start(fixture.postHuman('@Live Owner answer'))
+      await waitFor(() => firstSessions.calls.length === 1)
+      expect(database!.database.prepare(`
+        SELECT recovery_owner_id, recovery_claimed_at FROM conversation_turns WHERE id = ?
+      `).get(started.turn.id)).toEqual({
+        recovery_owner_id: 'live-owner',
+        recovery_claimed_at: '2026-08-02T00:00:00.000Z',
+      })
+      firstNow = new Date('2026-08-02T00:00:10.000Z')
+      await waitFor(() => (database!.database.prepare(`
+        SELECT recovery_claimed_at FROM conversation_turns WHERE id = ?
+      `).get(started.turn.id) as { recovery_claimed_at: string }).recovery_claimed_at === firstNow.toISOString())
+
+      await second.recover()
+
+      expect(secondSessions.calls).toEqual([])
+      expect(secondRepositories.listAgentInvocations(started.turn.id)).toEqual([
+        expect.objectContaining({ status: 'running' }),
+      ])
+      responseGate.resolve(publicReply('live owner reply'))
+      await expect(started.completion).resolves.toMatchObject({ status: 'completed' })
+      expect(fixture.agentMessages().map((message) => message.body)).toEqual(['live owner reply'])
+      expect(database!.database.prepare(`
+        SELECT recovery_owner_id, recovery_claimed_at FROM conversation_turns WHERE id = ?
+      `).get(started.turn.id)).toEqual({ recovery_owner_id: null, recovery_claimed_at: null })
+    } finally {
+      secondDatabase.close()
+    }
+  })
+
+  it('does not let a stale owner cancellation overwrite a takeover that already completed', async () => {
+    const fixture = await createFixture()
+    const agent = fixture.createAgent('Takeover Winner', ['takeover'])
+    const runtimeGate = deferred<ConversationSessionResult>()
+    const cancellationGate = deferred<void>()
+    const firstSessions = new ScriptedSessions()
+    const secondSessions = new ScriptedSessions()
+    firstSessions.handle = () => runtimeGate.promise
+    firstSessions.handleCancellation = () => cancellationGate.promise
+    secondSessions.handle = async () => publicReply('takeover completed')
+    const first = new ChannelTurnCoordinator({
+      repositories: fixture.repositories,
+      sessions: firstSessions,
+      recoveryOwnerId: 'stale-owner',
+      recoveryClaimTtlMs: 30_000,
+      recoveryHeartbeatMs: 1_000_000,
+      now: () => new Date('2026-08-02T00:00:00.000Z'),
+    })
+    const secondDatabase = createSqliteDatabase(path.join(temporaryDirectory!, 'sinapsis.sqlite'))
+    const secondRepositories = new SqliteRepositories(secondDatabase, new RecordingPublisher())
+    const second = new ChannelTurnCoordinator({
+      repositories: secondRepositories,
+      sessions: secondSessions,
+      recoveryOwnerId: 'takeover-owner',
+      recoveryClaimTtlMs: 30_000,
+      recoveryHeartbeatMs: 1_000_000,
+      now: () => new Date('2026-08-02T00:00:31.000Z'),
+    })
+
+    try {
+      const started = first.start(fixture.postHuman('@Takeover Winner answer'))
+      await waitFor(() => firstSessions.calls.length === 1)
+      const invocation = fixture.repositories.listAgentInvocations(started.turn.id)[0]!
+      firstSessions.onCancelInvocation = (invocationId) => runtimeGate.reject(
+        new ConversationInvocationCancelledError(invocationId),
+      )
+      const cancellation = first.cancel(started.turn.id)
+      await waitFor(() => firstSessions.cancellationAttempts.length === 1)
+
+      await second.recover()
+      await waitFor(() => secondRepositories.getConversationTurn(started.turn.id)?.status === 'completed')
+      cancellationGate.resolve()
+
+      await expect(cancellation).resolves.toMatchObject({ status: 'completed' })
+      await expect(started.completion).resolves.toMatchObject({ status: 'completed' })
+      expect(secondRepositories.getConversationTurn(started.turn.id)).toMatchObject({ status: 'completed' })
+      expect(secondRepositories.listAgentInvocations(started.turn.id)).toEqual([
+        expect.objectContaining({ id: invocation.id, status: 'settled' }),
+      ])
+      expect(secondRepositories.listTurnParticipants(started.turn.id)).toEqual([
+        expect.objectContaining({ agentId: agent.id, status: 'spoken' }),
+      ])
+      expect(fixture.agentMessages().map((message) => message.body)).toEqual(['takeover completed'])
+    } finally {
+      cancellationGate.resolve()
+      runtimeGate.reject(new ConversationInvocationCancelledError(invocationIdFor(firstSessions)))
+      secondDatabase.close()
+    }
+  })
+
   it('claims a recovered Turn once and cancellation fences a late Runtime result from settlement and publication', async () => {
     const fixture = await createFixture()
     const agent = fixture.createAgent('Claimed Recovery', ['restart'])
@@ -1662,6 +1801,7 @@ class ScriptedSessions {
   cancellationFailure: Error | undefined
   cancellationFailures = new Map<string, Error>()
   onCancelInvocation: ((invocationId: string) => void) | undefined
+  handleCancellation: ((invocationId: string) => Promise<void>) | undefined
   handle: (input: ConversationSessionInvocation) => Promise<ConversationSessionResult> = async () => participation('silent', 0)
 
   invoke(input: ConversationSessionInvocation): Promise<ConversationSessionResult> {
@@ -1679,15 +1819,20 @@ class ScriptedSessions {
     return Promise.resolve({ cancelledSessionKeys: [] })
   }
 
-  cancelInvocation(invocationId: string): Promise<{ invocationId: string; cancelledSessionKeys: string[] }> {
+  async cancelInvocation(invocationId: string): Promise<{ invocationId: string; cancelledSessionKeys: string[] }> {
     this.cancellationAttempts.push(invocationId)
     const invocationFailure = this.cancellationFailures.get(invocationId)
     if (invocationFailure) return Promise.reject(invocationFailure)
     if (this.cancellationFailure) return Promise.reject(this.cancellationFailure)
+    await this.handleCancellation?.(invocationId)
     this.cancelledInvocationIds.push(invocationId)
     this.onCancelInvocation?.(invocationId)
     return Promise.resolve({ invocationId, cancelledSessionKeys: [] })
   }
+}
+
+function invocationIdFor(sessions: ScriptedSessions): string {
+  return sessions.calls[0]?.conversation?.invocationId ?? 'unknown-invocation'
 }
 
 class RecordingPublisher implements DomainEventPublisher {

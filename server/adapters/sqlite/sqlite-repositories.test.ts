@@ -1099,6 +1099,76 @@ describe('SQLite workspace repositories', () => {
     }
   })
 
+  it('cancels a claimed Turn with owner CAS and atomically converges its active persisted chain', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const source = repositories.createAgent({
+      identity: 'Cancel Source', mentionName: 'cancel-source', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const target = repositories.createAgent({
+      identity: 'Cancel Target', mentionName: 'cancel-target', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const trigger = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: '@Cancel Source stop.',
+    })
+    const turn = repositories.createClaimedConversationTurn({
+      channelId: channel.id, triggerMessageId: trigger.id, threadRootMessageId: null,
+      mode: 'direct', maxRounds: 3,
+    }, 'owner-a', new Date('2026-08-02T00:00:00.000Z'))
+    const participant = repositories.createTurnParticipant({
+      turnId: turn.id, agentId: source.id, source: 'direct', rank: 1, matcherScore: null,
+      decision: 'speak', status: 'selected',
+    })
+    const invocation = repositories.createAgentInvocation({
+      turnId: turn.id, agentId: source.id, kind: 'response', priority: 'human_direct', round: 1,
+      idempotencyKey: `${turn.id}:response`, sourceInvocationId: null,
+      status: 'running', startedAt: '2026-08-02T00:00:01.000Z',
+    })
+    const handoff = repositories.createConversationHandoff({
+      turnId: turn.id, sourceInvocationId: invocation.id, fromAgentId: source.id,
+      requestedTargetAgentId: target.id, toAgentId: target.id, question: 'Continue?', round: 2,
+      status: 'accepted',
+    })
+
+    const staleOwner = repositories.cancelConversationTurn({
+      turnId: turn.id,
+      expectedRecoveryOwnerId: 'owner-b',
+      occurredAt: new Date('2026-08-02T00:00:02.000Z'),
+      reason: 'turn_cancelled',
+    })
+
+    expect(staleOwner).toMatchObject({ applied: false, turn: { status: 'screening' } })
+    expect(repositories.listAgentInvocations(turn.id)[0]).toMatchObject({ status: 'running' })
+    expect(repositories.listTurnParticipants(turn.id)[0]).toMatchObject({ status: 'selected' })
+    expect(repositories.listConversationHandoffs(turn.id)[0]).toMatchObject({ status: 'accepted' })
+
+    const cancelled = repositories.cancelConversationTurn({
+      turnId: turn.id,
+      expectedRecoveryOwnerId: 'owner-a',
+      occurredAt: new Date('2026-08-02T00:00:03.000Z'),
+      reason: 'turn_cancelled',
+    })
+
+    expect(cancelled).toMatchObject({
+      applied: true,
+      turn: { status: 'cancelled', completedAt: '2026-08-02T00:00:03.000Z' },
+      invocationIds: [invocation.id],
+      participantIds: [participant.id],
+      handoffIds: [handoff.id],
+    })
+    expect(repositories.listAgentInvocations(turn.id)[0]).toMatchObject({ status: 'cancelled' })
+    expect(repositories.listTurnParticipants(turn.id)[0]).toMatchObject({ status: 'cancelled', reason: 'turn_cancelled' })
+    expect(repositories.listConversationHandoffs(turn.id)[0]).toMatchObject({ status: 'failed', reason: 'turn_cancelled' })
+    expect(repositories.cancelConversationTurn({
+      turnId: turn.id,
+      expectedRecoveryOwnerId: 'owner-a',
+      occurredAt: new Date('2026-08-02T00:00:04.000Z'),
+      reason: 'turn_cancelled',
+    })).toMatchObject({ applied: false, turn: { status: 'cancelled' } })
+  })
+
   it('settles a public Invocation idempotently with its message, result, and Participant in one transaction', async () => {
     const { repositories } = await createRepositories()
     const channel = createChannel(repositories)

@@ -190,13 +190,13 @@ export class ChannelTurnCoordinator {
       .map((agentId) => memberAgents.find((agent) => agent.id === agentId))
       .filter((agent): agent is Agent => agent !== undefined)
 
-    const turn = this.repositories.createConversationTurn({
+    const turn = this.repositories.createClaimedConversationTurn({
       channelId: message.channelId,
       triggerMessageId: message.id,
       threadRootMessageId: message.threadRootMessageId ?? null,
       mode: route.mode,
       maxRounds: maxConversationRounds,
-    })
+    }, this.recoveryOwnerId, this.now())
     this.publish('conversation.turn_created', 'conversation_turn', turn.id)
     const execution: TurnExecution = {
       turnId: turn.id,
@@ -206,7 +206,7 @@ export class ChannelTurnCoordinator {
       activities: new Map(),
       invocationIds: new Set(),
       timedOutInvocationIds: new Set(),
-      recoveryOwnerId: null,
+      recoveryOwnerId: this.recoveryOwnerId,
     }
     this.executions.set(turn.id, execution)
     this.setActivity(execution, null, 'screening')
@@ -428,28 +428,39 @@ export class ChannelTurnCoordinator {
     const execution = this.executions.get(turnId)
     if (execution) {
       execution.cancelled = true
-      const cancellation = await this.cancelInvocations(execution, this.repositories.listAgentInvocations(turnId))
-      this.cancelParticipantsForInvocations(turnId, cancellation.cancelledInvocationIds, 'turn_cancelled')
+      const cancellation = await this.cancelInvocations(
+        execution,
+        this.repositories.listAgentInvocations(turnId),
+        false,
+      )
       this.clearActivitiesForInvocations(execution, cancellation.cancelledInvocationIds)
       if (cancellation.failures.length > 0) {
         throw cancellation.failures[0]!.error
       }
-      this.cancelParticipants(turnId)
       execution.activities.clear()
     } else {
       const activeInvocations = this.repositories.listAgentInvocations(turnId)
         .filter((invocation) => invocation.status === 'queued' || invocation.status === 'running')
-      for (const invocation of activeInvocations) this.cancelPersistedInvocation(turn, invocation)
-      this.cancelParticipantsForInvocations(turnId, activeInvocations.map((invocation) => invocation.id), 'turn_cancelled')
-      this.cancelParticipants(turnId)
+      for (const invocation of activeInvocations) this.stalePersistedInvocationSession(turn, invocation)
     }
-    this.failAcceptedHandoffs(turnId, 'turn_cancelled', true)
-    const cancelled = this.repositories.updateConversationTurn(turnId, {
-      status: 'cancelled',
-      completedAt: this.now().toISOString(),
+    const cancellation = this.repositories.cancelConversationTurn({
+      turnId,
+      ...(execution ? { expectedRecoveryOwnerId: execution.recoveryOwnerId! } : {}),
+      occurredAt: this.now(),
+      reason: 'turn_cancelled',
     })
-    this.publish('conversation.turn_completed', 'conversation_turn', cancelled.id)
-    return cancelled
+    if (!cancellation.applied) return cancellation.turn
+    for (const invocationId of cancellation.invocationIds) {
+      this.publish('conversation.invocation_updated', 'agent_invocation', invocationId)
+    }
+    for (const participantId of cancellation.participantIds) {
+      this.publish('conversation.participant_updated', 'turn_participant', participantId)
+    }
+    if (cancellation.handoffIds.length > 0) {
+      this.publish('conversation.turn_updated', 'conversation_turn', cancellation.turn.id)
+    }
+    this.publish('conversation.turn_completed', 'conversation_turn', cancellation.turn.id)
+    return cancellation.turn
   }
 
   getActiveStates(channelId: string): TurnActivity[] {
@@ -1192,7 +1203,7 @@ export class ChannelTurnCoordinator {
       }
       return { invocation, result }
     } catch (error) {
-      if (!execution.claimLost && !execution.timedOutInvocationIds.has(activeInvocation.id)) {
+      if (!execution.cancelled && !execution.claimLost && !execution.timedOutInvocationIds.has(activeInvocation.id)) {
         const current = this.repositories.listAgentInvocations(turn.id)
           .find((candidate) => candidate.id === activeInvocation.id)
         if (current && (current.status === 'queued' || current.status === 'running')) {
@@ -1350,6 +1361,7 @@ export class ChannelTurnCoordinator {
   private async cancelInvocations(
     execution: TurnExecution,
     invocations: AgentInvocation[],
+    persistCancellation = true,
   ): Promise<InvocationCancellationBatch> {
     const result: InvocationCancellationBatch = { cancelledInvocationIds: [], failures: [] }
     for (const invocation of invocations) {
@@ -1363,7 +1375,7 @@ export class ChannelTurnCoordinator {
         result.failures.push({ invocationId: invocation.id, error })
         continue
       }
-      this.markInvocationCancelled(execution.turnId, invocation.id, 'cancelled')
+      if (persistCancellation) this.markInvocationCancelled(execution.turnId, invocation.id, 'cancelled')
       result.cancelledInvocationIds.push(invocation.id)
     }
     return result
@@ -1394,6 +1406,16 @@ export class ChannelTurnCoordinator {
   }
 
   private cancelPersistedInvocation(turn: ConversationTurn, invocation: AgentInvocation): void {
+    this.stalePersistedInvocationSession(turn, invocation)
+    this.repositories.updateAgentInvocation(invocation.id, {
+      status: 'cancelled',
+      completedAt: this.now().toISOString(),
+      errorCode: 'cancelled',
+    })
+    this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
+  }
+
+  private stalePersistedInvocationSession(turn: ConversationTurn, invocation: AgentInvocation): void {
     const sessionKey = conversationSessionKey(turn.channelId, turn.threadRootMessageId, invocation.agentId)
     const session = this.repositories.getConversationSession(sessionKey)
     if (session && session.status !== 'stale') {
@@ -1410,12 +1432,6 @@ export class ChannelTurnCoordinator {
       })
     }
 
-    this.repositories.updateAgentInvocation(invocation.id, {
-      status: 'cancelled',
-      completedAt: this.now().toISOString(),
-      errorCode: 'cancelled',
-    })
-    this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
   }
 
   private cancelParticipants(turnId: string): void {
