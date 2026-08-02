@@ -1315,6 +1315,104 @@ describe('ChannelTurnCoordinator', () => {
     }
   })
 
+  it('continues renewing local executions and recovering orphans after one local claim is lost', async () => {
+    const fixture = await createFixture()
+    const lostAgent = fixture.createAgent('Lost Local', ['lost'])
+    const liveAgent = fixture.createAgent('Live Local', ['live'])
+    const orphanAgent = fixture.createAgent('Orphan Agent', ['orphan'])
+    const lostGate = deferred<ConversationSessionResult>()
+    const liveGate = deferred<ConversationSessionResult>()
+    const sessions = new ScriptedSessions()
+    sessions.handle = (input) => {
+      if (input.agent.id === lostAgent.id) return lostGate.promise
+      if (input.agent.id === liveAgent.id) return liveGate.promise
+      return Promise.resolve(publicReply('orphan recovered'))
+    }
+    let occurredAt = new Date('2026-08-02T00:00:00.000Z')
+    const coordinator = new ChannelTurnCoordinator({
+      repositories: fixture.repositories,
+      sessions,
+      recoveryOwnerId: 'local-owner',
+      recoveryClaimTtlMs: 30_000,
+      recoveryHeartbeatMs: 1_000_000,
+      now: () => occurredAt,
+    })
+    const lost = coordinator.start(fixture.postHuman('@Lost Local answer'))
+
+    try {
+      await waitFor(() => sessions.calls.length === 1)
+      const lostInvocation = fixture.repositories.listAgentInvocations(lost.turn.id)[0]!
+      fixture.repositories.claimRecoverableConversationTurns(
+        'takeover-owner',
+        new Date('2026-08-02T00:00:31.000Z'),
+        new Date('2026-08-02T00:00:01.000Z'),
+      )
+      expect(fixture.repositories.listAgentInvocations(lost.turn.id)).toEqual([
+        expect.objectContaining({ id: lostInvocation.id, status: 'queued' }),
+      ])
+
+      occurredAt = new Date('2026-08-02T00:00:32.000Z')
+      const live = coordinator.start(fixture.postHuman('@Live Local answer'))
+      await waitFor(() => sessions.calls.length === 2)
+      const orphanMessage = fixture.postHuman('@Orphan Agent answer')
+      const orphanTurn = fixture.repositories.createConversationTurn({
+        channelId: fixture.channel.id,
+        triggerMessageId: orphanMessage.id,
+        threadRootMessageId: null,
+        mode: 'direct',
+        maxRounds: 3,
+      })
+      fixture.repositories.createTurnParticipant({
+        turnId: orphanTurn.id,
+        agentId: orphanAgent.id,
+        source: 'direct',
+        rank: 1,
+        matcherScore: null,
+        decision: 'speak',
+        speakingOrder: 1,
+        status: 'selected',
+      })
+      fixture.repositories.createAgentInvocation({
+        turnId: orphanTurn.id,
+        agentId: orphanAgent.id,
+        kind: 'response',
+        priority: 'human_direct',
+        round: 1,
+        idempotencyKey: `${orphanTurn.id}:1:response:${orphanAgent.id}`,
+        sourceInvocationId: null,
+        status: 'running',
+        startedAt: occurredAt.toISOString(),
+      })
+      occurredAt = new Date('2026-08-02T00:00:33.000Z')
+
+      await coordinator.recover()
+      expect((coordinator as unknown as {
+        executions: Map<string, { cancelled: boolean; claimLost: boolean }>
+      }).executions.get(lost.turn.id)).toMatchObject({ cancelled: true, claimLost: true })
+      await waitFor(() => fixture.repositories.getConversationTurn(orphanTurn.id)?.status === 'completed')
+
+      expect(database!.database.prepare(`
+        SELECT recovery_claimed_at FROM conversation_turns WHERE id = ?
+      `).get(live.turn.id)).toEqual({ recovery_claimed_at: occurredAt.toISOString() })
+      expect(sessions.calls.filter((call) => call.agent.id === orphanAgent.id)).toHaveLength(1)
+      lostGate.resolve(publicReply('lost owner must not publish'))
+      await expect(lost.completion).resolves.toMatchObject({ status: 'responding' })
+      expect(fixture.repositories.listAgentInvocations(lost.turn.id)).toEqual([
+        expect.objectContaining({ id: lostInvocation.id, status: 'queued' }),
+      ])
+      expect(fixture.agentMessages().map((message) => message.body)).toEqual(['orphan recovered'])
+
+      liveGate.resolve(publicReply('live completion'))
+      await expect(live.completion).resolves.toMatchObject({ status: 'completed' })
+      expect(fixture.agentMessages().map((message) => message.body)).toEqual([
+        'orphan recovered', 'live completion',
+      ])
+    } finally {
+      lostGate.resolve(publicReply('lost owner must not publish'))
+      liveGate.resolve(publicReply('live completion'))
+    }
+  })
+
   it('does not let a stale owner cancellation overwrite a takeover that already completed', async () => {
     const fixture = await createFixture()
     const agent = fixture.createAgent('Takeover Winner', ['takeover'])

@@ -223,7 +223,7 @@ export class ChannelTurnCoordinator {
       if (this.repositories.renewConversationTurnClaim(execution.turnId, this.recoveryOwnerId, occurredAt)) continue
       execution.cancelled = true
       execution.claimLost = true
-      return
+      continue
     }
     const staleBefore = new Date(occurredAt.getTime() - this.recoveryClaimTtlMs)
     const recoverable = this.repositories.claimRecoverableConversationTurns(
