@@ -1169,44 +1169,52 @@ export class SqliteRepositories implements WorkspaceRepositories {
   }
 
   createMemoryCandidate(input: CreateMemoryCandidateInput): MemoryCandidate {
+    return this.createMemoryCandidates([input])[0]!
+  }
+
+  createMemoryCandidates(inputs: CreateMemoryCandidateInput[]): MemoryCandidate[] {
     return this.inTransaction(() => {
-      const database = this.sqlite.database
-      const run = this.getDreamRun(input.dreamRunId)
-      if (!run) throw new Error(`Dream run ${input.dreamRunId} does not exist.`)
-      assertMemoryScope(input.proposedScope, input.channelId)
-      if (input.proposedScope === 'channel' && input.channelId !== run.scopeId) {
-        throw new Error('Channel Memory candidate must match the Dream channel.')
-      }
-      const sourceMessageIds = [...new Set(input.sourceMessageIds)]
-      for (const sourceMessageId of sourceMessageIds) assertDreamSource(database, run.scopeId, sourceMessageId)
-      const createdAt = now()
-      const candidate: MemoryCandidate = {
-        id: randomUUID(), dreamRunId: input.dreamRunId, proposedScope: input.proposedScope, channelId: input.channelId,
-        kind: input.kind, proposedContent: requireText(input.proposedContent, 'Memory candidate content'),
-        rationale: requireText(input.rationale, 'Memory candidate rationale'),
-        confidence: unitInterval(input.confidence, 'Memory candidate confidence'),
-        importance: unitInterval(input.importance, 'Memory candidate importance'),
-        contentHash: contentHash(input.proposedContent), status: 'pending', reviewedContent: null,
-        reviewedScope: null, reviewedAt: null, createdAt,
-      }
-      database.prepare(`
-        INSERT INTO memory_candidates (
-          id, dream_run_id, proposed_scope, channel_id, kind, proposed_content, rationale, confidence,
-          importance, content_hash, status, reviewed_content, reviewed_scope, reviewed_at, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        candidate.id, candidate.dreamRunId, candidate.proposedScope, candidate.channelId, candidate.kind,
-        candidate.proposedContent, candidate.rationale, candidate.confidence, candidate.importance, candidate.contentHash,
-        candidate.status, candidate.reviewedContent, candidate.reviewedScope, candidate.reviewedAt, candidate.createdAt,
-      )
-      for (const sourceMessageId of sourceMessageIds) {
-        database.prepare('INSERT INTO memory_candidate_sources (candidate_id, message_id, turn_id) VALUES (?, ?, ?)').run(
-          candidate.id, sourceMessageId, sourceTurnId(database, sourceMessageId),
-        )
-      }
-      database.prepare('UPDATE dream_runs SET candidate_count = candidate_count + 1 WHERE id = ?').run(run.id)
-      return candidate
+      return inputs.map((input) => this.insertMemoryCandidate(input))
     })
+  }
+
+  private insertMemoryCandidate(input: CreateMemoryCandidateInput): MemoryCandidate {
+    const database = this.sqlite.database
+    const run = this.getDreamRun(input.dreamRunId)
+    if (!run) throw new Error(`Dream run ${input.dreamRunId} does not exist.`)
+    assertMemoryScope(input.proposedScope, input.channelId)
+    if (input.proposedScope === 'channel' && input.channelId !== run.scopeId) {
+      throw new Error('Channel Memory candidate must match the Dream channel.')
+    }
+    const sourceMessageIds = [...new Set(input.sourceMessageIds)]
+    for (const sourceMessageId of sourceMessageIds) assertDreamSource(database, run.scopeId, sourceMessageId)
+    const createdAt = now()
+    const candidate: MemoryCandidate = {
+      id: randomUUID(), dreamRunId: input.dreamRunId, proposedScope: input.proposedScope, channelId: input.channelId,
+      kind: input.kind, proposedContent: requireText(input.proposedContent, 'Memory candidate content'),
+      rationale: requireText(input.rationale, 'Memory candidate rationale'),
+      confidence: unitInterval(input.confidence, 'Memory candidate confidence'),
+      importance: unitInterval(input.importance, 'Memory candidate importance'),
+      contentHash: contentHash(input.proposedContent), status: 'pending', reviewedContent: null,
+      reviewedScope: null, reviewedAt: null, createdAt,
+    }
+    database.prepare(`
+      INSERT INTO memory_candidates (
+        id, dream_run_id, proposed_scope, channel_id, kind, proposed_content, rationale, confidence,
+        importance, content_hash, status, reviewed_content, reviewed_scope, reviewed_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      candidate.id, candidate.dreamRunId, candidate.proposedScope, candidate.channelId, candidate.kind,
+      candidate.proposedContent, candidate.rationale, candidate.confidence, candidate.importance, candidate.contentHash,
+      candidate.status, candidate.reviewedContent, candidate.reviewedScope, candidate.reviewedAt, candidate.createdAt,
+    )
+    for (const sourceMessageId of sourceMessageIds) {
+      database.prepare('INSERT INTO memory_candidate_sources (candidate_id, message_id, turn_id) VALUES (?, ?, ?)').run(
+        candidate.id, sourceMessageId, sourceTurnId(database, sourceMessageId),
+      )
+    }
+    database.prepare('UPDATE dream_runs SET candidate_count = candidate_count + 1 WHERE id = ?').run(run.id)
+    return candidate
   }
 
   getMemoryCandidate(candidateId: string): MemoryCandidate | undefined {

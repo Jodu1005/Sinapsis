@@ -20,6 +20,8 @@ const unsafeTextPatterns: Array<{ reason: string; patterns: RegExp[] }> = [
     patterns: [
       /\b(?:sk-(?:proj-)?|gh[pousr]_|github_pat_|xox[baprs]-)[a-z0-9_-]{12,}\b/i,
       /\bAKIA[A-Z0-9]{12,}\b/,
+      /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/,
+      /\b[A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL)[A-Z0-9_]*\s*=\s*\S{8,}/,
       /\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|auth[_ -]?token|secret|password|passwd|cookie|session_?id|database_url)\b\s*[:=]\s*\S{8,}/i,
       /\b(?:authorization|proxy-authorization)\s*:\s*(?:bearer|basic)\s+\S+/i,
       /\bcookie\s*:\s*[^\s=;]+=[^\s;]+/i,
@@ -31,7 +33,7 @@ const unsafeTextPatterns: Array<{ reason: string; patterns: RegExp[] }> = [
   {
     reason: 'credential path',
     patterns: [
-      /(?:~|\/(?:Users|home)\/[^/\s]+)\/\.(?:ssh\/(?:id_(?:rsa|ed25519)|config)|aws\/credentials|config\/gcloud\/application_default_credentials\.json)\b/i,
+      /(?:~|\/(?:Users|home)\/[^/\s]+)\/\.(?:ssh\/(?:id_(?:rsa|ed25519)|config)|aws\/credentials|config\/gcloud\/application_default_credentials\.json|kube\/config|npmrc)\b/i,
       /\b[A-Z]:\\Users\\[^\\\s]+\\\.(?:ssh\\id_(?:rsa|ed25519)|aws\\credentials)\b/i,
     ],
   },
@@ -54,7 +56,8 @@ const unsafeTextPatterns: Array<{ reason: string; patterns: RegExp[] }> = [
   {
     reason: 'temporary state',
     patterns: [
-      /\b(?:currently|right now|for now|at the moment|temporarily|in progress|still running)\b/i,
+      /\b(?:currently|right now|for now|at the moment|temporarily|still running)\b/i,
+      /\b(?:is|are|remains?)\s+in progress\b/i,
       /(?:当前|现在|暂时|正在|临时)[^。\n]*(?:运行|进行|处理|失败|报错|错误|状态)/,
     ],
   },

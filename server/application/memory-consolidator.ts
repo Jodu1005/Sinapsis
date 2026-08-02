@@ -9,7 +9,7 @@ import type { RuntimeAdapter, RuntimeArtifactType, RuntimeEvent, RuntimeSession,
 import { memoryContentHash, parseMemoryConsolidation, type ProposedMemory } from './memory-consolidation-protocol'
 
 export interface MemoryConsolidationRepositories {
-  createMemoryCandidate(input: CreateMemoryCandidateInput): MemoryCandidate
+  createMemoryCandidates(inputs: CreateMemoryCandidateInput[]): MemoryCandidate[]
 }
 
 export interface MemoryConsolidatorOptions {
@@ -64,6 +64,14 @@ export class MemoryConsolidator {
     if (crossChannelTurn) {
       throw new Error(`Turn ${crossChannelTurn.turn.id} does not belong to channel ${input.channel.id}.`)
     }
+    for (const details of input.turns) {
+      const foreignInvocation = details.invocations.find((invocation) => invocation.turnId !== details.turn.id)
+      if (foreignInvocation) {
+        throw new Error(
+          `Invocation ${foreignInvocation.id} belongs to turn ${foreignInvocation.turnId}, not ${details.turn.id}.`,
+        )
+      }
+    }
 
     const runDirectory = path.join(this.dataDir, 'dream', input.runId)
     await mkdir(runDirectory, { recursive: true })
@@ -82,8 +90,8 @@ export class MemoryConsolidator {
     const finish = (outcome: RuntimeOutcome, cancel: boolean): void => {
       if (terminal) return
       terminal = true
-      if (cancel && outcome.kind === 'error') {
-        if (session) outcome.error = cancelWithDiagnostic(this.runtime, session, outcome.error)
+      if (cancel) {
+        if (session) outcome = cancelOutcome(this.runtime, session, outcome)
         else cancelWhenStarted = true
       }
       resolveOutcome(outcome)
@@ -104,7 +112,7 @@ export class MemoryConsolidator {
           finish({ kind: 'error', error: new Error(`Dream Runtime failed: ${event.message}`) }, true)
           return
         case 'settled':
-          finish({ kind: 'settled', raw: text.join('').trim() }, false)
+          finish({ kind: 'settled', raw: text.join('').trim() }, true)
           return
         case 'session':
         case 'tool_start':
@@ -168,10 +176,14 @@ export class MemoryConsolidator {
       hash: memoryContentHash(memory.content),
       subjectKey: memorySubjectKey(memory.content),
     }))
-    const created: MemoryCandidate[] = []
+    const inputs: CreateMemoryCandidateInput[] = []
+    const proposedKeys = new Set<string>()
 
     for (const candidate of proposed) {
       const hash = memoryContentHash(candidate.content)
+      const proposalKey = `${candidate.scope}:${candidate.scope === 'channel' ? input.channel.id : ''}:${hash}`
+      if (proposedKeys.has(proposalKey)) continue
+      proposedKeys.add(proposalKey)
       if (accepted.some((item) => item.memory.scope === candidate.scope && item.hash === hash)) continue
 
       const conflict = accepted.find((item) =>
@@ -183,7 +195,7 @@ export class MemoryConsolidator {
       const rationale = conflict
         ? `${candidate.rationale} Potential conflict with accepted Memory ${conflict.memory.id}; human review required.`
         : candidate.rationale
-      created.push(this.repositories.createMemoryCandidate({
+      inputs.push({
         dreamRunId: input.runId,
         proposedScope: candidate.scope,
         channelId: candidate.scope === 'channel' ? input.channel.id : null,
@@ -193,9 +205,9 @@ export class MemoryConsolidator {
         confidence: candidate.confidence,
         importance: candidate.importance,
         sourceMessageIds: candidate.sourceMessageIds,
-      }))
+      })
     }
-    return created
+    return this.repositories.createMemoryCandidates(inputs)
   }
 }
 
@@ -233,6 +245,7 @@ function runtimeRequest(
     acceptanceCriteria: 'Return only the strict JSON Memory consolidation result. Do not include Markdown or explanatory text.',
     worktreePath: runDirectory,
     profile,
+    executionPolicy: 'read-only-no-tools',
   }
 }
 
@@ -304,12 +317,16 @@ async function persistArtifacts(
     writeFile(path.join(runDirectory, `${type}.log`), chunks.join(''), 'utf8')))
 }
 
-function cancelWithDiagnostic(runtime: RuntimeAdapter, session: RuntimeSession, primary: Error): Error {
+function cancelOutcome(runtime: RuntimeAdapter, session: RuntimeSession, outcome: RuntimeOutcome): RuntimeOutcome {
   try {
     runtime.cancel(session)
-    return primary
+    return outcome
   } catch (error) {
-    return new Error(`${primary.message} Runtime cancellation failed: ${errorMessage(error)}.`)
+    const cancellation = `Runtime cancellation failed: ${errorMessage(error)}.`
+    return {
+      kind: 'error',
+      error: new Error(outcome.kind === 'error' ? `${outcome.error.message} ${cancellation}` : cancellation),
+    }
   }
 }
 

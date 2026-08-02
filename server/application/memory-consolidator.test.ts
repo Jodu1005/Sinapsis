@@ -31,6 +31,7 @@ describe('MemoryConsolidator', () => {
     expect(request).toMatchObject({
       taskId: fixture.input.runId,
       mode: 'conversation',
+      executionPolicy: 'read-only-no-tools',
       worktreePath: path.join(fixture.dataDir, 'dream', fixture.input.runId),
       profile,
     })
@@ -108,6 +109,32 @@ describe('MemoryConsolidator', () => {
 
     await expect(operation).resolves.toEqual([])
     expect(fixture.repositories.created).toEqual([])
+    expect(fixture.runtime.cancellations).toHaveLength(1)
+  })
+
+  it('closes the one-shot Runtime session after a settled response that fails parsing', async () => {
+    const fixture = await createFixture()
+    const operation = fixture.consolidator.consolidate(fixture.input)
+    await vi.waitFor(() => expect(fixture.runtime.starts).toHaveLength(1))
+
+    fixture.runtime.emit(fixture.input.runId, { kind: 'text', text: '{not-json}' })
+    fixture.runtime.emit(fixture.input.runId, { kind: 'settled' })
+
+    await expect(operation).rejects.toThrow(/valid JSON/)
+    expect(fixture.runtime.cancellations).toHaveLength(1)
+  })
+
+  it('reports a one-shot Runtime cancellation failure instead of returning success', async () => {
+    const runtime = new FailingCancelRuntime()
+    const fixture = await createFixture({ runtime })
+    const operation = fixture.consolidator.consolidate(fixture.input)
+    await vi.waitFor(() => expect(fixture.runtime.starts).toHaveLength(1))
+    await Promise.resolve()
+
+    settle(fixture, { candidates: [] })
+
+    await expect(operation).rejects.toThrow(/Runtime cancellation failed: cancel unavailable/)
+    expect(runtime.cancelAttempts).toBe(1)
   })
 
   it('does not create a candidate that duplicates an accepted Memory after normalization', async () => {
@@ -212,6 +239,30 @@ describe('MemoryConsolidator', () => {
     expect(result.error).toBeInstanceOf(Error)
     expect((result.error as Error).message).toMatch(/turn-1.*channel-1/)
     expect(fixture.runtime.starts).toHaveLength(0)
+  })
+
+  it('rejects an invocation whose nested turn ID does not match its Turn details', async () => {
+    const fixture = await createFixture()
+    fixture.input.turns = [turnDetails([
+      { ...invocation('response', JSON.stringify({ reply: 'Foreign result.' })), turnId: 'turn-foreign' },
+    ])]
+
+    const result = await observePreflight(fixture)
+
+    expect(result.error).toBeInstanceOf(Error)
+    expect((result.error as Error).message).toMatch(/invocation-response.*turn-foreign.*turn-1/)
+    expect(fixture.runtime.starts).toHaveLength(0)
+  })
+
+  it('deduplicates repeated Runtime proposals before persistence', async () => {
+    const fixture = await createFixture()
+    const operation = fixture.consolidator.consolidate(fixture.input)
+    await vi.waitFor(() => expect(fixture.runtime.starts).toHaveLength(1))
+
+    settle(fixture, { candidates: [proposedMemory(), proposedMemory()] })
+
+    await expect(operation).resolves.toHaveLength(1)
+    expect(fixture.repositories.created).toHaveLength(1)
   })
 
   it('rejects a run ID that can escape or nest outside its Dream run directory', async () => {
@@ -374,25 +425,27 @@ const profile: RuntimeProfile = {
 class RecordingMemoryRepositories {
   readonly created: CreateMemoryCandidateInput[] = []
 
-  createMemoryCandidate(input: CreateMemoryCandidateInput): MemoryCandidate {
-    this.created.push(input)
-    return {
-      id: `candidate-${this.created.length}`,
-      dreamRunId: input.dreamRunId,
-      proposedScope: input.proposedScope,
-      channelId: input.channelId,
-      kind: input.kind,
-      proposedContent: input.proposedContent,
-      rationale: input.rationale,
-      confidence: input.confidence,
-      importance: input.importance,
-      contentHash: memoryContentHash(input.proposedContent),
-      status: 'pending',
-      reviewedContent: null,
-      reviewedScope: null,
-      reviewedAt: null,
-      createdAt: '2026-08-02T09:00:00.000Z',
-    }
+  createMemoryCandidates(inputs: CreateMemoryCandidateInput[]): MemoryCandidate[] {
+    return inputs.map((input) => {
+      this.created.push(input)
+      return {
+        id: `candidate-${this.created.length}`,
+        dreamRunId: input.dreamRunId,
+        proposedScope: input.proposedScope,
+        channelId: input.channelId,
+        kind: input.kind,
+        proposedContent: input.proposedContent,
+        rationale: input.rationale,
+        confidence: input.confidence,
+        importance: input.importance,
+        contentHash: memoryContentHash(input.proposedContent),
+        status: 'pending',
+        reviewedContent: null,
+        reviewedScope: null,
+        reviewedAt: null,
+        createdAt: '2026-08-02T09:00:00.000Z',
+      }
+    })
   }
 }
 
@@ -408,6 +461,15 @@ class DeferredStartRuntime extends FakeRuntimeAdapter {
   releaseStart(): void {
     if (!this.pendingSession || !this.resolveStart) throw new Error('Deferred Runtime start is not pending.')
     this.resolveStart(this.pendingSession)
+  }
+}
+
+class FailingCancelRuntime extends FakeRuntimeAdapter {
+  cancelAttempts = 0
+
+  override cancel(_session: RuntimeSession): void {
+    this.cancelAttempts += 1
+    throw new Error('cancel unavailable')
   }
 }
 

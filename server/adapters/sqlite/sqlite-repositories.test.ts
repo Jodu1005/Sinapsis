@@ -140,6 +140,28 @@ describe('SQLite workspace repositories', () => {
     expect(repositories.listDreamSourceMessages(run.id).map((item) => item.id)).toEqual([message.id])
   })
 
+  it('rolls back every candidate and the run count when a candidate batch fails', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const message = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Frontend uses React.',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'manual',
+      from: null, to: { createdAt: message.createdAt, id: message.id },
+    })
+    const input = {
+      dreamRunId: run.id, proposedScope: 'channel' as const, channelId: channel.id, kind: 'fact' as const,
+      proposedContent: 'Frontend uses React.', rationale: 'Confirmed.', confidence: 0.9, importance: 0.8,
+      sourceMessageIds: [message.id],
+    }
+
+    expect(() => repositories.createMemoryCandidates([input, input])).toThrow(/UNIQUE constraint failed/)
+
+    expect(repositories.listMemoryCandidates({ dreamRunId: run.id })).toEqual([])
+    expect(repositories.getDreamRun(run.id)?.candidateCount).toBe(0)
+  })
+
   it('persists a Thread Summary with an ordered message watermark', async () => {
     const { repositories } = await createRepositories()
     const channel = createChannel(repositories)
