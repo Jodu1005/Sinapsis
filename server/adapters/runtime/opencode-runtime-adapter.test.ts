@@ -37,6 +37,55 @@ describe('OpenCodeRuntimeAdapter', () => {
     expect(prompt).toContain('untrusted conversational context')
   })
 
+  it('enforces request-local deny-all permissions for the read-only no-tools policy', async () => {
+    const runner = new FakeProcessRunner()
+    const adapter = new OpenCodeRuntimeAdapter(runner)
+
+    await adapter.start({
+      ...task,
+      executionPolicy: 'read-only-no-tools',
+      profile: resolveRuntimeProfile('opencode', {
+        command: 'opencode-bin',
+        args: ['--agent', 'build', '--auto'],
+        env: { OPENCODE_CONFIG_CONTENT: '{"permission":"allow"}', KEEP_ME: 'yes' },
+      }),
+    }, () => {})
+
+    const spawn = runner.spawns[0]?.options
+    const args = spawn?.args ?? []
+    const agentIndex = args.lastIndexOf('--agent')
+    const config = JSON.parse(spawn?.env?.OPENCODE_CONFIG_CONTENT ?? '{}')
+    const deniedPermissions = {
+      '*': 'deny',
+      read: 'deny',
+      edit: 'deny',
+      glob: 'deny',
+      grep: 'deny',
+      list: 'deny',
+      bash: 'deny',
+      task: 'deny',
+      skill: 'deny',
+      lsp: 'deny',
+      todowrite: 'deny',
+      todoread: 'deny',
+      webfetch: 'deny',
+      websearch: 'deny',
+      codesearch: 'deny',
+      external_directory: 'deny',
+      doom_loop: 'deny',
+    }
+    expect(args[agentIndex + 1]).toBe('sinapsis-dream-maintenance')
+    expect(args).toContain('--pure')
+    expect(args).not.toContain('build')
+    expect(args).not.toContain('--auto')
+    expect(spawn?.env?.KEEP_ME).toBe('yes')
+    expect(config.permission).toEqual(deniedPermissions)
+    expect(config.agent['sinapsis-dream-maintenance']).toEqual({
+      mode: 'primary',
+      permission: deniedPermissions,
+    })
+  })
+
   it('falls back to the local OpenCode default for a legacy unqualified model name', async () => {
     const runner = new FakeProcessRunner()
     const adapter = new OpenCodeRuntimeAdapter(runner)

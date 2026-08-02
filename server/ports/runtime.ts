@@ -16,6 +16,8 @@ export type RuntimeEvent =
 
 export type RuntimeEventSink = (event: RuntimeEvent) => void
 
+export type RuntimeExecutionPolicy = 'default' | 'read-only-no-tools'
+
 export interface RuntimeTaskRequest {
   taskId: string
   mode: 'task' | 'conversation'
@@ -25,6 +27,7 @@ export interface RuntimeTaskRequest {
   initialMessage?: string
   worktreePath: string
   profile: RuntimeProfile
+  executionPolicy?: RuntimeExecutionPolicy
   conversation?: {
     turnId: string
     invocationId: string
@@ -38,6 +41,7 @@ export interface RuntimeSession {
   runtime: RuntimeKind
   worktreePath: string
   profile: RuntimeProfile
+  executionPolicy?: RuntimeExecutionPolicy
   sessionId: string | null
   sessionFile: string | null
   isStreaming: boolean

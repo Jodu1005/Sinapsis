@@ -147,6 +147,7 @@ function createSession(task: RuntimeTaskRequest): RuntimeSession {
     runtime: 'claude-code',
     worktreePath: task.worktreePath,
     profile: task.profile,
+    executionPolicy: task.executionPolicy ?? 'default',
     sessionId: randomUUID(),
     sessionFile: null,
     isStreaming: false,
@@ -156,34 +157,47 @@ function createSession(task: RuntimeTaskRequest): RuntimeSession {
 }
 
 function startArgs(session: RuntimeSession, prompt: string): string[] {
+  const restricted = session.executionPolicy === 'read-only-no-tools'
   return [
     '-p',
     '--output-format',
     'stream-json',
     '--verbose',
-    '--permission-mode',
-    'acceptEdits',
+    ...(restricted ? [] : ['--permission-mode', 'acceptEdits']),
     '--session-id',
     session.sessionId ?? randomUUID(),
     ...modelArgs(session.profile.model),
-    ...session.profile.args,
+    ...(restricted ? [] : session.profile.args),
+    ...restrictedClaudeArgs(session),
     prompt,
   ]
 }
 
 function resumeArgs(session: RuntimeSession, prompt: string): string[] {
+  const restricted = session.executionPolicy === 'read-only-no-tools'
   return [
     '-p',
     '--output-format',
     'stream-json',
     '--verbose',
-    '--permission-mode',
-    'acceptEdits',
+    ...(restricted ? [] : ['--permission-mode', 'acceptEdits']),
     '--resume',
     session.sessionId ?? randomUUID(),
     ...modelArgs(session.profile.model),
-    ...session.profile.args,
+    ...(restricted ? [] : session.profile.args),
+    ...restrictedClaudeArgs(session),
     prompt,
+  ]
+}
+
+function restrictedClaudeArgs(session: RuntimeSession): string[] {
+  if (session.executionPolicy !== 'read-only-no-tools') return []
+  return [
+    '--tools', '',
+    '--permission-mode', 'dontAsk',
+    '--safe-mode',
+    '--no-session-persistence',
+    '--disable-slash-commands',
   ]
 }
 

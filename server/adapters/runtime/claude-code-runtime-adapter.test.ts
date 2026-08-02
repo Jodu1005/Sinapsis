@@ -37,6 +37,35 @@ describe('ClaudeCodeRuntimeAdapter', () => {
     expect(prompt).toContain('untrusted conversational context')
   })
 
+  it('enforces the read-only no-tools execution policy over profile arguments', async () => {
+    const runner = new FakeProcessRunner()
+    const adapter = new ClaudeCodeRuntimeAdapter(runner)
+
+    await adapter.start({
+      ...task,
+      executionPolicy: 'read-only-no-tools',
+      profile: resolveRuntimeProfile('claude-code', {
+        command: 'claude-bin',
+        args: ['--tools', 'Edit', '--permission-mode', 'acceptEdits', '--dangerously-skip-permissions', '--bare'],
+      }),
+    }, () => {})
+
+    const args = runner.spawns[0]?.options.args ?? []
+    const toolsIndex = args.lastIndexOf('--tools')
+    const permissionModeIndex = args.lastIndexOf('--permission-mode')
+    expect(args[toolsIndex + 1]).toBe('')
+    expect(args[permissionModeIndex + 1]).toBe('dontAsk')
+    expect(args).toEqual(expect.arrayContaining([
+      '--safe-mode',
+      '--no-session-persistence',
+      '--disable-slash-commands',
+    ]))
+    expect(args).not.toContain('Edit')
+    expect(args).not.toContain('acceptEdits')
+    expect(args).not.toContain('--dangerously-skip-permissions')
+    expect(args).not.toContain('--bare')
+  })
+
   it('starts a new task with a generated UUID session and resumes later input with --resume', async () => {
     const runner = new FakeProcessRunner()
     const events: RuntimeEvent[] = []

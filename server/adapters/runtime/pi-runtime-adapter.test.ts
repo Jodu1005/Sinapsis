@@ -38,6 +38,31 @@ describe('PiRuntimeAdapter', () => {
     expect(prompt).toContain('Which risk should we address first?')
   })
 
+  it('enforces the read-only no-tools policy without loading profile resources or persisting a session', async () => {
+    const runner = new FakeProcessRunner()
+    const adapter = new PiRuntimeAdapter(runner, '/tmp/sinapsis-data')
+
+    await adapter.start({
+      ...task,
+      executionPolicy: 'read-only-no-tools',
+      profile: resolveRuntimeProfile('pi', {
+        command: 'pi-bin',
+        args: ['--extension', '/tmp/evil.ts', '--skill', '/tmp/evil.md', '--tools', 'bash'],
+      }),
+    }, () => {})
+
+    expect(runner.spawns[0]?.options.args).toEqual([
+      '--mode', 'rpc',
+      '--no-tools',
+      '--no-extensions',
+      '--no-skills',
+      '--no-prompt-templates',
+      '--no-context-files',
+      '--no-session',
+      '--no-approve',
+    ])
+  })
+
   it('captures its session state before sending the initial prompt', async () => {
     const runner = new FakeProcessRunner()
     const events: RuntimeEvent[] = []

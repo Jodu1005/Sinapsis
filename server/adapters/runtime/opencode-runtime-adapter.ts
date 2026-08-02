@@ -3,6 +3,39 @@ import { LfJsonlParser } from './lf-jsonl-parser'
 import type { ProcessHandle, ProcessRunner } from '../../ports/process-runner'
 import type { RuntimeAdapter, RuntimeEventSink, RuntimeSession, RuntimeTaskRequest } from '../../ports/runtime'
 
+const RESTRICTED_AGENT = 'sinapsis-dream-maintenance'
+const RESTRICTED_CONFIG = JSON.stringify({
+  permission: deniedOpenCodePermissions(),
+  agent: {
+    [RESTRICTED_AGENT]: {
+      mode: 'primary',
+      permission: deniedOpenCodePermissions(),
+    },
+  },
+})
+
+function deniedOpenCodePermissions(): Record<string, 'deny'> {
+  return Object.fromEntries([
+    '*',
+    'read',
+    'edit',
+    'glob',
+    'grep',
+    'list',
+    'bash',
+    'task',
+    'skill',
+    'lsp',
+    'todowrite',
+    'todoread',
+    'webfetch',
+    'websearch',
+    'codesearch',
+    'external_directory',
+    'doom_loop',
+  ].map((permission) => [permission, 'deny']))
+}
+
 export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
   private readonly processes = new WeakMap<RuntimeSession, ProcessHandle>()
   private readonly conversationSessions = new WeakSet<RuntimeSession>()
@@ -47,16 +80,20 @@ export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
   }
 
   private launch(session: RuntimeSession, prompt: string, sink: RuntimeEventSink): void {
-    const args = [...session.profile.args, '--format', 'json', '--dir', session.worktreePath]
+    const restricted = session.executionPolicy === 'read-only-no-tools'
+    const args = [...(restricted ? [] : session.profile.args), '--format', 'json', '--dir', session.worktreePath]
     if (isQualifiedModel(session.profile.model)) args.push('--model', session.profile.model)
     if (session.sessionId) args.push('--session', session.sessionId)
+    if (restricted) args.push('--pure', '--agent', RESTRICTED_AGENT)
     args.push(prompt)
 
     const process = this.processRunner.spawn({
       command: session.profile.command,
       args,
       cwd: session.worktreePath,
-      env: session.profile.env,
+      env: restricted
+        ? { ...session.profile.env, OPENCODE_CONFIG_CONTENT: RESTRICTED_CONFIG }
+        : session.profile.env,
       stdinMode: 'ignore',
     })
     const parser = new LfJsonlParser()
@@ -132,6 +169,7 @@ function createSession(task: RuntimeTaskRequest): RuntimeSession {
     runtime: 'opencode',
     worktreePath: task.worktreePath,
     profile: task.profile,
+    executionPolicy: task.executionPolicy ?? 'default',
     sessionId: null,
     sessionFile: null,
     isStreaming: false,

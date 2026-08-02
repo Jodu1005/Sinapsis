@@ -53,11 +53,13 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
   }
 
   private launch(session: RuntimeSession, sink: RuntimeEventSink): void {
-    const args = [
-      ...session.profile.args,
-      '--session-dir', path.join(this.dataDirectory, 'pi-sessions'),
-      '--name', `sinapsis:${session.taskId}`,
-    ]
+    const args = session.executionPolicy === 'read-only-no-tools'
+      ? restrictedPiArgs()
+      : [
+          ...session.profile.args,
+          '--session-dir', path.join(this.dataDirectory, 'pi-sessions'),
+          '--name', `sinapsis:${session.taskId}`,
+        ]
     const process = this.processRunner.spawn({
       command: session.profile.command,
       args,
@@ -170,12 +172,26 @@ function createSession(task: RuntimeTaskRequest): RuntimeSession {
     runtime: 'pi',
     worktreePath: task.worktreePath,
     profile: task.profile,
+    executionPolicy: task.executionPolicy ?? 'default',
     sessionId: null,
     sessionFile: null,
     isStreaming: false,
     queueLength: 0,
     pendingInputs: [],
   }
+}
+
+function restrictedPiArgs(): string[] {
+  return [
+    '--mode', 'rpc',
+    '--no-tools',
+    '--no-extensions',
+    '--no-skills',
+    '--no-prompt-templates',
+    '--no-context-files',
+    '--no-session',
+    '--no-approve',
+  ]
 }
 
 function initialPrompt(task: RuntimeTaskRequest): string {
