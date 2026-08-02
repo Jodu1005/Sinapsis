@@ -47,7 +47,15 @@ describe('OpenCodeRuntimeAdapter', () => {
       profile: resolveRuntimeProfile('opencode', {
         command: 'opencode-bin',
         args: ['--agent', 'build', '--auto'],
-        env: { OPENCODE_CONFIG_CONTENT: '{"permission":"allow"}', KEEP_ME: 'yes' },
+        env: {
+          OPENCODE_CONFIG: '/Users/jodu/.config/opencode/unsafe.json',
+          OPENCODE_CONFIG_DIR: '/Users/jodu/.config/opencode',
+          OPENCODE_CONFIG_CONTENT: '{"permission":{"custom_tool":"allow"}}',
+          OPENCODE_PERMISSION: '{"custom_tool":"allow"}',
+          OPENCODE_TEST_HOME: '/Users/jodu',
+          XDG_CONFIG_HOME: '/Users/jodu/.config',
+          KEEP_ME: 'yes',
+        },
       }),
     }, () => {})
 
@@ -79,6 +87,14 @@ describe('OpenCodeRuntimeAdapter', () => {
     expect(args).not.toContain('build')
     expect(args).not.toContain('--auto')
     expect(spawn?.env?.KEEP_ME).toBe('yes')
+    expect(spawn?.env).toMatchObject({
+      OPENCODE_CONFIG: '',
+      OPENCODE_CONFIG_DIR: '/tmp/task-1/.sinapsis-opencode-config',
+      OPENCODE_DISABLE_PROJECT_CONFIG: 'true',
+      OPENCODE_TEST_HOME: '/tmp/task-1/.sinapsis-opencode-home',
+      XDG_CONFIG_HOME: '/tmp/task-1/.sinapsis-opencode-config',
+    })
+    expect(JSON.parse(spawn?.env?.OPENCODE_PERMISSION ?? '{}')).toEqual(deniedPermissions)
     expect(config.permission).toEqual(deniedPermissions)
     expect(config.agent['sinapsis-dream-maintenance']).toEqual({
       mode: 'primary',

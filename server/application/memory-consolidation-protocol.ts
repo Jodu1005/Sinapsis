@@ -21,7 +21,7 @@ const unsafeTextPatterns: Array<{ reason: string; patterns: RegExp[] }> = [
       /\b(?:sk-(?:proj-)?|gh[pousr]_|github_pat_|xox[baprs]-)[a-z0-9_-]{12,}\b/i,
       /\bAKIA[A-Z0-9]{12,}\b/,
       /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/,
-      /\b[A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL)[A-Z0-9_]*\s*=\s*\S{8,}/,
+      /\b[A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL)[A-Z0-9_]*\s*=\s*\S{8,}/i,
       /\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|auth[_ -]?token|secret|password|passwd|cookie|session_?id|database_url)\b\s*[:=]\s*\S{8,}/i,
       /\b(?:authorization|proxy-authorization)\s*:\s*(?:bearer|basic)\s+\S+/i,
       /\bcookie\s*:\s*[^\s=;]+=[^\s;]+/i,
@@ -33,7 +33,7 @@ const unsafeTextPatterns: Array<{ reason: string; patterns: RegExp[] }> = [
   {
     reason: 'credential path',
     patterns: [
-      /(?:~|\/(?:Users|home)\/[^/\s]+)\/\.(?:ssh\/(?:id_(?:rsa|ed25519)|config)|aws\/credentials|config\/gcloud\/application_default_credentials\.json|kube\/config|npmrc)\b/i,
+      /(?:~|(?:\/[^/\s]+)+)\/\.(?:ssh\/(?:id_(?:rsa|ed25519)|config)|aws\/credentials|config\/gcloud\/application_default_credentials\.json|kube\/config|npmrc)\b/i,
       /\b[A-Z]:\\Users\\[^\\\s]+\\\.(?:ssh\\id_(?:rsa|ed25519)|aws\\credentials)\b/i,
     ],
   },

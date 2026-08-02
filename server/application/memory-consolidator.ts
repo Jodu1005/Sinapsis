@@ -83,18 +83,32 @@ export class MemoryConsolidator {
     const artifacts = new Map<RuntimeArtifactType, string[]>()
     let session: RuntimeSession | undefined
     let cancelWhenStarted = false
+    let pendingSettledOutcome: Extract<RuntimeOutcome, { kind: 'settled' }> | undefined
     let terminal = false
+    let outcomeResolved = false
     let resolveOutcome!: (outcome: RuntimeOutcome) => void
     const outcomePromise = new Promise<RuntimeOutcome>((resolve) => { resolveOutcome = resolve })
+
+    const resolveOnce = (outcome: RuntimeOutcome): void => {
+      if (outcomeResolved) return
+      outcomeResolved = true
+      resolveOutcome(outcome)
+    }
 
     const finish = (outcome: RuntimeOutcome, cancel: boolean): void => {
       if (terminal) return
       terminal = true
       if (cancel) {
         if (session) outcome = cancelOutcome(this.runtime, session, outcome)
-        else cancelWhenStarted = true
+        else {
+          cancelWhenStarted = true
+          if (outcome.kind === 'settled') {
+            pendingSettledOutcome = outcome
+            return
+          }
+        }
       }
-      resolveOutcome(outcome)
+      resolveOnce(outcome)
     }
     const sink = (event: RuntimeEvent): void => {
       if (event.taskId !== input.runId || terminal) return
@@ -124,6 +138,11 @@ export class MemoryConsolidator {
     }
 
     const timeout = setTimeout(() => {
+      if (pendingSettledOutcome) {
+        pendingSettledOutcome = undefined
+        resolveOnce({ kind: 'error', error: new Error(`Dream Runtime timed out after ${this.timeoutMs}ms.`) })
+        return
+      }
       finish({ kind: 'error', error: new Error(`Dream Runtime timed out after ${this.timeoutMs}ms.`) }, true)
     }, this.timeoutMs)
     timeout.unref?.()
@@ -131,22 +150,39 @@ export class MemoryConsolidator {
     const acceptSession = (startedSession: RuntimeSession): void => {
       session = startedSession
       if (!cancelWhenStarted) return
+      if (pendingSettledOutcome) {
+        const settled = pendingSettledOutcome
+        pendingSettledOutcome = undefined
+        resolveOnce(cancelOutcome(this.runtime, startedSession, settled))
+        return
+      }
       try {
         this.runtime.cancel(startedSession)
-      } catch {
-        // The already-recorded Runtime error remains the primary diagnostic.
+      } catch (error) {
+        const chunks = artifacts.get('runtime-stderr') ?? []
+        chunks.push(`Dream Runtime late cancellation failed: ${errorMessage(error)}.\n`)
+        artifacts.set('runtime-stderr', chunks)
       }
+    }
+    const rejectStart = (error: unknown): void => {
+      const failure = {
+        kind: 'error' as const,
+        error: new Error(`Dream Runtime failed to start: ${errorMessage(error)}.`),
+      }
+      if (pendingSettledOutcome) {
+        pendingSettledOutcome = undefined
+        resolveOnce(failure)
+        return
+      }
+      finish(failure, false)
     }
     try {
       void this.runtime.start(request, sink).then(
         acceptSession,
-        (error: unknown) => finish({
-          kind: 'error',
-          error: new Error(`Dream Runtime failed to start: ${errorMessage(error)}.`),
-        }, false),
+        rejectStart,
       )
     } catch (error) {
-      finish({ kind: 'error', error: new Error(`Dream Runtime failed to start: ${errorMessage(error)}.`) }, false)
+      rejectStart(error)
     }
 
     let outcome: RuntimeOutcome

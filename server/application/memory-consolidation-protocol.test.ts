@@ -110,11 +110,13 @@ describe('memory consolidation protocol', () => {
     'The API key is sk-proj-abcdefghijklmnopqrstuvwxyz123456.',
     'Set access_token=abcdefghijklmnopqrstuvwxyz1234567890.',
     'AWS_SECRET_ACCESS_KEY=abcdefghijklmnopqrstuvwxyz1234567890',
+    'aws_secret_access_key = abcdefghijklmnopqrstuvwxyz1234567890',
     'The bearer credential is eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c.',
     'Cookie: session_id=abcdefghijklmnopqrstuvwxyz1234567890',
     '.env contains DATABASE_URL=postgres://user:password@db.internal/app.',
     'The credential file is ~/.ssh/id_rsa.',
     'Use /Users/alice/.aws/credentials for authentication.',
+    'Use /root/.aws/credentials for authentication.',
     'Use ~/.kube/config to access the cluster.',
     'The registry token is stored in ~/.npmrc.',
   ])('rejects secret, token, cookie, env, and credential material: %s', (content) => {

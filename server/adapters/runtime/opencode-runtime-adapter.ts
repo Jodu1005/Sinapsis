@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { CommandRuntimeAvailabilityDetector, type RuntimeAvailability, type RuntimeAvailabilityDetector } from './runtime-profile'
 import { LfJsonlParser } from './lf-jsonl-parser'
 import type { ProcessHandle, ProcessRunner } from '../../ports/process-runner'
@@ -92,7 +93,7 @@ export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
       args,
       cwd: session.worktreePath,
       env: restricted
-        ? { ...session.profile.env, OPENCODE_CONFIG_CONTENT: RESTRICTED_CONFIG }
+        ? restrictedOpenCodeEnvironment(session)
         : session.profile.env,
       stdinMode: 'ignore',
     })
@@ -160,6 +161,20 @@ export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
     if (type === 'tool_start') sink({ kind: 'tool_start', taskId: session.taskId, toolName: stringValue(value.tool) ?? stringValue(part?.tool) ?? 'unknown', toolCallId: stringValue(value.id) ?? stringValue(part?.id) })
     if (type === 'tool_end') sink({ kind: 'tool_end', taskId: session.taskId, toolName: stringValue(value.tool) ?? stringValue(part?.tool) ?? 'unknown', toolCallId: stringValue(value.id) ?? stringValue(part?.id), success: value.success === true })
     if (type === 'error') sink({ kind: 'error', taskId: session.taskId, message: stringValue(value.message) ?? 'OpenCode reported an error.' })
+  }
+}
+
+function restrictedOpenCodeEnvironment(session: RuntimeSession): Record<string, string> {
+  const configDirectory = path.join(session.worktreePath, '.sinapsis-opencode-config')
+  return {
+    ...session.profile.env,
+    OPENCODE_CONFIG: '',
+    OPENCODE_CONFIG_DIR: configDirectory,
+    OPENCODE_CONFIG_CONTENT: RESTRICTED_CONFIG,
+    OPENCODE_DISABLE_PROJECT_CONFIG: 'true',
+    OPENCODE_PERMISSION: JSON.stringify(deniedOpenCodePermissions()),
+    OPENCODE_TEST_HOME: path.join(session.worktreePath, '.sinapsis-opencode-home'),
+    XDG_CONFIG_HOME: configDirectory,
   }
 }
 

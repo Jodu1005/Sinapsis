@@ -137,6 +137,25 @@ describe('MemoryConsolidator', () => {
     expect(runtime.cancelAttempts).toBe(1)
   })
 
+  it('waits for a delayed settled session and reports its cancellation failure', async () => {
+    const runtime = new DeferredFailingCancelRuntime()
+    const fixture = await createFixture({ runtime })
+    const operation = fixture.consolidator.consolidate(fixture.input)
+    await vi.waitFor(() => expect(fixture.runtime.starts).toHaveLength(1))
+
+    settle(fixture, { candidates: [] })
+    const beforeSession = await Promise.race([
+      operation.then(() => 'resolved' as const, () => 'rejected' as const),
+      Promise.resolve('pending' as const),
+    ])
+    expect(beforeSession).toBe('pending')
+
+    runtime.releaseStart()
+
+    await expect(operation).rejects.toThrow(/Runtime cancellation failed: cancel unavailable/)
+    expect(runtime.cancelAttempts).toBe(1)
+  })
+
   it('does not create a candidate that duplicates an accepted Memory after normalization', async () => {
     const fixture = await createFixture()
     fixture.input.acceptedMemories = [acceptedMemory({ content: 'User prefers Chinese.' })]
@@ -465,6 +484,15 @@ class DeferredStartRuntime extends FakeRuntimeAdapter {
 }
 
 class FailingCancelRuntime extends FakeRuntimeAdapter {
+  cancelAttempts = 0
+
+  override cancel(_session: RuntimeSession): void {
+    this.cancelAttempts += 1
+    throw new Error('cancel unavailable')
+  }
+}
+
+class DeferredFailingCancelRuntime extends DeferredStartRuntime {
   cancelAttempts = 0
 
   override cancel(_session: RuntimeSession): void {
