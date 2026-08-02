@@ -22,7 +22,7 @@ describe('MemoryConsolidator', () => {
     await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
   })
 
-  it('starts one independent task Runtime in the Dream run directory without conversation metadata', async () => {
+  it('starts one independent read-only conversation Runtime in the Dream run directory without conversation metadata or session reuse', async () => {
     const fixture = await createFixture()
     const operation = fixture.consolidator.consolidate(fixture.input)
     await vi.waitFor(() => expect(fixture.runtime.starts).toHaveLength(1))
@@ -30,11 +30,13 @@ describe('MemoryConsolidator', () => {
     const request = fixture.runtime.starts[0]!
     expect(request).toMatchObject({
       taskId: fixture.input.runId,
-      mode: 'task',
+      mode: 'conversation',
       worktreePath: path.join(fixture.dataDir, 'dream', fixture.input.runId),
       profile,
     })
     expect(request.conversation).toBeUndefined()
+    expect(fixture.runtime.resumes).toEqual([])
+    expect(fixture.runtime.inputs).toEqual([])
 
     settle(fixture, { candidates: [] })
     await expect(operation).resolves.toEqual([])
@@ -199,6 +201,49 @@ describe('MemoryConsolidator', () => {
     expect(fixture.repositories.created).toEqual([])
   })
 
+  it('rejects cross-channel Turn details before starting Runtime', async () => {
+    const fixture = await createFixture()
+    const foreignTurn = turnDetails([])
+    foreignTurn.turn.channelId = 'channel-2'
+    fixture.input.turns.push(foreignTurn)
+
+    const result = await observePreflight(fixture)
+
+    expect(result.error).toBeInstanceOf(Error)
+    expect((result.error as Error).message).toMatch(/turn-1.*channel-1/)
+    expect(fixture.runtime.starts).toHaveLength(0)
+  })
+
+  it('rejects a run ID that can escape or nest outside its Dream run directory', async () => {
+    const fixture = await createFixture()
+    fixture.input.runId = '../escaped-run'
+
+    const result = await observePreflight(fixture)
+
+    expect(result.error).toBeInstanceOf(Error)
+    expect((result.error as Error).message).toMatch(/safe letters, numbers, hyphens, and underscores/)
+    expect(fixture.runtime.starts).toHaveLength(0)
+  })
+
+  it('validates timeout and candidate limits at construction', async () => {
+    const fixture = await createFixture()
+    const options = {
+      repositories: fixture.repositories,
+      runtime: fixture.runtime,
+      dataDir: fixture.dataDir,
+      profile,
+    }
+
+    expect(() => new MemoryConsolidator({ ...options, timeoutMs: 0, maxCandidates: 20 }))
+      .toThrow(/timeoutMs must be a positive integer/)
+    expect(() => new MemoryConsolidator({ ...options, timeoutMs: 1.5, maxCandidates: 20 }))
+      .toThrow(/timeoutMs must be a positive integer/)
+    expect(() => new MemoryConsolidator({ ...options, timeoutMs: 1_000, maxCandidates: 0 }))
+      .toThrow(/maxCandidates must be an integer from 1 through 50/)
+    expect(() => new MemoryConsolidator({ ...options, timeoutMs: 1_000, maxCandidates: 51 }))
+      .toThrow(/maxCandidates must be an integer from 1 through 50/)
+  })
+
   it('cancels the independent session on Runtime error and creates no candidates', async () => {
     const fixture = await createFixture()
     const operation = fixture.consolidator.consolidate(fixture.input)
@@ -307,6 +352,17 @@ describe('MemoryConsolidator', () => {
         acceptedMemories: [] as MemoryRecord[],
       },
     }
+  }
+
+  async function observePreflight(fixture: Awaited<ReturnType<typeof createFixture>>) {
+    const operation = fixture.consolidator.consolidate(fixture.input)
+    const observed = operation.then(
+      () => ({ error: undefined }),
+      (error: unknown) => ({ error }),
+    )
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    if (fixture.runtime.starts.length > 0) settle(fixture, { candidates: [] })
+    return observed
   }
 })
 

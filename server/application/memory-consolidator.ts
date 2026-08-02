@@ -38,6 +38,12 @@ export class MemoryConsolidator {
   private readonly maxCandidates: number
 
   constructor(options: MemoryConsolidatorOptions) {
+    if (!Number.isInteger(options.timeoutMs) || options.timeoutMs < 1) {
+      throw new Error('MemoryConsolidator timeoutMs must be a positive integer.')
+    }
+    if (!Number.isInteger(options.maxCandidates) || options.maxCandidates < 1 || options.maxCandidates > 50) {
+      throw new Error('MemoryConsolidator maxCandidates must be an integer from 1 through 50.')
+    }
     this.repositories = options.repositories
     this.runtime = options.runtime
     this.dataDir = options.dataDir
@@ -47,9 +53,16 @@ export class MemoryConsolidator {
   }
 
   async consolidate(input: MemoryConsolidationInput): Promise<MemoryCandidate[]> {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(input.runId)) {
+      throw new Error('Dream runId must contain only safe letters, numbers, hyphens, and underscores.')
+    }
     const crossChannelMessage = input.messages.find((message) => message.channelId !== input.channel.id)
     if (crossChannelMessage) {
       throw new Error(`Message ${crossChannelMessage.id} does not belong to channel ${input.channel.id}.`)
+    }
+    const crossChannelTurn = input.turns.find((details) => details.turn.channelId !== input.channel.id)
+    if (crossChannelTurn) {
+      throw new Error(`Turn ${crossChannelTurn.turn.id} does not belong to channel ${input.channel.id}.`)
     }
 
     const runDirectory = path.join(this.dataDir, 'dream', input.runId)
@@ -199,7 +212,7 @@ function runtimeRequest(
 ): RuntimeTaskRequest {
   return {
     taskId: input.runId,
-    mode: 'task',
+    mode: 'conversation',
     title: `Dream memory consolidation for #${input.channel.name}`,
     description: JSON.stringify({
       instruction: 'Extract only durable, confirmed memories. Return exactly one JSON object with a candidates array that follows the Memory consolidation protocol.',

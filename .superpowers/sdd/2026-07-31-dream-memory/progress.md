@@ -32,10 +32,10 @@ Task 3 base: 56d4627
 Task 3 implementer: Gauss (019fc2ef-5600-7941-bedc-64ac851f77b6)
 Task 3 takeover: Gauss stalled without code changes after scope reduction
 Task 3 implementer: Beauvoir (019fc2f3-cacf-7171-ab20-9bc9fdcc4686)
-Task 2: fix round 2/5 implemented (migration 22 half-watermark cleanup; channel+thread Summary single-flight; AbortSignal timeout/cancel cleanup; Coordinator cancellation propagation; 489/489 tests; build passed)
 Task 3 protocol slice: complete (strict JSON/source/safety/max validation; normalized SHA-256 exports; 20/20 tests)
-Task 3 Runtime slice: complete (independent run directory/session, safe public prompt, settled parsing, atomic failure, artifact isolation, duplicate/conflict handling; 15/15 tests)
-Task 3 Runtime boundary hardening: complete (start timeout with late-session cancellation, channel provenance, ConversationSessionResult parsed.reply, relevant accepted Memory filtering, subject/key conflicts)
+Task 3 Runtime slice: complete (independent run directory/session, safe public prompt, settled parsing, atomic failure, artifact isolation, duplicate/conflict handling; 18/18 tests)
+Task 3 Runtime boundary hardening: complete (read-only one-shot conversation mode, start timeout with late-session cancellation, message/Turn channel provenance, safe runId, constructor bounds, ConversationSessionResult parsed.reply, relevant accepted Memory filtering, subject/key conflicts)
 Task 3 config slice: complete (Dream runtime/model/timeout/candidate-limit defaults and validation; 13/13 tests)
-Task 3 verification: focused 48/48; full suite 54 files and 529/529 tests; build and diff check passed
+Task 3: fix round 1/5 implemented (task mode replaced by read-only one-shot conversation mode; cross-channel Turn and unsafe runId rejected pre-start; constructor validates timeout and candidate bounds; 18/18 Runtime tests)
+Task 3 verification: focused 51/51; full suite 54 files and 532/532 tests; build and diff check passed
 Task 3: implementation complete; report written; ready for commit
