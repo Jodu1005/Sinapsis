@@ -256,6 +256,166 @@ describe('SQLite workspace repositories', () => {
     expect(database!.database.prepare(`
       SELECT message_id FROM memory_sources WHERE memory_id = ? ORDER BY message_id
     `).all(memory.id)).toContainEqual({ message_id: fourthSource.id })
+    expect(() => database!.database.prepare(`
+      INSERT INTO memory_sources (memory_id, candidate_id, message_id, turn_id) VALUES (?, ?, ?, ?)
+    `).run(memory.id, first.id, fourthSource.id, null)).toThrow(/candidate and Dream channel/)
+  })
+
+  it('uses the Dream channel when accepting a Global candidate as channel-scoped Memory', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const source = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Keep this channel-specific.',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'manual', from: null,
+      to: { createdAt: source.createdAt, id: source.id },
+    })
+    const candidate = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'global', channelId: null, kind: 'decision',
+      proposedContent: 'Use React.', rationale: 'Accepted for this channel.', confidence: 0.9, importance: 0.8,
+      sourceMessageIds: [source.id],
+    })
+
+    const memory = repositories.createMemoryFromCandidate({
+      candidateId: candidate.id, reviewedContent: 'Use React.', reviewedScope: 'channel',
+      occurredAt: new Date('2026-08-03T00:00:00.000Z'),
+    })
+
+    expect(memory).toMatchObject({ scope: 'channel', channelId: channel.id })
+    expect(repositories.listAcceptedMemories('channel', channel.id)).toEqual([
+      expect.objectContaining({ id: memory.id }),
+    ])
+    expect(repositories.listAcceptedMemories('global')).toEqual([])
+  })
+
+  it('reuses a Global Memory across Dream channels while retaining each candidate source provenance', async () => {
+    const { repositories } = await createRepositories()
+    const channelA = createChannel(repositories)
+    const workspaceB = repositories.createWorkspace({ name: 'Second workspace' })
+    repositories.createRepository({ workspaceId: workspaceB.id, name: 'second-repository', path: '/projects/second' })
+    const channelB = repositories.createChannel({ name: 'operations' })
+    const sourceA = repositories.createMessage({
+      channelId: channelA.id, senderType: 'human', authorName: 'Jodu', body: 'React is the standard.',
+    })
+    const sourceB = repositories.createMessage({
+      channelId: channelB.id, senderType: 'human', authorName: 'Jodu', body: 'Operations also use React.',
+    })
+    const candidateA = repositories.createMemoryCandidate({
+      dreamRunId: repositories.createDreamRun({
+        scope: 'channel', scopeId: channelA.id, trigger: 'manual', from: null,
+        to: { createdAt: sourceA.createdAt, id: sourceA.id },
+      }).id,
+      proposedScope: 'global', channelId: null, kind: 'fact', proposedContent: 'Frontend uses React.',
+      rationale: 'Channel A confirmation.', confidence: 0.9, importance: 0.8, sourceMessageIds: [sourceA.id],
+    })
+    const memory = repositories.createMemoryFromCandidate({
+      candidateId: candidateA.id, reviewedContent: 'Frontend uses React.', reviewedScope: 'global',
+      occurredAt: new Date('2026-08-03T00:00:00.000Z'),
+    })
+    const candidateB = repositories.createMemoryCandidate({
+      dreamRunId: repositories.createDreamRun({
+        scope: 'channel', scopeId: channelB.id, trigger: 'manual', from: null,
+        to: { createdAt: sourceB.createdAt, id: sourceB.id },
+      }).id,
+      proposedScope: 'global', channelId: null, kind: 'fact', proposedContent: 'Frontend uses React.',
+      rationale: 'Channel B confirmation.', confidence: 0.9, importance: 0.8, sourceMessageIds: [sourceB.id],
+    })
+
+    const reused = repositories.createMemoryFromCandidate({
+      candidateId: candidateB.id, reviewedContent: 'Frontend uses React.', reviewedScope: 'global',
+      occurredAt: new Date('2026-08-03T00:01:00.000Z'),
+    })
+
+    expect(reused.id).toBe(memory.id)
+    expect(repositories.getMemoryCandidate(candidateB.id)).toMatchObject({ status: 'accepted' })
+    expect(database!.database.prepare(`
+      SELECT candidate_id, message_id FROM memory_sources WHERE memory_id = ? ORDER BY candidate_id
+    `).all(memory.id)).toEqual([
+      { candidate_id: candidateA.id, message_id: sourceA.id },
+      { candidate_id: candidateB.id, message_id: sourceB.id },
+    ].sort((left, right) => left.candidate_id.localeCompare(right.candidate_id)))
+  })
+
+  it('rejects duplicate no-watermark Dream runs for a channel', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+
+    repositories.createDreamRun({ scope: 'channel', scopeId: channel.id, trigger: 'manual', from: null, to: null })
+
+    expect(() => repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'scheduled', from: null, to: null,
+    })).toThrow(/UNIQUE constraint failed/)
+  })
+
+  it('serializes concurrent candidate acceptance across SQLite connections', async () => {
+    const { repositories, publisher, databasePath } = await createRepositories()
+    const channel = createChannel(repositories)
+    const source = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Concurrent review.',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'manual', from: null,
+      to: { createdAt: source.createdAt, id: source.id },
+    })
+    const candidate = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Concurrent Memory.', rationale: 'Test.', confidence: 0.9, importance: 0.8,
+      sourceMessageIds: [source.id],
+    })
+    const secondDatabase = createSqliteDatabase(databasePath)
+    const secondPublisher = new RecordingPublisher()
+    const competing = new SqliteRepositories(secondDatabase, secondPublisher)
+
+    try {
+      const memory = repositories.createMemoryFromCandidate({
+        candidateId: candidate.id, reviewedContent: 'Concurrent Memory.', reviewedScope: 'channel',
+        occurredAt: new Date('2026-08-03T00:00:00.000Z'),
+      })
+
+      expect(() => competing.createMemoryFromCandidate({
+        candidateId: candidate.id, reviewedContent: 'Concurrent Memory.', reviewedScope: 'channel',
+        occurredAt: new Date('2026-08-03T00:00:01.000Z'),
+      })).toThrow(/already reviewed/)
+      expect(database!.database.prepare('SELECT COUNT(*) AS count FROM memories').get()).toEqual({ count: 1 })
+      expect(database!.database.prepare('SELECT COUNT(*) AS count FROM memory_sources WHERE memory_id = ?').get(memory.id))
+        .toEqual({ count: 1 })
+      expect(secondPublisher.events).toEqual([])
+      expect(publisher.events.map((event) => event.type)).toContain('memory.changed')
+    } finally {
+      secondDatabase.close()
+    }
+  })
+
+  it('rolls back a failed candidate acceptance without leaking Memory events', async () => {
+    const { repositories, publisher } = await createRepositories()
+    const channel = createChannel(repositories)
+    const source = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Rollback review.',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'manual', from: null,
+      to: { createdAt: source.createdAt, id: source.id },
+    })
+    const candidate = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Rollback Memory.', rationale: 'Test.', confidence: 0.9, importance: 0.8,
+      sourceMessageIds: [source.id],
+    })
+    const eventCount = publisher.events.length
+
+    expect(() => repositories.inTransaction(() => {
+      repositories.createMemoryFromCandidate({
+        candidateId: candidate.id, reviewedContent: 'Rollback Memory.', reviewedScope: 'channel',
+        occurredAt: new Date('2026-08-03T00:00:00.000Z'),
+      })
+      throw new Error('force review rollback')
+    })).toThrow('force review rollback')
+
+    expect(repositories.getMemoryCandidate(candidate.id)).toMatchObject({ status: 'pending' })
+    expect(database!.database.prepare('SELECT COUNT(*) AS count FROM memories').get()).toEqual({ count: 0 })
+    expect(database!.database.prepare('SELECT COUNT(*) AS count FROM memory_sources').get()).toEqual({ count: 0 })
+    expect(publisher.events).toHaveLength(eventCount)
   })
 
   it('upgrades an existing migration 18 database through migration 19', async () => {
@@ -272,6 +432,8 @@ describe('SQLite workspace repositories', () => {
 
     expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 19').get())
       .toEqual({ version: 19 })
+    expect((database.database.prepare('PRAGMA table_info(memory_sources)').all() as Array<{ name: string }>)
+      .map((column) => column.name)).toContain('candidate_id')
     expect(database.database.prepare('SELECT id FROM messages WHERE id = ?').get(message.id))
       .toEqual({ id: message.id })
   })

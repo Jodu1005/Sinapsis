@@ -1244,8 +1244,10 @@ export class SqliteRepositories implements WorkspaceRepositories {
       const candidate = this.getMemoryCandidate(input.candidateId)
       if (!candidate) throw new Error(`Memory candidate ${input.candidateId} does not exist.`)
       if (candidate.status !== 'pending') throw new Error(`Memory candidate ${input.candidateId} is already reviewed.`)
+      const dreamRun = this.getDreamRun(candidate.dreamRunId)
+      if (!dreamRun) throw new Error(`Dream run ${candidate.dreamRunId} does not exist.`)
       const reviewedContent = requireText(input.reviewedContent, 'Reviewed Memory content')
-      const reviewedChannelId = input.reviewedScope === 'channel' ? candidate.channelId : null
+      const reviewedChannelId = input.reviewedScope === 'channel' ? candidate.channelId ?? dreamRun.scopeId : null
       assertMemoryScope(input.reviewedScope, reviewedChannelId)
       const reviewedContentHash = contentHash(reviewedContent)
       const reviewedAt = input.occurredAt.toISOString()
@@ -1270,9 +1272,9 @@ export class SqliteRepositories implements WorkspaceRepositories {
         )
       }
       database.prepare(`
-        INSERT OR IGNORE INTO memory_sources (memory_id, message_id, turn_id)
-        SELECT ?, message_id, turn_id FROM memory_candidate_sources WHERE candidate_id = ?
-      `).run(memory.id, candidate.id)
+        INSERT OR IGNORE INTO memory_sources (memory_id, candidate_id, message_id, turn_id)
+        SELECT ?, ?, message_id, turn_id FROM memory_candidate_sources WHERE candidate_id = ?
+      `).run(memory.id, candidate.id, candidate.id)
       const accepted = database.prepare(`
         UPDATE memory_candidates
         SET status = 'accepted', reviewed_content = ?, reviewed_scope = ?, reviewed_at = ?

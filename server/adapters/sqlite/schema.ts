@@ -497,7 +497,7 @@ export function migrateSchema(database: DatabaseSync): void {
           CHECK((to_message_created_at IS NULL) = (to_message_id IS NULL))
         );
         CREATE UNIQUE INDEX dream_runs_channel_watermark_unique_idx
-          ON dream_runs(scope_id, to_message_created_at, to_message_id);
+          ON dream_runs(scope_id, COALESCE(to_message_created_at, ''), COALESCE(to_message_id, ''));
 
         CREATE TABLE dream_run_sources (
           dream_run_id TEXT NOT NULL REFERENCES dream_runs(id),
@@ -555,9 +555,10 @@ export function migrateSchema(database: DatabaseSync): void {
 
         CREATE TABLE memory_sources (
           memory_id TEXT NOT NULL REFERENCES memories(id),
+          candidate_id TEXT NOT NULL REFERENCES memory_candidates(id),
           message_id TEXT NOT NULL REFERENCES messages(id),
           turn_id TEXT REFERENCES conversation_turns(id),
-          PRIMARY KEY (memory_id, message_id)
+          PRIMARY KEY (memory_id, candidate_id, message_id)
         );
 
         CREATE TABLE thread_summaries (
@@ -601,14 +602,18 @@ export function migrateSchema(database: DatabaseSync): void {
         END;
         CREATE TRIGGER memory_sources_channel_match
         BEFORE INSERT ON memory_sources
-        WHEN (SELECT channel_id FROM messages WHERE id = NEW.message_id)
-          != (SELECT dream_runs.scope_id
-              FROM memories
-              JOIN memory_candidates ON memory_candidates.id = memories.source_candidate_id
-              JOIN dream_runs ON dream_runs.id = memory_candidates.dream_run_id
-              WHERE memories.id = NEW.memory_id)
+        WHEN NOT EXISTS (
+          SELECT 1
+          FROM memory_candidate_sources
+          JOIN memory_candidates ON memory_candidates.id = memory_candidate_sources.candidate_id
+          JOIN dream_runs ON dream_runs.id = memory_candidates.dream_run_id
+          JOIN messages ON messages.id = memory_candidate_sources.message_id
+          WHERE memory_candidate_sources.candidate_id = NEW.candidate_id
+            AND memory_candidate_sources.message_id = NEW.message_id
+            AND messages.channel_id = dream_runs.scope_id
+        )
         BEGIN
-          SELECT RAISE(ABORT, 'Memory source message must belong to the Dream channel.');
+          SELECT RAISE(ABORT, 'Memory source must belong to its candidate and Dream channel.');
         END;
         CREATE TRIGGER thread_summaries_channel_match
         BEFORE INSERT ON thread_summaries
