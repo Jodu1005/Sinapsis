@@ -64,3 +64,13 @@
 - Build：`npm run build`，PASS。
 - Diff check：`git diff --check`，PASS。
 - 仍未修改、未暂存 `.codex/` 和 `src/.DS_Store`。
+
+## 修复轮次 2
+
+- RED：新增两个 `WorkspaceShell` 竞态测试，分别覆盖“旧详情请求在途时收到终态事件”和“取消成功后详情重拉失败”。两项均按预期失败。
+- Turn 详情加载改为 single-flight + dirty 合并；请求在途期间到达的新快照会在当前请求完成后自动补拉，终态事件不会丢失。
+- 取消 API 成功后立即记录本地已确认取消状态。即使 Bootstrap 或详情刷新失败，界面也不会重新开放取消入口。
+- 详情刷新失败时保留旧详情，显示可恢复错误和“重试 Turn 详情”命令；重试成功后原位更新并清除错误。
+- 聚焦测试：6 files / 70 tests passed。
+- 全量测试：50 files / 421 tests passed。
+- `npm run build` 与 `git diff --check`：通过。

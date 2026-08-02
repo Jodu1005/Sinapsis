@@ -201,6 +201,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .task-filter-row button[aria-selected="true"] { border-color: #7bb99f; color: #075d4a; background: var(--green-soft); font-weight: 700; }
 .task-details-context { padding: 0; }
 .turn-details-context { padding: 0; }
+.turn-detail-refresh-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 16px; border-bottom: 1px solid #eed2d8; color: #8a2839; background: #fff7f8; font-size: 12px; }
+.turn-detail-refresh-error span { min-width: 0; overflow-wrap: anywhere; }
+.turn-detail-refresh-error .secondary-action { flex: 0 0 auto; min-height: 28px; padding: 4px 7px; font-size: 11px; }
 .turn-detail-panel { display: grid; }
 .turn-detail-title { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
 .turn-detail-title h2 { margin: 0; overflow: hidden; color: var(--ink); font-size: 14px; letter-spacing: 0; text-overflow: ellipsis; white-space: nowrap; }
