@@ -110,7 +110,7 @@ archiveMemory(memoryId: string, occurredAt: Date): MemoryRecord
 listDreamSourceMessages(runId: string): Message[]
 ```
 
-- [ ] **Step 1: 写 migration 16 的失败测试**
+- [ ] **Step 1: 写 migration 19 的失败测试**
 
 从已完成 migration 15 的 fixture 升级，覆盖：
 
@@ -147,7 +147,9 @@ npm test -- server/adapters/sqlite/sqlite-repositories.test.ts
 
 Expected: FAIL。
 
-- [ ] **Step 3: 添加 migration 16**
+- [ ] **Step 3: 添加 migration 19**
+
+迁移编号 16-18 已分别用于 Handoff、Turn 终态扩展和 Turn 恢复租约/幂等结果；Dream 从 19 开始。
 
 创建：
 
