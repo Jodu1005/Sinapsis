@@ -25,3 +25,4 @@ Task 2 implementation: 1db45dd feat: assemble confirmed memory context
 Task 2 reviewer: Galileo (019fc2c6-9c55-7ae0-a9d7-7d1870a1fb3d)
 Task 2: fix round 1/5 in progress (6 P1, 2 minor: summary CAS/order, warm invocation envelope, nonblocking refresh, prompt boundary, production wiring, tiny budget, watermark pair constraint)
 Task 2: fix round 1/5 implemented (summary CAS/rowid watermark API, warm/resume envelopes, safe JSON boundaries, nonblocking refresh, production rolling generator, exact tiny budgets, migration 22 pair constraints; 487/487 tests; build passed)
+Task 2: fix round 2/5 implemented (migration 22 half-watermark cleanup; channel+thread Summary single-flight; AbortSignal timeout/cancel cleanup; Coordinator cancellation propagation; 489/489 tests; build passed)

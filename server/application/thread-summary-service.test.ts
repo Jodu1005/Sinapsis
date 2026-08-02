@@ -99,10 +99,10 @@ describe('ThreadSummaryService', () => {
 
     const refreshed = await service.refresh(fixture.channelId, root.id)
 
-    expect(summarize).toHaveBeenCalledWith({
+    expect(summarize).toHaveBeenCalledWith(expect.objectContaining({
       previousSummary: 'Previous summary.',
       messages: [expect.objectContaining({ id: 'a-after', body: 'New despite inverse lexical ID' })],
-    })
+    }))
     expect(refreshed).toMatchObject({
       content: 'Updated summary.',
       throughMessageCreatedAt: '2026-08-01T08:01:00.000Z',
@@ -130,44 +130,71 @@ describe('ThreadSummaryService', () => {
 
     const refreshed = await service.refresh(fixture.channelId, root.id)
 
-    expect(summarize).toHaveBeenCalledWith({
+    expect(summarize).toHaveBeenCalledWith(expect.objectContaining({
       previousSummary: 'Previous summary.',
       messages: [
         expect.objectContaining({ id: 'a-before', body: 'Before fallback boundary' }),
         expect.objectContaining({ id: 'z-after', body: 'After fallback boundary' }),
       ],
-    })
+    }))
     expect(refreshed).toMatchObject({ throughMessageId: 'z-after' })
   })
 
-  it('keeps the newer Summary when two refreshes finish out of order', async () => {
+  it('single-flights concurrent refreshes for the same channel and Thread', async () => {
     const fixture = await createFixture()
     const root = fixture.messages.postHuman(fixture.channelId, 'Thread root')
     const first = fixture.messages.postHuman(fixture.channelId, 'First reply', null, root.id)
     fixture.at(root.id, '2026-08-01T08:00:00.000Z')
     fixture.at(first.id, '2026-08-01T08:01:00.000Z')
-    const firstGeneration = deferred<string>()
-    const secondGeneration = deferred<string>()
-    const summarize = vi.fn()
-      .mockImplementationOnce(() => firstGeneration.promise)
-      .mockImplementationOnce(() => secondGeneration.promise)
-    const service = new ThreadSummaryService(fixture.repositories, { summarize })
+    const generation = deferred<string>()
+    const summarize = vi.fn(() => generation.promise)
+    const service = new ThreadSummaryService(fixture.repositories, { summarize }, { timeoutMs: 1_000 })
 
-    const staleRefresh = service.refresh(fixture.channelId, root.id)
+    const firstRefresh = service.refresh(fixture.channelId, root.id)
+    const secondRefresh = service.refresh(fixture.channelId, root.id)
     await vi.waitFor(() => expect(summarize).toHaveBeenCalledTimes(1))
-    const second = fixture.messages.postHuman(fixture.channelId, 'Second reply', null, root.id)
-    fixture.at(second.id, '2026-08-01T08:02:00.000Z')
-    const newerRefresh = service.refresh(fixture.channelId, root.id)
-    await vi.waitFor(() => expect(summarize).toHaveBeenCalledTimes(2))
+    generation.resolve('Shared summary.')
 
-    secondGeneration.resolve('Newer summary.')
-    const newer = await newerRefresh
-    firstGeneration.resolve('Stale summary.')
-    const stale = await staleRefresh
+    const [firstResult, secondResult] = await Promise.all([firstRefresh, secondRefresh])
+    expect(firstResult).toEqual(secondResult)
+    expect(firstResult).toMatchObject({ content: 'Shared summary.', throughMessageId: first.id })
+    expect(summarize).toHaveBeenCalledTimes(1)
+  })
 
-    expect(newer).toMatchObject({ content: 'Newer summary.', throughMessageId: second.id })
-    expect(stale).toEqual(newer)
-    expect(fixture.repositories.getThreadSummary(fixture.channelId, root.id)).toEqual(newer)
+  it('aborts a timed-out generation, clears single-flight state, and allows a later refresh', async () => {
+    const fixture = await createFixture()
+    const root = fixture.messages.postHuman(fixture.channelId, 'Thread root')
+    let firstSignal: AbortSignal | undefined
+    const summarize = vi.fn()
+      .mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
+        firstSignal = signal
+        return new Promise<string>(() => undefined)
+      })
+      .mockImplementationOnce(async () => 'Retry summary.')
+    const service = new ThreadSummaryService(fixture.repositories, { summarize }, { timeoutMs: 5 })
+
+    await expect(service.refresh(fixture.channelId, root.id)).resolves.toBeUndefined()
+    expect(firstSignal?.aborted).toBe(true)
+    await expect(service.refresh(fixture.channelId, root.id)).resolves.toMatchObject({ content: 'Retry summary.' })
+    expect(summarize).toHaveBeenCalledTimes(2)
+  })
+
+  it('aborts the generator signal when maintenance is cancelled', async () => {
+    const fixture = await createFixture()
+    const root = fixture.messages.postHuman(fixture.channelId, 'Thread root')
+    let signal: AbortSignal | undefined
+    const summarize = vi.fn(({ signal: currentSignal }: { signal: AbortSignal }) => {
+      signal = currentSignal
+      return new Promise<string>(() => undefined)
+    })
+    const service = new ThreadSummaryService(fixture.repositories, { summarize }, { timeoutMs: 1_000 })
+
+    const refresh = service.refresh(fixture.channelId, root.id)
+    await vi.waitFor(() => expect(signal).toBeDefined())
+    service.cancel(fixture.channelId, root.id)
+
+    await expect(refresh).resolves.toBeUndefined()
+    expect(signal?.aborted).toBe(true)
   })
 
   it('generates a deterministic rolling Summary within the production hard limit', async () => {
@@ -175,7 +202,11 @@ describe('ThreadSummaryService', () => {
     const root = fixture.messages.postHuman(fixture.channelId, 'Thread root')
     const longReply = fixture.messages.postHuman(fixture.channelId, `Newest ${'x'.repeat(8_000)}`, null, root.id)
     const generator = new DeterministicRollingThreadSummaryGenerator()
-    const input = { previousSummary: `Earlier ${'y'.repeat(8_000)}`, messages: [root, longReply] }
+    const input = {
+      previousSummary: `Earlier ${'y'.repeat(8_000)}`,
+      messages: [root, longReply],
+      signal: new AbortController().signal,
+    }
 
     const first = await generator.summarize(input)
     const second = await generator.summarize(input)

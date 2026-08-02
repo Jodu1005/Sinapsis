@@ -20,16 +20,20 @@
 - GREEN 专项：`npm test -- --run server/adapters/sqlite/sqlite-repositories.test.ts server/application/context-assembler.test.ts server/application/thread-summary-service.test.ts server/application/channel-turn-coordinator.test.ts server/application/conversation-session-service.test.ts`，5 个文件、132/132 通过。
 - Fix round 1 RED：仓储 Summary 可被乱序 refresh 回退；删除水位 fallback 会漏同毫秒逆序 ID；warm/resume 丢失调用协议；refresh 挂起阻塞 Turn；历史文本可形成同级指令标题；production 未装配 generator；极小预算超界；水位双列可被直接 SQL 拆开。
 - Fix round 1 GREEN：专项 6 个文件、148/148 通过。
-- GREEN 全量：`npm test -- --run`，52 个文件、487/487 通过。
+- Fix round 2 RED：migration 21 既存半水位在 trigger 创建后仍残留；同一 Thread 并发 refresh 重复调用 generator；悬挂 generator 无 timeout/cancel signal，且 Coordinator 取消不传播 maintenance abort。
+- Fix round 2 GREEN：SQLite/Thread Summary/Coordinator 专项 3 个文件、113/113 通过。
+- GREEN 全量：`npm test -- --run`，52 个文件、489/489 通过。
 - Build：`npm run build` 通过，包括 `tsc --noEmit` 与 Vite production build。
 - Diff check：`git diff --check` 通过。
 
 ## 增量与边界
 
 - Summary upsert 在 `BEGIN IMMEDIATE` 事务中按同 Thread 消息的 `created_at,rowid` 比较水位；旧水位或相同水位不会覆盖当前 Summary。测试覆盖双 refresh 乱序完成。
-- migration 22 通过 INSERT/UPDATE trigger 约束两个水位列同时为 `NULL` 或同时非空，并覆盖 migration 21 升级和直接 SQL 失败。
+- migration 22 在创建 INSERT/UPDATE trigger 前，将既存“仅一个水位列为 NULL”的行保守修复为双 `NULL`；随后约束两个水位列同时为 `NULL` 或同时非空。测试覆盖 migration 21 半水位升级和直接 SQL 失败，migration 21 保持不变。
 - 每层历史以单行 safe JSON 编码，`<`、`>`、`&` 转为 Unicode escape；Memory、Summary 和 message 中的闭合标记或“当前调用指令”只能留在 JSON string 内。
 - Summary 刷新入口已由 production composition root 默认装配并覆盖 next-Turn 可见、失败不阻断、悬挂不阻塞与 Timeline 不调用。
+- `ThreadSummaryService` 按 channel+thread single-flight；generator 接收 `AbortSignal`。维护默认 5 秒超时且测试可注入短 timeout，超时或显式 cancel 会 abort 并在 `finally` 清理 in-flight，允许后续 refresh 重试。
+- Coordinator 取消 Thread Turn 时调用可选 Summary cancel，但不等待维护结束；Timeline 或未提供 cancel 的实现不受影响。
 - Summary 刷新失败时，ContextAssembler 会继续使用旧 Summary 及水位后的公开消息，保持当前对话可用。
 
 ## 改动文件
@@ -55,3 +59,4 @@
 
 - `tokenBudget` 沿用既有参数名，但实现按需求简报使用字符数而非模型 tokenizer 计数；后续若切换为真实 token 预算，需要统一替换成本函数和相应测试。
 - 默认 rolling generator 是确定性的有界文本滚动器，不做模型级语义压缩；接口仍保留为可替换依赖，后续可接 Runtime-backed summarizer。
+- Service 会在 timeout/cancel 后停止等待并发出 abort；替换 generator 若要立即释放自身外部资源，仍需正确响应传入的 `AbortSignal`。

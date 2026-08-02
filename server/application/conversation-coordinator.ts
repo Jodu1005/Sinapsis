@@ -16,7 +16,7 @@ export interface ConversationCoordinatorOptions {
   messages?: ChannelMessageService
   sessions?: ConversationSessionService
   contextAssembler?: ContextAssembler
-  threadSummaryService?: Pick<ThreadSummaryService, 'refresh'>
+  threadSummaryService?: Pick<ThreadSummaryService, 'refresh'> & Partial<Pick<ThreadSummaryService, 'cancel'>>
   turnCoordinator?: ChannelTurnCoordinator
 }
 

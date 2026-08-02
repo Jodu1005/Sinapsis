@@ -76,7 +76,7 @@ export interface ChannelTurnCoordinatorOptions {
   messages?: ChannelMessageService
   sessions?: ConversationSessions
   contextAssembler?: ContextAssembler
-  threadSummaryService?: Pick<ThreadSummaryService, 'refresh'>
+  threadSummaryService?: Pick<ThreadSummaryService, 'refresh'> & Partial<Pick<ThreadSummaryService, 'cancel'>>
   queue?: InvocationQueue
   handoffPolicy?: HandoffPolicy
   events?: DomainEventPublisher
@@ -146,7 +146,7 @@ export class ChannelTurnCoordinator {
   private readonly repositories: WorkspaceRepositories
   private readonly sessions: ConversationSessions
   private readonly contextAssembler: ContextAssembler
-  private readonly threadSummaryService?: Pick<ThreadSummaryService, 'refresh'>
+  private readonly threadSummaryService?: Pick<ThreadSummaryService, 'refresh'> & Partial<Pick<ThreadSummaryService, 'cancel'>>
   private readonly queue: InvocationQueue
   private readonly handoffPolicy: HandoffPolicy
   private readonly events?: DomainEventPublisher
@@ -438,6 +438,7 @@ export class ChannelTurnCoordinator {
     const turn = this.repositories.getConversationTurn(turnId)
     if (!turn) throw new DomainError(`Conversation turn ${turnId} does not exist.`)
     if (isTerminal(turn)) return turn
+    this.cancelThreadSummary(turn)
     const execution = this.executions.get(turnId)
     if (execution) {
       execution.cancelled = true
@@ -1257,6 +1258,15 @@ export class ChannelTurnCoordinator {
       void this.threadSummaryService.refresh(turn.channelId, turn.threadRootMessageId).catch(() => undefined)
     } catch {
       // A stale Summary plus messages after its watermark remains a valid fallback context.
+    }
+  }
+
+  private cancelThreadSummary(turn: ConversationTurn): void {
+    if (!this.threadSummaryService?.cancel || turn.threadRootMessageId === null) return
+    try {
+      this.threadSummaryService.cancel(turn.channelId, turn.threadRootMessageId)
+    } catch {
+      // Summary maintenance must not block Turn cancellation.
     }
   }
 

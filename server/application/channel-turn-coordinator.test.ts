@@ -394,7 +394,8 @@ describe('ChannelTurnCoordinator', () => {
 
   it('cancels a Thread Turn without waiting for a pending Summary refresh', async () => {
     const refresh = vi.fn<ThreadSummaryService['refresh']>(() => new Promise(() => undefined))
-    const fixture = await createFixture({ threadSummaryService: { refresh } })
+    const cancelSummary = vi.fn<ThreadSummaryService['cancel']>()
+    const fixture = await createFixture({ threadSummaryService: { refresh, cancel: cancelSummary } })
     fixture.createAgent('Responder', [])
     const root = fixture.postHuman('Thread root')
     const started = fixture.coordinator.start(fixture.postHuman('@Responder continue', root.id))
@@ -407,6 +408,8 @@ describe('ChannelTurnCoordinator', () => {
 
     expect(cancelled.status).toBe('cancelled')
     expect(completion.status).toBe('cancelled')
+    expect(cancelSummary).toHaveBeenCalledOnce()
+    expect(cancelSummary).toHaveBeenCalledWith(fixture.channel.id, root.id)
   })
 
   it('does not block a Thread reply when Summary refresh fails', async () => {
@@ -2000,7 +2003,7 @@ describe('ChannelTurnCoordinator', () => {
     realQueue?: boolean
     handoffPolicy?: HandoffPolicy
     channelSystemKey?: string
-    threadSummaryService?: Pick<ThreadSummaryService, 'refresh'>
+    threadSummaryService?: Pick<ThreadSummaryService, 'refresh'> & Partial<Pick<ThreadSummaryService, 'cancel'>>
   } = {}) {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-turn-'))
     database = createSqliteDatabase(path.join(temporaryDirectory, 'sinapsis.sqlite'))

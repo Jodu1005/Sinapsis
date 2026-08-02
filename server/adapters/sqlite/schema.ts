@@ -730,6 +730,11 @@ export function migrateSchema(database: DatabaseSync): void {
     const twentySecondMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 22').get()
     if (!twentySecondMigration) {
       database.exec(`
+        UPDATE thread_summaries
+        SET through_message_created_at = NULL, through_message_id = NULL
+        WHERE (through_message_created_at IS NULL AND through_message_id IS NOT NULL)
+           OR (through_message_created_at IS NOT NULL AND through_message_id IS NULL);
+
         CREATE TRIGGER thread_summaries_watermark_pair_insert
         BEFORE INSERT ON thread_summaries
         WHEN (NEW.through_message_created_at IS NULL AND NEW.through_message_id IS NOT NULL)

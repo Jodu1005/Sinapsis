@@ -560,23 +560,24 @@ describe('SQLite workspace repositories', () => {
     database!.close()
     database = undefined
     downgradeThreadSummaryConstraintsToVersion21(databasePath)
+    const version21 = new DatabaseSync(databasePath)
+    version21.prepare(`
+      INSERT INTO thread_summaries (
+        channel_id, thread_root_message_id, content, through_message_created_at, through_message_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, NULL, ?, ?)
+    `).run(
+      channel.id, root.id, 'Legacy half-watermark summary.', root.createdAt, root.createdAt, root.updatedAt,
+    )
+    version21.close()
 
     database = createSqliteDatabase(databasePath)
     expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 22').get())
       .toEqual({ version: 22 })
-    expect(() => database!.database.prepare(`
-      INSERT INTO thread_summaries (
-        channel_id, thread_root_message_id, content, through_message_created_at, through_message_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      channel.id, root.id, 'Invalid partial watermark.', root.createdAt, null, root.createdAt, root.updatedAt,
-    )).toThrow(/watermark/i)
-
-    database.database.prepare(`
-      INSERT INTO thread_summaries (
-        channel_id, thread_root_message_id, content, through_message_created_at, through_message_id, created_at, updated_at
-      ) VALUES (?, ?, ?, NULL, NULL, ?, ?)
-    `).run(channel.id, root.id, 'Legacy empty watermark.', root.createdAt, root.updatedAt)
+    expect(new SqliteRepositories(database, new RecordingPublisher()).getThreadSummary(channel.id, root.id)).toMatchObject({
+      content: 'Legacy half-watermark summary.',
+      throughMessageCreatedAt: null,
+      throughMessageId: null,
+    })
     expect(() => database!.database.prepare(`
       UPDATE thread_summaries SET through_message_id = ? WHERE channel_id = ? AND thread_root_message_id = ?
     `).run(root.id, channel.id, root.id)).toThrow(/watermark/i)
