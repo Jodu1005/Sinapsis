@@ -510,6 +510,91 @@ describe('SQLite workspace repositories', () => {
     ].sort((left, right) => left.candidate_id.localeCompare(right.candidate_id)))
   })
 
+  it('restores original migration 19 sources without crossing Global and channel Memory provenance', async () => {
+    const { repositories, databasePath } = await createRepositories()
+    const channel = createChannel(repositories)
+    const source = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Shared source.',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'manual', from: null,
+      to: { createdAt: source.createdAt, id: source.id },
+    })
+    const globalCandidate = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'global', channelId: null, kind: 'fact', proposedContent: 'Shared fact.',
+      rationale: 'Global.', confidence: 0.9, importance: 0.8, sourceMessageIds: [source.id],
+    })
+    const channelCandidate = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact', proposedContent: 'Shared fact.',
+      rationale: 'Channel.', confidence: 0.9, importance: 0.8, sourceMessageIds: [source.id],
+    })
+    const globalMemory = repositories.createMemoryFromCandidate({
+      candidateId: globalCandidate.id, reviewedContent: 'Shared fact.', reviewedScope: 'global',
+      occurredAt: new Date('2026-08-05T00:00:00.000Z'),
+    })
+    const channelMemory = repositories.createMemoryFromCandidate({
+      candidateId: channelCandidate.id, reviewedContent: 'Shared fact.', reviewedScope: 'channel',
+      occurredAt: new Date('2026-08-05T00:01:00.000Z'),
+    })
+    database!.close()
+    database = undefined
+    restoreOriginalMigration19Schema(databasePath)
+
+    database = createSqliteDatabase(databasePath)
+
+    expect(database.database.prepare(`
+      SELECT memory_id, candidate_id FROM memory_sources WHERE message_id = ? ORDER BY memory_id
+    `).all(source.id)).toEqual([
+      { memory_id: globalMemory.id, candidate_id: globalCandidate.id },
+      { memory_id: channelMemory.id, candidate_id: channelCandidate.id },
+    ].sort((left, right) => left.memory_id.localeCompare(right.memory_id)))
+  })
+
+  it('preserves ac16 migration 19 candidate provenance when one Memory has two candidates for one source', async () => {
+    const { repositories, databasePath } = await createRepositories()
+    const channel = createChannel(repositories)
+    const source = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Shared ac16 source.',
+    })
+    const firstCandidate = repositories.createMemoryCandidate({
+      dreamRunId: repositories.createDreamRun({
+        scope: 'channel', scopeId: channel.id, trigger: 'manual', from: null,
+        to: { createdAt: source.createdAt, id: source.id },
+      }).id,
+      proposedScope: 'global', channelId: null, kind: 'fact', proposedContent: 'Ac16 fact.',
+      rationale: 'First.', confidence: 0.9, importance: 0.8, sourceMessageIds: [source.id],
+    })
+    const memory = repositories.createMemoryFromCandidate({
+      candidateId: firstCandidate.id, reviewedContent: 'Ac16 fact.', reviewedScope: 'global',
+      occurredAt: new Date('2026-08-05T00:00:00.000Z'),
+    })
+    const secondCandidate = repositories.createMemoryCandidate({
+      dreamRunId: repositories.createDreamRun({
+        scope: 'channel', scopeId: channel.id, trigger: 'scheduled', from: null, to: null,
+      }).id,
+      proposedScope: 'global', channelId: null, kind: 'fact', proposedContent: 'Ac16 fact.',
+      rationale: 'Second.', confidence: 0.9, importance: 0.8, sourceMessageIds: [source.id],
+    })
+    repositories.createMemoryFromCandidate({
+      candidateId: secondCandidate.id, reviewedContent: 'Ac16 fact.', reviewedScope: 'global',
+      occurredAt: new Date('2026-08-05T00:01:00.000Z'),
+    })
+    database!.close()
+    database = undefined
+    restoreAc16Migration19Schema(databasePath)
+
+    database = createSqliteDatabase(databasePath)
+
+    expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 20').get())
+      .toEqual({ version: 20 })
+    expect(database.database.prepare(`
+      SELECT candidate_id, message_id FROM memory_sources WHERE memory_id = ? ORDER BY candidate_id
+    `).all(memory.id)).toEqual([
+      { candidate_id: firstCandidate.id, message_id: source.id },
+      { candidate_id: secondCandidate.id, message_id: source.id },
+    ].sort((left, right) => left.candidate_id.localeCompare(right.candidate_id)))
+  })
+
   it('rejects moving an accepted task back to queued', () => {
     const acceptedTask: Task = {
       id: 'task-1',
@@ -1957,6 +2042,16 @@ describe('SQLite workspace repositories', () => {
       DROP INDEX dream_runs_channel_watermark_unique_idx;
       CREATE UNIQUE INDEX dream_runs_channel_watermark_unique_idx
         ON dream_runs(scope_id, to_message_created_at, to_message_id);
+      DELETE FROM schema_migrations WHERE version = 20;
+      COMMIT;
+    `)
+    legacy.close()
+  }
+
+  function restoreAc16Migration19Schema(databasePath: string): void {
+    const legacy = new DatabaseSync(databasePath)
+    legacy.exec(`
+      BEGIN;
       DELETE FROM schema_migrations WHERE version = 20;
       COMMIT;
     `)

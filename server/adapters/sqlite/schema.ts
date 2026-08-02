@@ -626,63 +626,93 @@ export function migrateSchema(database: DatabaseSync): void {
         DROP INDEX dream_runs_channel_watermark_unique_idx;
         CREATE UNIQUE INDEX dream_runs_channel_watermark_unique_idx
           ON dream_runs(scope_id, COALESCE(to_message_created_at, ''), COALESCE(to_message_id, ''));
-
-        DROP TRIGGER memory_sources_channel_match;
-        CREATE TABLE memory_sources_v20 (
-          memory_id TEXT NOT NULL REFERENCES memories(id),
-          candidate_id TEXT NOT NULL REFERENCES memory_candidates(id),
-          message_id TEXT NOT NULL REFERENCES messages(id),
-          turn_id TEXT REFERENCES conversation_turns(id),
-          PRIMARY KEY (memory_id, candidate_id, message_id)
-        );
-        INSERT INTO memory_sources_v20 (memory_id, candidate_id, message_id, turn_id)
-        SELECT
-          legacy.memory_id,
-          COALESCE(
-            (
-              SELECT candidates.id
-              FROM memory_candidate_sources
-              JOIN memory_candidates AS candidates ON candidates.id = memory_candidate_sources.candidate_id
-              WHERE memory_candidate_sources.message_id = legacy.message_id
-                AND candidates.status = 'accepted'
-                AND candidates.reviewed_content = memories.content
-              ORDER BY candidates.reviewed_at, candidates.id
-              LIMIT 1
-            ),
-            memories.source_candidate_id
-          ),
-          legacy.message_id,
-          legacy.turn_id
-        FROM memory_sources AS legacy
-        JOIN memories ON memories.id = legacy.memory_id;
-        DROP TABLE memory_sources;
-        CREATE TABLE memory_sources (
-          memory_id TEXT NOT NULL REFERENCES memories(id),
-          candidate_id TEXT NOT NULL REFERENCES memory_candidates(id),
-          message_id TEXT NOT NULL REFERENCES messages(id),
-          turn_id TEXT REFERENCES conversation_turns(id),
-          PRIMARY KEY (memory_id, candidate_id, message_id)
-        );
-        INSERT INTO memory_sources (memory_id, candidate_id, message_id, turn_id)
-        SELECT memory_id, candidate_id, message_id, turn_id FROM memory_sources_v20;
-        DROP TABLE memory_sources_v20;
-
-        CREATE TRIGGER memory_sources_candidate_match
-        BEFORE INSERT ON memory_sources
-        WHEN NOT EXISTS (
-          SELECT 1
-          FROM memory_candidate_sources
-          JOIN memory_candidates ON memory_candidates.id = memory_candidate_sources.candidate_id
-          JOIN dream_runs ON dream_runs.id = memory_candidates.dream_run_id
-          JOIN messages ON messages.id = memory_candidate_sources.message_id
-          WHERE memory_candidate_sources.candidate_id = NEW.candidate_id
-            AND memory_candidate_sources.message_id = NEW.message_id
-            AND messages.channel_id = dream_runs.scope_id
-        )
-        BEGIN
-          SELECT RAISE(ABORT, 'Memory source must belong to its candidate and Dream channel.');
-        END;
       `)
+
+      if (!hasColumn(database, 'memory_sources', 'candidate_id')) {
+        database.exec(`
+          DROP TRIGGER IF EXISTS memory_sources_channel_match;
+          DROP TRIGGER IF EXISTS memory_sources_candidate_match;
+          CREATE TABLE memory_sources_v20 (
+            memory_id TEXT NOT NULL REFERENCES memories(id),
+            candidate_id TEXT NOT NULL REFERENCES memory_candidates(id),
+            message_id TEXT NOT NULL REFERENCES messages(id),
+            turn_id TEXT REFERENCES conversation_turns(id),
+            PRIMARY KEY (memory_id, candidate_id, message_id)
+          );
+          INSERT INTO memory_sources_v20 (memory_id, candidate_id, message_id, turn_id)
+          SELECT
+            legacy.memory_id,
+            COALESCE(
+              (
+                SELECT candidates.id
+                FROM memory_candidate_sources
+                JOIN memory_candidates AS candidates ON candidates.id = memory_candidate_sources.candidate_id
+                JOIN dream_runs ON dream_runs.id = candidates.dream_run_id
+                WHERE memory_candidate_sources.candidate_id = memories.source_candidate_id
+                  AND memory_candidate_sources.message_id = legacy.message_id
+                  AND candidates.status = 'accepted'
+                  AND candidates.reviewed_content = memories.content
+                  AND candidates.reviewed_scope = memories.scope
+                  AND (memories.scope = 'global' OR dream_runs.scope_id = memories.channel_id)
+                LIMIT 1
+              ),
+              (
+                SELECT candidates.id
+                FROM memory_candidate_sources
+                JOIN memory_candidates AS candidates ON candidates.id = memory_candidate_sources.candidate_id
+                JOIN dream_runs ON dream_runs.id = candidates.dream_run_id
+                WHERE memory_candidate_sources.message_id = legacy.message_id
+                  AND candidates.status = 'accepted'
+                  AND candidates.reviewed_content = memories.content
+                  AND candidates.reviewed_scope = memories.scope
+                  AND (memories.scope = 'global' OR dream_runs.scope_id = memories.channel_id)
+                ORDER BY candidates.reviewed_at, candidates.id
+                LIMIT 1
+              ),
+              (
+                SELECT candidates.id
+                FROM memory_candidates AS candidates
+                JOIN dream_runs ON dream_runs.id = candidates.dream_run_id
+                WHERE candidates.id = memories.source_candidate_id
+                  AND candidates.status = 'accepted'
+                  AND candidates.reviewed_scope = memories.scope
+                  AND (memories.scope = 'global' OR dream_runs.scope_id = memories.channel_id)
+                LIMIT 1
+              )
+            ),
+            legacy.message_id,
+            legacy.turn_id
+          FROM memory_sources AS legacy
+          JOIN memories ON memories.id = legacy.memory_id;
+          DROP TABLE memory_sources;
+          CREATE TABLE memory_sources (
+            memory_id TEXT NOT NULL REFERENCES memories(id),
+            candidate_id TEXT NOT NULL REFERENCES memory_candidates(id),
+            message_id TEXT NOT NULL REFERENCES messages(id),
+            turn_id TEXT REFERENCES conversation_turns(id),
+            PRIMARY KEY (memory_id, candidate_id, message_id)
+          );
+          INSERT INTO memory_sources (memory_id, candidate_id, message_id, turn_id)
+          SELECT memory_id, candidate_id, message_id, turn_id FROM memory_sources_v20;
+          DROP TABLE memory_sources_v20;
+
+          CREATE TRIGGER memory_sources_candidate_match
+          BEFORE INSERT ON memory_sources
+          WHEN NOT EXISTS (
+            SELECT 1
+            FROM memory_candidate_sources
+            JOIN memory_candidates ON memory_candidates.id = memory_candidate_sources.candidate_id
+            JOIN dream_runs ON dream_runs.id = memory_candidates.dream_run_id
+            JOIN messages ON messages.id = memory_candidate_sources.message_id
+            WHERE memory_candidate_sources.candidate_id = NEW.candidate_id
+              AND memory_candidate_sources.message_id = NEW.message_id
+              AND messages.channel_id = dream_runs.scope_id
+          )
+          BEGIN
+            SELECT RAISE(ABORT, 'Memory source must belong to its candidate and Dream channel.');
+          END;
+        `)
+      }
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(20, new Date().toISOString())
     }
 
