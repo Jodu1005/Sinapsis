@@ -88,10 +88,11 @@ interface TurnExecution {
   turnId: string
   channelId: string
   cancelled: boolean
+  claimLost: boolean
   activities: Map<string, TurnActivity>
   invocationIds: Set<string>
   timedOutInvocationIds: Set<string>
-  recoveryOwnerId: string
+  recoveryOwnerId: string | null
 }
 
 interface RankedSpeaker {
@@ -122,6 +123,13 @@ interface InvocationCancellationBatch {
 }
 
 const duplicateCheckCancelled = Symbol('duplicate_check_cancelled')
+
+class ConversationTurnClaimLostError extends Error {
+  constructor(readonly turnId: string) {
+    super(`Conversation turn ${turnId} recovery claim was lost.`)
+    this.name = 'ConversationTurnClaimLostError'
+  }
+}
 
 const maxParticipationCandidates = 3
 const maxInitialSpeakers = 2
@@ -182,22 +190,23 @@ export class ChannelTurnCoordinator {
       .map((agentId) => memberAgents.find((agent) => agent.id === agentId))
       .filter((agent): agent is Agent => agent !== undefined)
 
-    const turn = this.repositories.createClaimedConversationTurn({
+    const turn = this.repositories.createConversationTurn({
       channelId: message.channelId,
       triggerMessageId: message.id,
       threadRootMessageId: message.threadRootMessageId ?? null,
       mode: route.mode,
       maxRounds: maxConversationRounds,
-    }, this.recoveryOwnerId, this.now())
+    })
     this.publish('conversation.turn_created', 'conversation_turn', turn.id)
     const execution: TurnExecution = {
       turnId: turn.id,
       channelId: turn.channelId,
       cancelled: false,
+      claimLost: false,
       activities: new Map(),
       invocationIds: new Set(),
       timedOutInvocationIds: new Set(),
-      recoveryOwnerId: this.recoveryOwnerId,
+      recoveryOwnerId: null,
     }
     this.executions.set(turn.id, execution)
     this.setActivity(execution, null, 'screening')
@@ -218,10 +227,22 @@ export class ChannelTurnCoordinator {
 
     for (const { turn, invocations } of recoverable) {
       if (this.executions.has(turn.id)) continue
+      const execution: TurnExecution = {
+        turnId: turn.id,
+        channelId: turn.channelId,
+        cancelled: false,
+        claimLost: false,
+        activities: new Map(),
+        invocationIds: new Set(invocations.map((invocation) => invocation.id)),
+        timedOutInvocationIds: new Set(),
+        recoveryOwnerId: this.recoveryOwnerId,
+      }
+      this.executions.set(turn.id, execution)
       const message = this.repositories.getMessage(turn.triggerMessageId)
       if (!message) {
         this.failTurn(turn.id, new Error('trigger_message_missing'))
         this.repositories.releaseConversationTurnClaim(turn.id, this.recoveryOwnerId)
+        this.executions.delete(turn.id)
         continue
       }
       const memberIds = new Set(this.repositories.getChannelAgentIds(turn.channelId))
@@ -237,22 +258,13 @@ export class ChannelTurnCoordinator {
         } catch (error) {
           this.failTurn(turn.id, error)
           this.repositories.releaseConversationTurnClaim(turn.id, this.recoveryOwnerId)
+          this.executions.delete(turn.id)
           continue
         }
       }
       const targetAgents = targetIds
         .map((agentId) => this.repositories.getAgent(agentId))
         .filter((agent): agent is Agent => agent !== undefined)
-      const execution: TurnExecution = {
-        turnId: turn.id,
-        channelId: turn.channelId,
-        cancelled: false,
-        activities: new Map(),
-        invocationIds: new Set(invocations.map((invocation) => invocation.id)),
-        timedOutInvocationIds: new Set(),
-        recoveryOwnerId: this.recoveryOwnerId,
-      }
-      this.executions.set(turn.id, execution)
       if (invocations.length === 0) this.setActivity(execution, null, phaseForTurnStatus(turn.status))
       for (const invocation of invocations) this.setActivity(execution, invocation.agentId, 'queued')
       void this.runClaimedTurn(execution, turn, message, targetAgents, memberIds, memberAgents)
@@ -268,17 +280,22 @@ export class ChannelTurnCoordinator {
     memberIds: Set<string>,
     memberAgents: Agent[],
   ): Promise<ConversationTurn> {
-    const heartbeat = setInterval(() => {
-      if (!this.repositories.renewConversationTurnClaim(turn.id, execution.recoveryOwnerId, this.now())) {
-        execution.cancelled = true
-      }
-    }, this.recoveryHeartbeatMs)
-    heartbeat.unref?.()
+    const heartbeat = execution.recoveryOwnerId === null
+      ? undefined
+      : setInterval(() => {
+          if (!this.repositories.renewConversationTurnClaim(turn.id, execution.recoveryOwnerId!, this.now())) {
+            execution.cancelled = true
+            execution.claimLost = true
+          }
+        }, this.recoveryHeartbeatMs)
+    heartbeat?.unref?.()
     try {
       return await this.executeTurn(execution, turn, message, targetAgents, memberIds, memberAgents)
     } finally {
-      clearInterval(heartbeat)
-      this.repositories.releaseConversationTurnClaim(turn.id, execution.recoveryOwnerId)
+      if (heartbeat) clearInterval(heartbeat)
+      if (execution.recoveryOwnerId !== null) {
+        this.repositories.releaseConversationTurnClaim(turn.id, execution.recoveryOwnerId)
+      }
       this.executions.delete(turn.id)
     }
   }
@@ -310,18 +327,18 @@ export class ChannelTurnCoordinator {
         }
       }
       const agents = memberAgents.filter((agent) => agent.status !== 'offline' && agent.status !== 'error')
-      const candidates = persistedParticipants.length > 0
-        ? persistedParticipants.flatMap((participant) => {
+      const initialParticipants = persistedParticipants.filter((participant) => participant.source !== 'handoff')
+      const candidates = initialParticipants.length > 0
+        ? initialParticipants.flatMap((participant) => {
             const agent = agents.find((candidate) => candidate.id === participant.agentId)
             return agent ? [{ agent, score: participant.matcherScore ?? 0 }] : []
           })
         : matchResponsibilities(message.body, agents, maxParticipationCandidates)
       const participants = candidates.map((candidate, index) => {
         const existing = existingParticipants.get(candidate.agent.id)
-        const participant = existing ?? this.repositories.createTurnParticipant({
-          turnId: turn.id, agentId: candidate.agent.id, source: 'responsibility', rank: index + 1,
-          matcherScore: candidate.score,
-        })
+        const participant = existing ?? this.writeTurnState(turn.id, () => this.repositories.createTurnParticipant({
+          turnId: turn.id, agentId: candidate.agent.id, source: 'responsibility', rank: index + 1, matcherScore: candidate.score,
+        }))
         if (!existing) this.publish('conversation.participant_updated', 'turn_participant', participant.id)
         return { candidate, participant }
       })
@@ -426,7 +443,7 @@ export class ChannelTurnCoordinator {
       this.cancelParticipantsForInvocations(turnId, activeInvocations.map((invocation) => invocation.id), 'turn_cancelled')
       this.cancelParticipants(turnId)
     }
-    this.failAcceptedHandoffs(turnId, 'turn_cancelled')
+    this.failAcceptedHandoffs(turnId, 'turn_cancelled', true)
     const cancelled = this.repositories.updateConversationTurn(turnId, {
       status: 'cancelled',
       completedAt: this.now().toISOString(),
@@ -541,10 +558,10 @@ export class ChannelTurnCoordinator {
   ): Promise<ConversationTurn> {
     const existing = this.repositories.listTurnParticipants(initialTurn.id)
       .find((participant) => participant.agentId === agent.id)
-    const participant = existing ?? this.repositories.createTurnParticipant({
+    const participant = existing ?? this.writeTurnState(initialTurn.id, () => this.repositories.createTurnParticipant({
       turnId: initialTurn.id, agentId: agent.id, source: 'direct', rank: 1, matcherScore: null,
       decision: 'speak', speakingOrder: 1, status: 'selected',
-    })
+    }))
     if (!existing) this.publish('conversation.participant_updated', 'turn_participant', participant.id)
     if (agent.status === 'offline' || agent.status === 'error') {
       this.failActiveInvocationsForAgent(initialTurn.id, agent.id, 'agent_unavailable')
@@ -590,11 +607,11 @@ export class ChannelTurnCoordinator {
       const unavailable = agent.status === 'offline' || agent.status === 'error'
       const existing = this.repositories.listTurnParticipants(initialTurn.id)
         .find((participant) => participant.agentId === agent.id)
-      const participant = existing ?? this.repositories.createTurnParticipant({
+      const participant = existing ?? this.writeTurnState(initialTurn.id, () => this.repositories.createTurnParticipant({
         turnId: initialTurn.id, agentId: agent.id, source, rank: index + 1, matcherScore: null,
         decision: 'speak', speakingOrder: index + 1,
         status: unavailable ? 'failed' : 'selected', reason: unavailable ? 'agent_unavailable' : null,
-      })
+      }))
       if (!existing) this.publish('conversation.participant_updated', 'turn_participant', participant.id)
       if (unavailable) this.failActiveInvocationsForAgent(initialTurn.id, agent.id, 'agent_unavailable')
       if (!unavailable) availableAgents.push(agent)
@@ -685,11 +702,11 @@ export class ChannelTurnCoordinator {
         const invocation = this.repositories.listAgentInvocations(turn.id)
           .find((candidate) => candidate.id === participationInvocationId)
         if (invocation && (invocation.status === 'queued' || invocation.status === 'running')) {
-          this.repositories.updateAgentInvocation(invocation.id, {
+          this.writeTurnState(turn.id, () => this.repositories.updateAgentInvocation(invocation.id, {
             status: 'failed',
             completedAt: this.now().toISOString(),
             errorCode: 'timeout',
-          })
+          }))
           this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
         }
         execution.activities.delete(agent.id)
@@ -903,7 +920,7 @@ export class ChannelTurnCoordinator {
     for (const target of outcome.response.handoffTo) {
       const existing = this.findHandoff(turn.id, outcome.invocation.id, target.agentId)
       if (existing) continue
-      const handoff = this.repositories.createConversationHandoff({
+      const handoff = this.writeTurnState(turn.id, () => this.repositories.createConversationHandoff({
         turnId: turn.id,
         sourceInvocationId: outcome.invocation.id,
         fromAgentId,
@@ -913,7 +930,7 @@ export class ChannelTurnCoordinator {
         round: turn.currentRound + 1,
         status: 'rejected',
         reason: 'handoff_disabled_for_parallel_mode',
-      })
+      }))
       this.publish('conversation.handoff_created', 'conversation_handoff', handoff.id)
     }
   }
@@ -956,7 +973,7 @@ export class ChannelTurnCoordinator {
       handoffEdges: edges,
     })
     for (const rejected of decision.rejected) {
-      const handoff = this.repositories.createConversationHandoff({
+      const handoff = this.writeTurnState(turn.id, () => this.repositories.createConversationHandoff({
         turnId: turn.id,
         sourceInvocationId: proposal.sourceInvocationId,
         fromAgentId: proposal.fromAgentId,
@@ -966,12 +983,12 @@ export class ChannelTurnCoordinator {
         round: this.currentTurn(turn.id).currentRound + 1,
         status: 'rejected',
         reason: rejected.reason,
-      })
+      }))
       this.publish('conversation.handoff_created', 'conversation_handoff', handoff.id)
     }
     for (const accepted of decision.accepted) {
       const round = this.currentTurn(turn.id).currentRound + 1
-      const handoff = this.repositories.createConversationHandoff({
+      const handoff = this.writeTurnState(turn.id, () => this.repositories.createConversationHandoff({
         turnId: turn.id,
         sourceInvocationId: proposal.sourceInvocationId,
         fromAgentId: proposal.fromAgentId,
@@ -980,7 +997,7 @@ export class ChannelTurnCoordinator {
         question: accepted.question,
         round,
         status: 'accepted',
-      })
+      }))
       this.publish('conversation.handoff_created', 'conversation_handoff', handoff.id)
       edges.push({ fromAgentId: proposal.fromAgentId, toAgentId: accepted.agentId })
       reservedAgentIds.add(accepted.agentId)
@@ -1015,7 +1032,7 @@ export class ChannelTurnCoordinator {
       const item = worklist.shift()!
       const agent = this.repositories.getAgent(item.toAgentId)
       if (!agent) {
-        this.finishHandoff(item.handoffId, 'failed', 'target_agent_missing')
+        this.finishHandoff(initialTurn.id, item.handoffId, 'failed', 'target_agent_missing')
         continue
       }
       const turn = this.transitionTurn(initialTurn.id, { status: 'handoff', currentRound: item.round })
@@ -1034,7 +1051,7 @@ export class ChannelTurnCoordinator {
             speakingOrder: nextSpeakingOrder(this.repositories, turn.id),
             reason: null,
             }, { failedRecoverySource: 'handoff' })
-        : this.repositories.createTurnParticipant({
+        : this.writeTurnState(turn.id, () => this.repositories.createTurnParticipant({
             turnId: turn.id,
             agentId: agent.id,
             source: 'handoff',
@@ -1043,7 +1060,7 @@ export class ChannelTurnCoordinator {
             decision: 'speak',
             status: 'selected',
             speakingOrder: nextSpeakingOrder(this.repositories, turn.id),
-          })
+          }))
       if (!existing) this.publish('conversation.participant_updated', 'turn_participant', participant.id)
       const outcome = await this.respond(
         execution,
@@ -1060,6 +1077,7 @@ export class ChannelTurnCoordinator {
         const failedParticipant = this.repositories.listTurnParticipants(turn.id)
           .find((candidate) => candidate.agentId === agent.id)
         this.finishHandoff(
+          turn.id,
           item.handoffId,
           'failed',
           execution.cancelled ? 'turn_cancelled' : failedParticipant?.reason ?? 'response_failed',
@@ -1067,7 +1085,7 @@ export class ChannelTurnCoordinator {
         continue
       }
       if (execution.cancelled) continue
-      this.finishHandoff(item.handoffId, 'completed', null)
+      this.finishHandoff(turn.id, item.handoffId, 'completed', null)
       spokenAgentIds.add(agent.id)
       this.addValidatedHandoffs(turn, {
         fromAgentId: agent.id,
@@ -1100,7 +1118,7 @@ export class ChannelTurnCoordinator {
     let invocation = this.repositories.listAgentInvocations(turn.id)
       .find((candidate) => candidate.idempotencyKey === idempotencyKey)
     if (!invocation) {
-      invocation = this.repositories.createAgentInvocation({
+      invocation = this.writeTurnState(turn.id, () => this.repositories.createAgentInvocation({
         turnId: turn.id,
         agentId: agent.id,
         kind: input.kind,
@@ -1108,7 +1126,7 @@ export class ChannelTurnCoordinator {
         round: input.round,
         idempotencyKey,
         sourceInvocationId: input.sourceInvocationId,
-      })
+      }))
       this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
     }
     onInvocationCreated?.(invocation.id)
@@ -1130,7 +1148,10 @@ export class ChannelTurnCoordinator {
         sequence: this.invocationSequence++,
         run: async () => {
           if (execution.cancelled) throw new ConversationInvocationCancelledError(activeInvocation.id)
-          this.repositories.updateAgentInvocation(activeInvocation.id, { status: 'running', startedAt: this.now().toISOString() })
+          this.writeTurnState(turn.id, () => this.repositories.updateAgentInvocation(
+            activeInvocation.id,
+            { status: 'running', startedAt: this.now().toISOString() },
+          ))
           this.publish('conversation.invocation_updated', 'agent_invocation', activeInvocation.id)
           this.setActivity(execution, agent.id, input.phase)
           return this.sessions.invoke({
@@ -1152,8 +1173,10 @@ export class ChannelTurnCoordinator {
       })
       if (execution.cancelled) throw new ConversationInvocationCancelledError(activeInvocation.id)
       if (execution.timedOutInvocationIds.has(activeInvocation.id)) throw new Error('timeout')
-      if (!this.repositories.renewConversationTurnClaim(turn.id, execution.recoveryOwnerId, this.now())) {
+      if (execution.recoveryOwnerId !== null
+        && !this.repositories.renewConversationTurnClaim(turn.id, execution.recoveryOwnerId, this.now())) {
         execution.cancelled = true
+        execution.claimLost = true
         throw new ConversationInvocationCancelledError(activeInvocation.id)
       }
       if (!input.deferSettlement) {
@@ -1169,18 +1192,18 @@ export class ChannelTurnCoordinator {
       }
       return { invocation, result }
     } catch (error) {
-      if (!execution.timedOutInvocationIds.has(activeInvocation.id)) {
+      if (!execution.claimLost && !execution.timedOutInvocationIds.has(activeInvocation.id)) {
         const current = this.repositories.listAgentInvocations(turn.id)
           .find((candidate) => candidate.id === activeInvocation.id)
         if (current && (current.status === 'queued' || current.status === 'running')) {
-          this.repositories.updateAgentInvocation(activeInvocation.id, {
+          this.writeTurnState(turn.id, () => this.repositories.updateAgentInvocation(activeInvocation.id, {
             status: execution.cancelled
               || isInvocationCancellation(error)
               ? 'cancelled'
               : 'failed',
             completedAt: this.now().toISOString(),
             errorCode: errorMessage(error),
-          })
+          }))
           this.publish('conversation.invocation_updated', 'agent_invocation', activeInvocation.id)
         }
       }
@@ -1199,11 +1222,26 @@ export class ChannelTurnCoordinator {
     }))
   }
 
+  private writeTurnState<T>(turnId: string, work: () => T): T {
+    const execution = this.executions.get(turnId)
+    if (!execution || execution.recoveryOwnerId === null) return work()
+    if (execution.claimLost) throw new ConversationTurnClaimLostError(turnId)
+    const result = this.repositories.withConversationTurnClaim(
+      turnId,
+      execution.recoveryOwnerId,
+      work,
+    )
+    if (result.applied) return result.value
+    execution.cancelled = true
+    execution.claimLost = true
+    throw new ConversationTurnClaimLostError(turnId)
+  }
+
   private updateParticipant(
     turnId: string,
     agentId: string,
     patch: Parameters<WorkspaceRepositories['updateTurnParticipant']>[2],
-    options: { failedRecoverySource?: 'handoff' } = {},
+    options: { failedRecoverySource?: 'handoff'; bypassClaim?: boolean } = {},
   ): TurnParticipant {
     const current = this.currentParticipant(turnId, agentId)
     if (current.status === 'cancelled'
@@ -1221,7 +1259,9 @@ export class ChannelTurnCoordinator {
       && !recoversFailedThroughHandoff) {
       return current
     }
-    const participant = this.repositories.updateTurnParticipant(turnId, agentId, patch)
+    const participant = options.bypassClaim
+      ? this.repositories.updateTurnParticipant(turnId, agentId, patch)
+      : this.writeTurnState(turnId, () => this.repositories.updateTurnParticipant(turnId, agentId, patch))
     this.publish('conversation.participant_updated', 'turn_participant', participant.id)
     return participant
   }
@@ -1234,17 +1274,17 @@ export class ChannelTurnCoordinator {
   }
 
   private transitionTurn(turnId: string, patch: Parameters<WorkspaceRepositories['updateConversationTurn']>[1]): ConversationTurn {
-    const turn = this.repositories.updateConversationTurn(turnId, patch)
+    const turn = this.writeTurnState(turnId, () => this.repositories.updateConversationTurn(turnId, patch))
     this.publish('conversation.turn_updated', 'conversation_turn', turn.id)
     return turn
   }
 
   private completeTurn(turnId: string): ConversationTurn {
     this.failAcceptedHandoffs(turnId, 'turn_completed_without_handoff_terminal_state')
-    const turn = this.repositories.updateConversationTurn(turnId, {
+    const turn = this.writeTurnState(turnId, () => this.repositories.updateConversationTurn(turnId, {
       status: 'completed',
       completedAt: this.now().toISOString(),
-    })
+    }))
     this.publish('conversation.turn_completed', 'conversation_turn', turn.id)
     return turn
   }
@@ -1257,10 +1297,10 @@ export class ChannelTurnCoordinator {
     if (!hasFailure) return this.completeTurn(turnId)
 
     this.failAcceptedHandoffs(turnId, 'turn_completed_without_handoff_terminal_state')
-    const turn = this.repositories.updateConversationTurn(turnId, {
+    const turn = this.writeTurnState(turnId, () => this.repositories.updateConversationTurn(turnId, {
       status: spokenCount > 0 ? 'partial' : 'failed',
       completedAt: this.now().toISOString(),
-    })
+    }))
     this.publish('conversation.turn_completed', 'conversation_turn', turn.id)
     return turn
   }
@@ -1280,26 +1320,30 @@ export class ChannelTurnCoordinator {
       }
     }
     this.failAcceptedHandoffs(turnId, failureReason)
-    const turn = this.repositories.updateConversationTurn(turnId, {
+    const turn = this.writeTurnState(turnId, () => this.repositories.updateConversationTurn(turnId, {
       status: hasPublicReply ? 'partial' : 'failed',
       completedAt: this.now().toISOString(),
-    })
+    }))
     this.publish('conversation.turn_completed', 'conversation_turn', turn.id)
     return turn
   }
 
   private finishHandoff(
+    turnId: string,
     handoffId: string,
     status: Extract<ReturnType<WorkspaceRepositories['updateConversationHandoff']>['status'], 'completed' | 'failed'>,
     reason: string | null,
+    bypassClaim = false,
   ): void {
-    const handoff = this.repositories.updateConversationHandoff(handoffId, { status, reason })
+    const handoff = bypassClaim
+      ? this.repositories.updateConversationHandoff(handoffId, { status, reason })
+      : this.writeTurnState(turnId, () => this.repositories.updateConversationHandoff(handoffId, { status, reason }))
     this.publish('conversation.turn_updated', 'conversation_turn', handoff.turnId)
   }
 
-  private failAcceptedHandoffs(turnId: string, reason: string): void {
+  private failAcceptedHandoffs(turnId: string, reason: string, bypassClaim = false): void {
     for (const handoff of this.repositories.listConversationHandoffs(turnId)) {
-      if (handoff.status === 'accepted') this.finishHandoff(handoff.id, 'failed', reason)
+      if (handoff.status === 'accepted') this.finishHandoff(turnId, handoff.id, 'failed', reason, bypassClaim)
     }
   }
 
@@ -1340,11 +1384,11 @@ export class ChannelTurnCoordinator {
   private failActiveInvocationsForAgent(turnId: string, agentId: string, errorCode: string): void {
     for (const invocation of this.repositories.listAgentInvocations(turnId)) {
       if (invocation.agentId !== agentId || (invocation.status !== 'queued' && invocation.status !== 'running')) continue
-      this.repositories.updateAgentInvocation(invocation.id, {
+      this.writeTurnState(turnId, () => this.repositories.updateAgentInvocation(invocation.id, {
         status: 'failed',
         completedAt: this.now().toISOString(),
         errorCode,
-      })
+      }))
       this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
     }
   }
@@ -1377,7 +1421,12 @@ export class ChannelTurnCoordinator {
   private cancelParticipants(turnId: string): void {
     for (const participant of this.repositories.listTurnParticipants(turnId)) {
       if (!isTerminalParticipant(participant)) {
-        this.updateParticipant(turnId, participant.agentId, { status: 'cancelled', reason: 'turn_cancelled' })
+        this.updateParticipant(
+          turnId,
+          participant.agentId,
+          { status: 'cancelled', reason: 'turn_cancelled' },
+          { bypassClaim: true },
+        )
       }
     }
   }
@@ -1393,7 +1442,12 @@ export class ChannelTurnCoordinator {
       .map((invocation) => invocation.agentId))
     for (const participant of this.repositories.listTurnParticipants(turnId)) {
       if (agentIds.has(participant.agentId) && !isTerminalParticipant(participant)) {
-        this.updateParticipant(turnId, participant.agentId, { status: 'cancelled', reason })
+        this.updateParticipant(
+          turnId,
+          participant.agentId,
+          { status: 'cancelled', reason },
+          { bypassClaim: true },
+        )
       }
     }
   }

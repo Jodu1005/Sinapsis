@@ -1249,6 +1249,176 @@ describe('ChannelTurnCoordinator', () => {
     expect(fixture.agentMessages()).toEqual([])
   })
 
+  it('lets an expired claim move across Coordinators without the old owner cancelling the takeover Invocation', async () => {
+    const fixture = await createFixture()
+    const agent = fixture.createAgent('Lease Recovery', ['restart'])
+    const message = fixture.postHuman('@Lease Recovery restart')
+    const turn = fixture.repositories.createConversationTurn({
+      channelId: fixture.channel.id,
+      triggerMessageId: message.id,
+      threadRootMessageId: null,
+      mode: 'direct',
+      maxRounds: 3,
+    })
+    fixture.repositories.createTurnParticipant({
+      turnId: turn.id, agentId: agent.id, source: 'direct', rank: 1, matcherScore: null,
+      decision: 'speak', speakingOrder: 1, status: 'selected',
+    })
+    fixture.repositories.createAgentInvocation({
+      turnId: turn.id, agentId: agent.id, kind: 'response', priority: 'human_direct', round: 1,
+      idempotencyKey: `${turn.id}:1:response:${agent.id}`, sourceInvocationId: null,
+      status: 'running', startedAt: '2026-08-01T00:00:00.000Z',
+    })
+    const firstGate = deferred<ConversationSessionResult>()
+    const secondGate = deferred<ConversationSessionResult>()
+    const firstSessions = new ScriptedSessions()
+    const secondSessions = new ScriptedSessions()
+    firstSessions.handle = () => firstGate.promise
+    secondSessions.handle = () => secondGate.promise
+    let firstNow = new Date('2026-08-02T00:00:00.000Z')
+    let secondNow = new Date('2026-08-02T00:00:01.000Z')
+    const first = new ChannelTurnCoordinator({
+      repositories: fixture.repositories,
+      sessions: firstSessions,
+      recoveryOwnerId: 'owner-a',
+      recoveryClaimTtlMs: 30_000,
+      recoveryHeartbeatMs: 1_000_000,
+      now: () => firstNow,
+    })
+    const secondDatabase = createSqliteDatabase(path.join(temporaryDirectory!, 'sinapsis.sqlite'))
+    const secondRepositories = new SqliteRepositories(secondDatabase, new RecordingPublisher())
+    const second = new ChannelTurnCoordinator({
+      repositories: secondRepositories,
+      sessions: secondSessions,
+      recoveryOwnerId: 'owner-b',
+      recoveryClaimTtlMs: 30_000,
+      recoveryHeartbeatMs: 1_000_000,
+      now: () => secondNow,
+    })
+
+    try {
+      await first.recover()
+      await waitFor(() => firstSessions.calls.length === 1)
+      await second.recover()
+      expect(secondSessions.calls).toEqual([])
+
+      secondNow = new Date('2026-08-02T00:00:31.000Z')
+      await second.recover()
+      await waitFor(() => secondSessions.calls.length === 1)
+      expect(secondRepositories.listAgentInvocations(turn.id)[0]).toMatchObject({ status: 'running' })
+
+      firstNow = new Date('2026-08-02T00:00:32.000Z')
+      firstGate.resolve(publicReply('stale owner reply'))
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(secondRepositories.listAgentInvocations(turn.id)[0]).toMatchObject({ status: 'running' })
+      expect(fixture.agentMessages()).toEqual([])
+
+      secondGate.resolve(publicReply('takeover reply'))
+      await waitFor(() => secondRepositories.getConversationTurn(turn.id)?.status === 'completed')
+      expect(secondRepositories.listAgentInvocations(turn.id)[0]).toMatchObject({ status: 'settled' })
+      expect(fixture.agentMessages().map((persisted) => persisted.body)).toEqual(['takeover reply'])
+    } finally {
+      secondDatabase.close()
+    }
+  })
+
+  it('replays settled duplicate, response, and handoff state without treating handoff Participants as first-round candidates', async () => {
+    const fixture = await createFixture()
+    const alpha = fixture.createAgent('Settled Alpha', ['persisted chain'])
+    const beta = fixture.createAgent('Settled Beta', ['persisted chain'])
+    const gamma = fixture.createAgent('Settled Gamma', ['follow-up'])
+    const message = fixture.postHuman('persisted chain')
+    const turn = fixture.repositories.createConversationTurn({
+      channelId: fixture.channel.id,
+      triggerMessageId: message.id,
+      threadRootMessageId: null,
+      mode: 'ordinary',
+      maxRounds: 3,
+    })
+    fixture.repositories.updateConversationTurn(turn.id, { status: 'handoff', currentRound: 2 })
+    for (const [agent, rank, matcherScore] of [[alpha, 1, 10], [beta, 2, -1]] as const) {
+      fixture.repositories.createTurnParticipant({
+        turnId: turn.id, agentId: agent.id, source: 'responsibility', rank, matcherScore,
+        decision: 'speak', confidence: 1, proposedAngle: agent.identity,
+        speakingOrder: rank, status: 'selected',
+      })
+      fixture.repositories.createAgentInvocation({
+        turnId: turn.id, agentId: agent.id, kind: 'participation', priority: 'participation', round: 0,
+        idempotencyKey: `${turn.id}:0:participation:${agent.id}`, sourceInvocationId: null,
+        status: 'settled', completedAt: '2026-08-01T00:00:00.000Z',
+        resultJson: JSON.stringify(participation('speak', 1)),
+      })
+    }
+    fixture.repositories.createTurnParticipant({
+      turnId: turn.id, agentId: gamma.id, source: 'handoff', rank: 3, matcherScore: null,
+      decision: 'speak', speakingOrder: 3, status: 'selected',
+    })
+    const alphaResponse = fixture.repositories.createAgentInvocation({
+      turnId: turn.id, agentId: alpha.id, kind: 'response', priority: 'human_ordinary', round: 1,
+      idempotencyKey: `${turn.id}:1:response:${alpha.id}`, sourceInvocationId: null, status: 'running',
+    })
+    fixture.repositories.settleConversationInvocation({
+      invocationId: alphaResponse.id,
+      recoveryOwnerId: null,
+      resultJson: JSON.stringify(publicReply('settled alpha', [{ agentId: gamma.id, question: 'settled handoff?' }])),
+      participantPatch: { status: 'spoken' },
+      publicReply: { authorName: alpha.identity, body: 'settled alpha' },
+      occurredAt: new Date('2026-08-01T00:00:01.000Z'),
+    })
+    const betaDuplicate = fixture.repositories.createAgentInvocation({
+      turnId: turn.id, agentId: beta.id, kind: 'duplicate_check', priority: 'duplicate_check', round: 1,
+      idempotencyKey: `${turn.id}:1:duplicate_check:${beta.id}`, sourceInvocationId: null, status: 'running',
+    })
+    fixture.repositories.settleConversationInvocation({
+      invocationId: betaDuplicate.id,
+      recoveryOwnerId: null,
+      resultJson: JSON.stringify(duplicate('speak')),
+      occurredAt: new Date('2026-08-01T00:00:02.000Z'),
+    })
+    const betaResponse = fixture.repositories.createAgentInvocation({
+      turnId: turn.id, agentId: beta.id, kind: 'response', priority: 'human_ordinary', round: 1,
+      idempotencyKey: `${turn.id}:1:response:${beta.id}`, sourceInvocationId: null, status: 'running',
+    })
+    fixture.repositories.settleConversationInvocation({
+      invocationId: betaResponse.id,
+      recoveryOwnerId: null,
+      resultJson: JSON.stringify(publicReply('settled beta')),
+      participantPatch: { status: 'spoken' },
+      publicReply: { authorName: beta.identity, body: 'settled beta' },
+      occurredAt: new Date('2026-08-01T00:00:03.000Z'),
+    })
+    const handoff = fixture.repositories.createConversationHandoff({
+      turnId: turn.id, sourceInvocationId: alphaResponse.id, fromAgentId: alpha.id,
+      requestedTargetAgentId: gamma.id, toAgentId: gamma.id, question: 'settled handoff?',
+      round: 2, status: 'completed',
+    })
+    const gammaResponse = fixture.repositories.createAgentInvocation({
+      turnId: turn.id, agentId: gamma.id, kind: 'handoff_response', priority: 'automatic_handoff', round: 2,
+      idempotencyKey: `${turn.id}:2:handoff_response:${gamma.id}`,
+      sourceInvocationId: alphaResponse.id, status: 'running',
+    })
+    fixture.repositories.settleConversationInvocation({
+      invocationId: gammaResponse.id,
+      recoveryOwnerId: null,
+      resultJson: JSON.stringify(publicReply('settled gamma')),
+      participantPatch: { status: 'spoken' },
+      publicReply: { authorName: gamma.identity, body: 'settled gamma' },
+      occurredAt: new Date('2026-08-01T00:00:04.000Z'),
+    })
+    const messageIds = fixture.agentMessages().map((persisted) => persisted.id)
+    fixture.sessions.handle = async () => publicReply('unexpected replay')
+
+    await fixture.coordinator.recover()
+    await waitFor(() => fixture.repositories.getConversationTurn(turn.id)?.status === 'completed')
+
+    expect(fixture.sessions.calls).toEqual([])
+    expect(fixture.agentMessages().map((persisted) => persisted.id)).toEqual(messageIds)
+    expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({ id: handoff.id, round: 2, status: 'completed' }),
+    ])
+    expect(fixture.repositories.listAgentInvocations(turn.id)).toHaveLength(6)
+  })
+
   it('keeps a persisted Invocation retryable when stale persistence fails', async () => {
     const fixture = await createFixture()
     const agent = fixture.createAgent('Retryable', ['restart'])

@@ -1028,7 +1028,10 @@ describe('SQLite workspace repositories', () => {
       identity: 'Recovery Agent', mentionName: 'recovery-agent', runtime: 'opencode', capabilityTags: [],
       maxConcurrentTasks: 1, command: 'opencode', args: [], model: '', env: {},
     })
-    const createTurn = (status: 'screening' | 'completed' | 'cancelled', priority: 'human_direct' | 'automatic_handoff') => {
+    const createTurn = (
+      status: 'screening' | 'completed' | 'partial' | 'cancelled' | 'failed',
+      priority: 'human_direct' | 'automatic_handoff',
+    ) => {
       const message = repositories.createMessage({
         channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: `${status}-${priority}`,
       })
@@ -1050,7 +1053,9 @@ describe('SQLite workspace repositories', () => {
     const lowerPriority = createTurn('screening', 'automatic_handoff')
     repositories.updateAgentInvocation(lowerPriority.invocation.id, { status: 'queued', startedAt: null })
     const completed = createTurn('completed', 'automatic_handoff')
+    const partial = createTurn('partial', 'human_direct')
     const cancelled = createTurn('cancelled', 'human_direct')
+    const failed = createTurn('failed', 'human_direct')
     const liveMessage = repositories.createMessage({
       channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'live claimed turn',
     })
@@ -1084,7 +1089,11 @@ describe('SQLite workspace repositories', () => {
       expect(claimed.map((projection) => projection.turn.id)).not.toContain(live.id)
       expect(repositories.getConversationTurn(completed.turn.id)?.status).toBe('completed')
       expect(repositories.listAgentInvocations(completed.turn.id)[0]).toMatchObject({ status: 'running' })
+      expect(repositories.getConversationTurn(partial.turn.id)?.status).toBe('partial')
+      expect(repositories.listAgentInvocations(partial.turn.id)[0]).toMatchObject({ status: 'running' })
       expect(repositories.getConversationTurn(cancelled.turn.id)?.status).toBe('cancelled')
+      expect(repositories.getConversationTurn(failed.turn.id)?.status).toBe('failed')
+      expect(repositories.listAgentInvocations(failed.turn.id)[0]).toMatchObject({ status: 'running' })
     } finally {
       secondDatabase.close()
     }

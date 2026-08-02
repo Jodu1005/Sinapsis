@@ -45,6 +45,7 @@ import type { DomainEventPublisher } from '../../ports/domain-event-publisher'
 import type {
   BootstrapSnapshot,
   ActiveConversationTurnProjection,
+  ConversationTurnClaimResult,
   ExpiredLease,
   LeaseRecovery,
   TaskClaim,
@@ -1150,6 +1151,29 @@ export class SqliteRepositories implements WorkspaceRepositories {
         const projection = projectionsById.get(turnId)
         return projection ? [projection] : []
       })
+    })
+  }
+
+  withConversationTurnClaim<T>(
+    turnId: string,
+    ownerId: string,
+    work: () => T,
+  ): ConversationTurnClaimResult<T> {
+    return this.inTransaction(() => {
+      const claim = this.sqlite.database.prepare(`
+        SELECT recovery_owner_id, status
+        FROM conversation_turns
+        WHERE id = ?
+      `).get(turnId) as { recovery_owner_id: string | null; status: ConversationTurn['status'] } | undefined
+      if (!claim
+        || claim.recovery_owner_id !== ownerId
+        || claim.status === 'completed'
+        || claim.status === 'partial'
+        || claim.status === 'cancelled'
+        || claim.status === 'failed') {
+        return { applied: false }
+      }
+      return { applied: true, value: work() }
     })
   }
 

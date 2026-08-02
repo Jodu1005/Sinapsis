@@ -69,6 +69,10 @@ export interface SettleConversationInvocationResult {
   message?: Message
 }
 
+export type ConversationTurnClaimResult<T> =
+  | { applied: true; value: T }
+  | { applied: false }
+
 export interface TaskClaim {
   task: Task
   lease: TaskLease
@@ -158,6 +162,11 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   listActiveConversationActivity(channelId?: string): ActiveConversationTurnProjection[]
   listActiveConversationTurns(channelId?: string): ConversationTurn[]
   claimRecoverableConversationTurns(ownerId: string, occurredAt: Date, staleBefore: Date): ActiveConversationTurnProjection[]
+  withConversationTurnClaim<T>(
+    turnId: string,
+    ownerId: string,
+    work: () => T,
+  ): ConversationTurnClaimResult<T>
   renewConversationTurnClaim(turnId: string, ownerId: string, occurredAt: Date): boolean
   releaseConversationTurnClaim(turnId: string, ownerId: string): boolean
   updateConversationTurn(turnId: string, patch: ConversationTurnPatch): ConversationTurn
