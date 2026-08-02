@@ -497,7 +497,7 @@ export function migrateSchema(database: DatabaseSync): void {
           CHECK((to_message_created_at IS NULL) = (to_message_id IS NULL))
         );
         CREATE UNIQUE INDEX dream_runs_channel_watermark_unique_idx
-          ON dream_runs(scope_id, COALESCE(to_message_created_at, ''), COALESCE(to_message_id, ''));
+          ON dream_runs(scope_id, to_message_created_at, to_message_id);
 
         CREATE TABLE dream_run_sources (
           dream_run_id TEXT NOT NULL REFERENCES dream_runs(id),
@@ -555,10 +555,9 @@ export function migrateSchema(database: DatabaseSync): void {
 
         CREATE TABLE memory_sources (
           memory_id TEXT NOT NULL REFERENCES memories(id),
-          candidate_id TEXT NOT NULL REFERENCES memory_candidates(id),
           message_id TEXT NOT NULL REFERENCES messages(id),
           turn_id TEXT REFERENCES conversation_turns(id),
-          PRIMARY KEY (memory_id, candidate_id, message_id)
+          PRIMARY KEY (memory_id, message_id)
         );
 
         CREATE TABLE thread_summaries (
@@ -602,6 +601,74 @@ export function migrateSchema(database: DatabaseSync): void {
         END;
         CREATE TRIGGER memory_sources_channel_match
         BEFORE INSERT ON memory_sources
+        WHEN (SELECT channel_id FROM messages WHERE id = NEW.message_id)
+          != (SELECT dream_runs.scope_id
+              FROM memories
+              JOIN memory_candidates ON memory_candidates.id = memories.source_candidate_id
+              JOIN dream_runs ON dream_runs.id = memory_candidates.dream_run_id
+              WHERE memories.id = NEW.memory_id)
+        BEGIN
+          SELECT RAISE(ABORT, 'Memory source message must belong to the Dream channel.');
+        END;
+        CREATE TRIGGER thread_summaries_channel_match
+        BEFORE INSERT ON thread_summaries
+        WHEN (SELECT channel_id FROM messages WHERE id = NEW.thread_root_message_id) != NEW.channel_id
+        BEGIN
+          SELECT RAISE(ABORT, 'Thread summary root message must belong to its channel.');
+        END;
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(19, new Date().toISOString())
+    }
+
+    const twentiethMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 20').get()
+    if (!twentiethMigration) {
+      database.exec(`
+        DROP INDEX dream_runs_channel_watermark_unique_idx;
+        CREATE UNIQUE INDEX dream_runs_channel_watermark_unique_idx
+          ON dream_runs(scope_id, COALESCE(to_message_created_at, ''), COALESCE(to_message_id, ''));
+
+        DROP TRIGGER memory_sources_channel_match;
+        CREATE TABLE memory_sources_v20 (
+          memory_id TEXT NOT NULL REFERENCES memories(id),
+          candidate_id TEXT NOT NULL REFERENCES memory_candidates(id),
+          message_id TEXT NOT NULL REFERENCES messages(id),
+          turn_id TEXT REFERENCES conversation_turns(id),
+          PRIMARY KEY (memory_id, candidate_id, message_id)
+        );
+        INSERT INTO memory_sources_v20 (memory_id, candidate_id, message_id, turn_id)
+        SELECT
+          legacy.memory_id,
+          COALESCE(
+            (
+              SELECT candidates.id
+              FROM memory_candidate_sources
+              JOIN memory_candidates AS candidates ON candidates.id = memory_candidate_sources.candidate_id
+              WHERE memory_candidate_sources.message_id = legacy.message_id
+                AND candidates.status = 'accepted'
+                AND candidates.reviewed_content = memories.content
+              ORDER BY candidates.reviewed_at, candidates.id
+              LIMIT 1
+            ),
+            memories.source_candidate_id
+          ),
+          legacy.message_id,
+          legacy.turn_id
+        FROM memory_sources AS legacy
+        JOIN memories ON memories.id = legacy.memory_id;
+        DROP TABLE memory_sources;
+        CREATE TABLE memory_sources (
+          memory_id TEXT NOT NULL REFERENCES memories(id),
+          candidate_id TEXT NOT NULL REFERENCES memory_candidates(id),
+          message_id TEXT NOT NULL REFERENCES messages(id),
+          turn_id TEXT REFERENCES conversation_turns(id),
+          PRIMARY KEY (memory_id, candidate_id, message_id)
+        );
+        INSERT INTO memory_sources (memory_id, candidate_id, message_id, turn_id)
+        SELECT memory_id, candidate_id, message_id, turn_id FROM memory_sources_v20;
+        DROP TABLE memory_sources_v20;
+
+        CREATE TRIGGER memory_sources_candidate_match
+        BEFORE INSERT ON memory_sources
         WHEN NOT EXISTS (
           SELECT 1
           FROM memory_candidate_sources
@@ -615,14 +682,8 @@ export function migrateSchema(database: DatabaseSync): void {
         BEGIN
           SELECT RAISE(ABORT, 'Memory source must belong to its candidate and Dream channel.');
         END;
-        CREATE TRIGGER thread_summaries_channel_match
-        BEFORE INSERT ON thread_summaries
-        WHEN (SELECT channel_id FROM messages WHERE id = NEW.thread_root_message_id) != NEW.channel_id
-        BEGIN
-          SELECT RAISE(ABORT, 'Thread summary root message must belong to its channel.');
-        END;
       `)
-      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(19, new Date().toISOString())
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(20, new Date().toISOString())
     }
 
     database.exec(`
