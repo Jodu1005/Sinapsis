@@ -384,6 +384,16 @@ Raft 的“待办、进行中、审查中、完成、关闭”是灵感来源；
 5. 完成可接受/可驳回的审查闭环。
 6. 验证通过后，再进入原型 2 的并行、多 Runtime 与活动收件箱。
 
+## 多 Agent 频道回合
+
+频道中的非任务消息会创建持久化 Conversation Turn，并按四种模式路由：普通消息先从职责匹配的候选中征询，再选择最多两名发言者；单个 `@Agent` 是定向回合；多个 `@Agent` 是并行定向回合；`@all` 则并行通知全部频道成员。并行模式的单个 Runtime 失败只使该成员失败，不能阻断其余公开回复。
+
+每个 Agent 的对话会话键是 `channelId:threadRootMessageId-or-timeline:agentId`。同频道时间线和每条 Thread 因而独立；服务重启后可从 SQLite 读取该键对应的 Runtime Session 并尝试恢复。恢复失败会把旧会话标记为 stale 后冷启动，但 ContextAssembler 仍会注入相同频道或 Thread 的公开历史。启动会在一个数据库事务中把残留 `running` Invocation 改为 `queued`，按既有优先级恢复；已取消和已完成的 Turn 不会重放。
+
+Handoff 的结构化路由只保存在 Turn Handoff 记录中，指定下一个 Agent 和问题；频道里只展示该 Agent 的普通公开回复，不暴露内部 JSON、私有提示词或 Runtime Artifact。Turn 的内部阶段为筛选、判断、回复和交接；用户界面将其投影为筛选、判断、排队、准备、交接和最终回复，终态为完成、部分完成、取消或失败。
+
+Dream Memory 不属于这一回合实现，仍由 `2026-07-31-dream-memory.md` 的后续计划负责。
+
 ## 上线前的人工演练
 
 在写代码前，先在同一个仓库手动开三个终端：一个 Agent 做小功能，一个写或修测试，一个审查 diff。记录每一个协调不顺的时刻：忘了谁在做什么、两个 Agent 改了同一文件、不知道是否被卡住、想暂停、希望有统一审查入口。

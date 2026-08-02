@@ -33,6 +33,7 @@ import { DomainError } from './domain/task'
 import type { GitClient } from './ports/git-client'
 import { NodeProcessRunner } from './ports/process-runner'
 import type { ConversationTurnDetails, WorkspaceRepositories, WorkspaceUnitOfWork } from './ports/repositories'
+import type { RuntimeAdapter } from './ports/runtime'
 
 export interface PublicConversationTurnDetails {
   turn: PublicConversationTurn
@@ -109,6 +110,7 @@ export interface CreateAppOptions {
   gitClient?: GitClient
   runtimeAvailabilityDetector?: RuntimeAvailabilityDetector
   executionCoordinator?: TaskExecutionCoordinator
+  conversationRuntimes?: Partial<Record<import('./adapters/runtime/runtime-profile').RuntimeKind, RuntimeAdapter>>
   conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'> & Partial<Pick<
     ConversationCoordinator,
     'getActiveStatesByChannel' | 'cancel' | 'cancelChannel' | 'cancelAgentInChannel'
@@ -144,7 +146,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
   })
   const conversationCoordinator = options.conversationCoordinator ?? new ConversationCoordinator({
     repositories,
-    runtimes,
+    runtimes: options.conversationRuntimes ?? runtimes,
     messages,
     conversationDirectory: path.join(path.dirname(databasePath), 'conversations'),
   })

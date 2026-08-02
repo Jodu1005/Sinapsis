@@ -42,6 +42,10 @@ export class ConversationCoordinator {
     this.turnCoordinator.start(message)
   }
 
+  async recover(): Promise<void> {
+    await this.turnCoordinator.recover()
+  }
+
   getActiveStatesByChannel(): Record<string, TurnActivity[]> {
     return this.turnCoordinator.getActiveStatesByChannel()
   }

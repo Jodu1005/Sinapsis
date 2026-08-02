@@ -22,6 +22,7 @@ import {
 } from './agent-invocation-queue'
 import type {
   DuplicateDecision,
+  ParticipationDecision,
   PublicAgentResponse,
   RuntimeConversationCall,
 } from './agent-conversation-protocol'
@@ -193,6 +194,123 @@ export class ChannelTurnCoordinator {
       .finally(() => this.executions.delete(turn.id))
     void completion.catch(() => undefined)
     return { turn, completion }
+  }
+
+  async recover(): Promise<void> {
+    const recoverable = this.repositories.inTransaction(() => this.repositories.listActiveConversationActivity()
+      .flatMap(({ turn, invocations }) => invocations
+        .filter((invocation) => invocation.status === 'queued' || invocation.status === 'running')
+        .map((invocation) => ({
+          turn,
+          invocation: invocation.status === 'running'
+            ? this.repositories.updateAgentInvocation(invocation.id, {
+                status: 'queued', startedAt: null, completedAt: null, errorCode: null,
+              })
+            : invocation,
+        }))))
+
+    recoverable
+      .sort((left, right) => recoveryPriority(left.invocation.priority) - recoveryPriority(right.invocation.priority)
+        || left.invocation.queuedAt.localeCompare(right.invocation.queuedAt))
+      .forEach(({ turn, invocation }) => {
+        void this.resumeInvocation(turn, invocation).catch(() => undefined)
+      })
+  }
+
+  private async resumeInvocation(turn: ConversationTurn, invocation: AgentInvocation): Promise<void> {
+    const message = this.repositories.getMessage(turn.triggerMessageId)
+    const agent = this.repositories.getAgent(invocation.agentId)
+    if (!message || !agent) {
+      this.repositories.updateAgentInvocation(invocation.id, {
+        status: 'failed', completedAt: this.now().toISOString(), errorCode: message ? 'agent_missing' : 'trigger_message_missing',
+      })
+      return
+    }
+
+    const execution = this.executions.get(turn.id) ?? {
+      turnId: turn.id,
+      channelId: turn.channelId,
+      cancelled: false,
+      activities: new Map<string, TurnActivity>(),
+      invocationIds: new Set<string>(),
+      timedOutInvocationIds: new Set<string>(),
+    }
+    this.executions.set(turn.id, execution)
+    execution.invocationIds.add(invocation.id)
+    const context = this.renderContext(message)
+    const handoff = invocation.kind === 'handoff_response'
+      ? this.repositories.listConversationHandoffs(turn.id)
+        .find((candidate) => candidate.sourceInvocationId === invocation.sourceInvocationId && candidate.toAgentId === agent.id)
+      : undefined
+    const expectedOutput = invocation.kind === 'participation'
+      ? 'participation'
+      : invocation.kind === 'duplicate_check'
+        ? 'duplicate'
+        : 'public_response'
+    const initialMessage = invocation.kind === 'duplicate_check'
+      ? `Check whether your proposed contribution duplicates these persisted public replies.\n\n${context}`
+      : handoff?.question ?? message.body
+
+    this.setActivity(execution, agent.id, 'queued')
+    try {
+      const result = await this.queue.enqueue({
+        id: invocation.id,
+        agentId: agent.id,
+        priority: invocation.priority,
+        sequence: this.invocationSequence++,
+        run: async () => {
+          this.repositories.updateAgentInvocation(invocation.id, { status: 'running', startedAt: this.now().toISOString() })
+          this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
+          this.setActivity(execution, agent.id, invocation.kind === 'handoff_response' ? 'handoff' : 'preparing')
+          return this.sessions.invoke({
+            channelId: turn.channelId,
+            threadRootMessageId: turn.threadRootMessageId,
+            currentMessageId: message.id,
+            agent,
+            context,
+            initialMessage,
+            candidateAgentIds: this.repositories.listTurnParticipants(turn.id).map((participant) => participant.agentId),
+            conversation: {
+              turnId: turn.id,
+              invocationId: invocation.id,
+              kind: invocation.kind,
+              expectedOutput,
+            },
+          })
+        },
+      })
+      this.repositories.updateAgentInvocation(invocation.id, { status: 'settled', completedAt: this.now().toISOString() })
+      this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
+      if (isPublicResponse(result.parsed)) {
+        this.persistPublicReply(turn, agent, result.parsed.reply)
+        this.updateParticipant(turn.id, agent.id, { status: 'spoken' })
+        if (handoff) this.finishHandoff(handoff.id, 'completed', null)
+      }
+      if (isParticipationDecision(result.parsed)) {
+        this.updateParticipant(turn.id, agent.id, {
+          decision: result.parsed.decision,
+          confidence: result.parsed.confidence,
+          proposedAngle: result.parsed.proposedAngle,
+          dependsOnAgentId: result.parsed.dependsOnAgentId,
+          status: result.parsed.decision === 'speak' ? 'selected' : 'skipped',
+          reason: result.parsed.reason,
+        })
+      }
+    } catch (error) {
+      this.repositories.updateAgentInvocation(invocation.id, {
+        status: 'failed', completedAt: this.now().toISOString(), errorCode: errorMessage(error),
+      })
+      const participant = this.repositories.listTurnParticipants(turn.id).find((candidate) => candidate.agentId === agent.id)
+      if (participant && !isTerminalParticipant(participant)) {
+        this.updateParticipant(turn.id, agent.id, { status: 'failed', reason: `response_failed:${errorMessage(error)}` })
+      }
+    } finally {
+      execution.activities.delete(agent.id)
+      const active = this.repositories.listAgentInvocations(turn.id)
+        .some((candidate) => candidate.status === 'queued' || candidate.status === 'running')
+      if (!active && !isTerminal(this.currentTurn(turn.id))) this.finishTurn(turn.id)
+      this.executions.delete(turn.id)
+    }
   }
 
   private async executeTurn(
@@ -1302,6 +1420,20 @@ function phaseForInvocation(invocation: AgentInvocation): TurnActivity['phase'] 
   if (invocation.kind === 'participation' || invocation.kind === 'duplicate_check') return 'judging'
   if (invocation.kind === 'handoff_response') return 'handoff'
   return 'preparing'
+}
+
+function recoveryPriority(priority: InvocationPriority): number {
+  return {
+    human_direct: 0,
+    human_ordinary: 1,
+    participation: 2,
+    duplicate_check: 3,
+    automatic_handoff: 4,
+  }[priority]
+}
+
+function isParticipationDecision(value: ConversationSessionResult['parsed']): value is ParticipationDecision {
+  return value !== null && 'decision' in value && 'confidence' in value && 'proposedAngle' in value
 }
 
 function isDuplicateDecision(value: ConversationSessionResult['parsed']): value is DuplicateDecision {

@@ -12,6 +12,8 @@ await ensureDataDirectory(config.dataDir)
 const app = createApp()
 const repositories = app.locals.repositories as WorkspaceRepositories
 repositories.recoverOrphanedAgents(new Date())
+const conversationCoordinator = app.locals.conversationCoordinator as { recover?: () => Promise<void> }
+await conversationCoordinator.recover?.()
 const scheduler = app.locals.scheduler as TaskScheduler
 const coordinator = app.locals.executionCoordinator as TaskExecutionCoordinator
 const schedulerLoop = new SchedulerLoop(scheduler, repositories, 1_000, () => new Date(), coordinator)
