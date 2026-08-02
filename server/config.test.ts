@@ -62,4 +62,46 @@ describe('getServiceConfig', () => {
     expect(() => getServiceConfig({ SINAPSIS_MAX_CONVERSATION_ROUNDS: '4' }))
       .toThrow('SINAPSIS_MAX_CONVERSATION_ROUNDS must be between 1 and 3.')
   })
+
+  it('defaults Dream Runtime consolidation controls', () => {
+    expect(getServiceConfig({})).toMatchObject({
+      dreamRuntime: 'pi',
+      dreamModel: '',
+      dreamTimeoutMs: 120_000,
+      maxDreamCandidatesPerRun: 20,
+    })
+  })
+
+  it('parses and trims configured Dream Runtime consolidation controls', () => {
+    expect(getServiceConfig({
+      SINAPSIS_DREAM_RUNTIME: ' claude-code ',
+      SINAPSIS_DREAM_MODEL: ' dream-model ',
+      SINAPSIS_DREAM_TIMEOUT_MS: '45000',
+      SINAPSIS_MAX_DREAM_CANDIDATES_PER_RUN: '50',
+    })).toMatchObject({
+      dreamRuntime: 'claude-code',
+      dreamModel: 'dream-model',
+      dreamTimeoutMs: 45_000,
+      maxDreamCandidatesPerRun: 50,
+    })
+  })
+
+  it('rejects an unsupported Dream Runtime', () => {
+    expect(() => getServiceConfig({ SINAPSIS_DREAM_RUNTIME: 'unknown' }))
+      .toThrow('SINAPSIS_DREAM_RUNTIME must be one of: opencode, pi, claude-code.')
+  })
+
+  it('requires Dream timeout to be a positive integer', () => {
+    expect(() => getServiceConfig({ SINAPSIS_DREAM_TIMEOUT_MS: '0' }))
+      .toThrow('SINAPSIS_DREAM_TIMEOUT_MS must be a positive integer.')
+    expect(() => getServiceConfig({ SINAPSIS_DREAM_TIMEOUT_MS: '1.5' }))
+      .toThrow('SINAPSIS_DREAM_TIMEOUT_MS must be a positive integer.')
+  })
+
+  it('requires the Dream candidate limit to be between one and fifty', () => {
+    expect(() => getServiceConfig({ SINAPSIS_MAX_DREAM_CANDIDATES_PER_RUN: '0' }))
+      .toThrow('SINAPSIS_MAX_DREAM_CANDIDATES_PER_RUN must be a positive integer.')
+    expect(() => getServiceConfig({ SINAPSIS_MAX_DREAM_CANDIDATES_PER_RUN: '51' }))
+      .toThrow('SINAPSIS_MAX_DREAM_CANDIDATES_PER_RUN must be between 1 and 50.')
+  })
 })

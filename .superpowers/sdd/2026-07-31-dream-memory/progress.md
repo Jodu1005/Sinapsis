@@ -25,4 +25,17 @@ Task 2 implementation: 1db45dd feat: assemble confirmed memory context
 Task 2 reviewer: Galileo (019fc2c6-9c55-7ae0-a9d7-7d1870a1fb3d)
 Task 2: fix round 1/5 in progress (6 P1, 2 minor: summary CAS/order, warm invocation envelope, nonblocking refresh, prompt boundary, production wiring, tiny budget, watermark pair constraint)
 Task 2: fix round 1/5 implemented (summary CAS/rowid watermark API, warm/resume envelopes, safe JSON boundaries, nonblocking refresh, production rolling generator, exact tiny budgets, migration 22 pair constraints; 487/487 tests; build passed)
+Task 2: fix round 2/5 implemented (migration 22 repairs existing half-watermarks; thread Summary single-flight, timeout, AbortSignal and cancellation; commit 56d4627; 489/489 tests; build passed)
+Task 2: complete (commits a2b6d9a..56d4627, final scoped review clean)
+Task 3: in progress
+Task 3 base: 56d4627
+Task 3 implementer: Gauss (019fc2ef-5600-7941-bedc-64ac851f77b6)
+Task 3 takeover: Gauss stalled without code changes after scope reduction
+Task 3 implementer: Beauvoir (019fc2f3-cacf-7171-ab20-9bc9fdcc4686)
 Task 2: fix round 2/5 implemented (migration 22 half-watermark cleanup; channel+thread Summary single-flight; AbortSignal timeout/cancel cleanup; Coordinator cancellation propagation; 489/489 tests; build passed)
+Task 3 protocol slice: complete (strict JSON/source/safety/max validation; normalized SHA-256 exports; 20/20 tests)
+Task 3 Runtime slice: complete (independent run directory/session, safe public prompt, settled parsing, atomic failure, artifact isolation, duplicate/conflict handling; 15/15 tests)
+Task 3 Runtime boundary hardening: complete (start timeout with late-session cancellation, channel provenance, ConversationSessionResult parsed.reply, relevant accepted Memory filtering, subject/key conflicts)
+Task 3 config slice: complete (Dream runtime/model/timeout/candidate-limit defaults and validation; 13/13 tests)
+Task 3 verification: focused 48/48; full suite 54 files and 529/529 tests; build and diff check passed
+Task 3: implementation complete; report written; ready for commit

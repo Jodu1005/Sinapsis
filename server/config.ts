@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
+import { runtimeKinds, type RuntimeKind } from './adapters/runtime/runtime-profile'
 
 export interface ServiceConfig {
   dataDir: string
@@ -13,6 +14,10 @@ export interface ServiceConfig {
   participationProbeTimeoutMs: number
   duplicateCheckTimeoutMs: number
   conversationResponseTimeoutMs: number
+  dreamRuntime: RuntimeKind
+  dreamModel: string
+  dreamTimeoutMs: number
+  maxDreamCandidatesPerRun: number
 }
 
 const defaultDataDir = path.join(homedir(), '.sinapsis')
@@ -25,6 +30,9 @@ const defaultMaxHandoffTargetsPerReply = 2
 const defaultParticipationProbeTimeoutMs = 30_000
 const defaultDuplicateCheckTimeoutMs = 30_000
 const defaultConversationResponseTimeoutMs = 90_000
+const defaultDreamRuntime: RuntimeKind = 'pi'
+const defaultDreamTimeoutMs = 120_000
+const defaultMaxDreamCandidatesPerRun = 20
 
 export function getServiceConfig(environment = process.env): ServiceConfig {
   return {
@@ -53,6 +61,15 @@ export function getServiceConfig(environment = process.env): ServiceConfig {
     participationProbeTimeoutMs: parsePositiveInteger(environment.SINAPSIS_PARTICIPATION_PROBE_TIMEOUT_MS, defaultParticipationProbeTimeoutMs, 'SINAPSIS_PARTICIPATION_PROBE_TIMEOUT_MS'),
     duplicateCheckTimeoutMs: parsePositiveInteger(environment.SINAPSIS_DUPLICATE_CHECK_TIMEOUT_MS, defaultDuplicateCheckTimeoutMs, 'SINAPSIS_DUPLICATE_CHECK_TIMEOUT_MS'),
     conversationResponseTimeoutMs: parsePositiveInteger(environment.SINAPSIS_CONVERSATION_RESPONSE_TIMEOUT_MS, defaultConversationResponseTimeoutMs, 'SINAPSIS_CONVERSATION_RESPONSE_TIMEOUT_MS'),
+    dreamRuntime: parseRuntimeKind(environment.SINAPSIS_DREAM_RUNTIME),
+    dreamModel: environment.SINAPSIS_DREAM_MODEL?.trim() ?? '',
+    dreamTimeoutMs: parsePositiveInteger(environment.SINAPSIS_DREAM_TIMEOUT_MS, defaultDreamTimeoutMs, 'SINAPSIS_DREAM_TIMEOUT_MS'),
+    maxDreamCandidatesPerRun: parseBoundedPositiveInteger(
+      environment.SINAPSIS_MAX_DREAM_CANDIDATES_PER_RUN,
+      defaultMaxDreamCandidatesPerRun,
+      'SINAPSIS_MAX_DREAM_CANDIDATES_PER_RUN',
+      50,
+    ),
   }
 }
 
@@ -104,4 +121,12 @@ function parseBoundedPositiveInteger(value: string | undefined, defaultValue: nu
     throw new Error(`${name} must be between 1 and ${maximum}.`)
   }
   return parsed
+}
+
+function parseRuntimeKind(value: string | undefined): RuntimeKind {
+  const runtime = value?.trim() || defaultDreamRuntime
+  if (!runtimeKinds.includes(runtime as RuntimeKind)) {
+    throw new Error(`SINAPSIS_DREAM_RUNTIME must be one of: ${runtimeKinds.join(', ')}.`)
+  }
+  return runtime as RuntimeKind
 }
