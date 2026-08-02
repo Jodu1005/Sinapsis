@@ -1277,6 +1277,44 @@ describe('ChannelTurnCoordinator', () => {
     }
   })
 
+  it('renews an expired local execution before recover can requeue its running Invocation', async () => {
+    const fixture = await createFixture()
+    fixture.createAgent('Local Owner', ['local'])
+    const responseGate = deferred<ConversationSessionResult>()
+    const sessions = new ScriptedSessions()
+    sessions.handle = () => responseGate.promise
+    let occurredAt = new Date('2026-08-02T00:00:00.000Z')
+    const coordinator = new ChannelTurnCoordinator({
+      repositories: fixture.repositories,
+      sessions,
+      recoveryOwnerId: 'same-owner',
+      recoveryClaimTtlMs: 30_000,
+      recoveryHeartbeatMs: 1_000_000,
+      now: () => occurredAt,
+    })
+    const started = coordinator.start(fixture.postHuman('@Local Owner answer'))
+
+    try {
+      await waitFor(() => sessions.calls.length === 1)
+      expect(fixture.repositories.listAgentInvocations(started.turn.id)).toEqual([
+        expect.objectContaining({ status: 'running' }),
+      ])
+      occurredAt = new Date('2026-08-02T00:00:31.000Z')
+
+      await coordinator.recover()
+
+      expect(sessions.calls).toHaveLength(1)
+      expect(fixture.repositories.listAgentInvocations(started.turn.id)).toEqual([
+        expect.objectContaining({ status: 'running' }),
+      ])
+      responseGate.resolve(publicReply('local completion'))
+      await expect(started.completion).resolves.toMatchObject({ status: 'completed' })
+      expect(fixture.agentMessages().map((message) => message.body)).toEqual(['local completion'])
+    } finally {
+      responseGate.resolve(publicReply('local completion'))
+    }
+  })
+
   it('does not let a stale owner cancellation overwrite a takeover that already completed', async () => {
     const fixture = await createFixture()
     const agent = fixture.createAgent('Takeover Winner', ['takeover'])

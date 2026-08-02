@@ -218,6 +218,13 @@ export class ChannelTurnCoordinator {
 
   async recover(): Promise<void> {
     const occurredAt = this.now()
+    for (const execution of this.executions.values()) {
+      if (execution.recoveryOwnerId !== this.recoveryOwnerId) continue
+      if (this.repositories.renewConversationTurnClaim(execution.turnId, this.recoveryOwnerId, occurredAt)) continue
+      execution.cancelled = true
+      execution.claimLost = true
+      return
+    }
     const staleBefore = new Date(occurredAt.getTime() - this.recoveryClaimTtlMs)
     const recoverable = this.repositories.claimRecoverableConversationTurns(
       this.recoveryOwnerId,
