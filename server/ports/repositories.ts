@@ -30,6 +30,8 @@ import type {
   MemoryRecord,
   MemoryScope,
   ReviewMemoryCandidateInput,
+  ThreadSummary,
+  UpsertThreadSummaryInput,
 } from '../domain/memory'
 import type { CreateTaskInput, Task, TaskArtifact, TaskDetails, TaskInput, TaskLease, TaskSession, TaskStatus } from '../domain/task'
 import type { TaskSessionStore } from './task-session-store'
@@ -194,6 +196,8 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   updateMemory(memoryId: string, content: string): MemoryRecord
   archiveMemory(memoryId: string, occurredAt: Date): MemoryRecord
   listDreamSourceMessages(runId: string): Message[]
+  getThreadSummary(channelId: string, threadRootMessageId: string): ThreadSummary | undefined
+  upsertThreadSummary(input: UpsertThreadSummaryInput): ThreadSummary
   createConversationTurn(input: CreateConversationTurnInput): ConversationTurn
   createClaimedConversationTurn(
     input: CreateConversationTurnInput,

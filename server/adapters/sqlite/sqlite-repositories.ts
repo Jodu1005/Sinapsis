@@ -33,6 +33,8 @@ import type {
   MemoryRecord,
   MemoryScope,
   ReviewMemoryCandidateInput,
+  ThreadSummary,
+  UpsertThreadSummaryInput,
 } from '../../domain/memory'
 import {
   DomainError,
@@ -234,6 +236,18 @@ interface MemoryRow {
   status: MemoryRecord['status']
   source_candidate_id: string
   archived_at: string | null
+  created_at: string
+  updated_at: string
+  source_confidence?: number
+  source_importance?: number
+}
+
+interface ThreadSummaryRow {
+  channel_id: string
+  thread_root_message_id: string
+  content: string
+  through_message_created_at: string | null
+  through_message_id: string | null
   created_at: string
   updated_at: string
 }
@@ -1295,9 +1309,11 @@ export class SqliteRepositories implements WorkspaceRepositories {
   listAcceptedMemories(scope: MemoryScope, channelId?: string): MemoryRecord[] {
     assertMemoryScope(scope, channelId ?? null)
     const rows = this.sqlite.database.prepare(`
-      SELECT * FROM memories
-      WHERE scope = ? AND channel_id IS ? AND status = 'active'
-      ORDER BY updated_at DESC, id
+      SELECT memories.*, source.confidence AS source_confidence, source.importance AS source_importance
+      FROM memories
+      JOIN memory_candidates AS source ON source.id = memories.source_candidate_id
+      WHERE memories.scope = ? AND memories.channel_id IS ? AND memories.status = 'active'
+      ORDER BY memories.updated_at DESC, memories.id
     `).all(scope, channelId ?? null) as unknown as MemoryRow[]
     return rows.map(mapMemory)
   }
@@ -1340,6 +1356,49 @@ export class SqliteRepositories implements WorkspaceRepositories {
       ORDER BY messages.created_at, messages.id
     `).all(runId) as unknown as MessageRow[]
     return rows.map(mapMessage)
+  }
+
+  getThreadSummary(channelId: string, threadRootMessageId: string): ThreadSummary | undefined {
+    const row = this.sqlite.database.prepare(`
+      SELECT * FROM thread_summaries WHERE channel_id = ? AND thread_root_message_id = ?
+    `).get(channelId, threadRootMessageId) as ThreadSummaryRow | undefined
+    return row ? mapThreadSummary(row) : undefined
+  }
+
+  upsertThreadSummary(input: UpsertThreadSummaryInput): ThreadSummary {
+    return this.inTransaction(() => {
+      const database = this.sqlite.database
+      const root = readMessage(database, input.threadRootMessageId)
+      if (!root || root.channelId !== input.channelId || root.threadRootMessageId !== null) {
+        throw new Error('Thread summary root message must be a Timeline message in its channel.')
+      }
+      const through = readMessage(database, input.throughMessageId)
+      if (!through || through.channelId !== input.channelId || through.createdAt !== input.throughMessageCreatedAt
+        || (through.id !== root.id && through.threadRootMessageId !== root.id)) {
+        throw new Error('Thread summary watermark must be a message in its Thread.')
+      }
+      const content = requireText(input.content, 'Thread summary content')
+      const updatedAt = now()
+      const existing = this.getThreadSummary(input.channelId, input.threadRootMessageId)
+      database.prepare(`
+        INSERT INTO thread_summaries (
+          channel_id, thread_root_message_id, content, through_message_created_at, through_message_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(channel_id, thread_root_message_id) DO UPDATE SET
+          content = excluded.content,
+          through_message_created_at = excluded.through_message_created_at,
+          through_message_id = excluded.through_message_id,
+          updated_at = excluded.updated_at
+      `).run(
+        input.channelId, input.threadRootMessageId, content, input.throughMessageCreatedAt, input.throughMessageId,
+        existing?.createdAt ?? updatedAt, updatedAt,
+      )
+      return {
+        channelId: input.channelId, threadRootMessageId: input.threadRootMessageId, content,
+        throughMessageCreatedAt: input.throughMessageCreatedAt, throughMessageId: input.throughMessageId,
+        createdAt: existing?.createdAt ?? updatedAt, updatedAt,
+      }
+    })
   }
 
   getConversationTurn(turnId: string): ConversationTurn | undefined {
@@ -2616,6 +2675,20 @@ function mapMemory(row: MemoryRow): MemoryRecord {
     status: row.status,
     sourceCandidateId: row.source_candidate_id,
     archivedAt: row.archived_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    sourceConfidence: row.source_confidence,
+    sourceImportance: row.source_importance,
+  }
+}
+
+function mapThreadSummary(row: ThreadSummaryRow): ThreadSummary {
+  return {
+    channelId: row.channel_id,
+    threadRootMessageId: row.thread_root_message_id,
+    content: row.content,
+    throughMessageCreatedAt: row.through_message_created_at,
+    throughMessageId: row.through_message_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }

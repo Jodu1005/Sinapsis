@@ -50,6 +50,26 @@ export interface MemoryRecord {
   archivedAt: string | null
   createdAt: string
   updatedAt: string
+  sourceConfidence?: number
+  sourceImportance?: number
+}
+
+export interface ThreadSummary {
+  channelId: string
+  threadRootMessageId: string
+  content: string
+  throughMessageCreatedAt: string | null
+  throughMessageId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface UpsertThreadSummaryInput {
+  channelId: string
+  threadRootMessageId: string
+  content: string
+  throughMessageCreatedAt: string
+  throughMessageId: string
 }
 
 export interface DreamWatermark {

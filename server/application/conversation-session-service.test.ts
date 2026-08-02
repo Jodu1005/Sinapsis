@@ -47,6 +47,7 @@ describe('ConversationSessionService', () => {
     const second = await fixture.service.invoke(secondInput)
 
     expect(fixture.runtime.order).toEqual(['resume:persisted-session', 'send:first input', 'send:second input'])
+    expect(fixture.runtime.order.join('\n')).not.toContain('earlier context')
     expect(fixture.runtime.resumedWorktreeExists).toEqual([true])
     expect(fixture.runtime.starts).toHaveLength(0)
     expect(first.text).toBe('reply:first input')
@@ -93,6 +94,10 @@ describe('ConversationSessionService', () => {
 
     expect(result.text).toBe('reply:cold input')
     expect(fixture.runtime.order).toEqual(['resume:stale-session', 'start:cold input'])
+    expect(fixture.runtime.starts[0]).toMatchObject({
+      initialMessage: 'cold input',
+      description: expect.stringContaining('近期公开消息：\nYou: earlier context'),
+    })
     expect(persistedStatuses).toContain('stale:stale-session')
     expect(persistedStatuses).toContain('active:fresh-session')
     expect(fixture.repositories.getConversationSession(key)).toMatchObject({

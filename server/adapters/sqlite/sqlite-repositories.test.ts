@@ -140,6 +140,28 @@ describe('SQLite workspace repositories', () => {
     expect(repositories.listDreamSourceMessages(run.id).map((item) => item.id)).toEqual([message.id])
   })
 
+  it('persists a Thread Summary with an ordered message watermark', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const root = repositories.createMessage({ channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Root' })
+    const reply = repositories.createMessage({
+      channelId: channel.id, threadRootMessageId: root.id, senderType: 'agent', authorName: 'Ada', body: 'Reply',
+    })
+
+    const saved = repositories.upsertThreadSummary({
+      channelId: channel.id,
+      threadRootMessageId: root.id,
+      content: 'Summary through reply.',
+      throughMessageCreatedAt: reply.createdAt,
+      throughMessageId: reply.id,
+    })
+
+    expect(repositories.getThreadSummary(channel.id, root.id)).toEqual(saved)
+    expect(saved).toMatchObject({
+      content: 'Summary through reply.', throughMessageCreatedAt: reply.createdAt, throughMessageId: reply.id,
+    })
+  })
+
   it('enforces channel scope and source channel constraints in SQLite', async () => {
     const { repositories } = await createRepositories()
     const firstChannel = createChannel(repositories)
@@ -427,7 +449,7 @@ describe('SQLite workspace repositories', () => {
     expect(publisher.events).toHaveLength(eventCount)
   })
 
-  it('upgrades an existing migration 18 database through migration 20', async () => {
+  it('upgrades an existing migration 18 database through migration 21', async () => {
     const { repositories, databasePath } = await createRepositories()
     const channel = createChannel(repositories)
     const message = repositories.createMessage({
@@ -441,10 +463,36 @@ describe('SQLite workspace repositories', () => {
 
     expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 20').get())
       .toEqual({ version: 20 })
+    expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 21').get())
+      .toEqual({ version: 21 })
     expect((database.database.prepare('PRAGMA table_info(memory_sources)').all() as Array<{ name: string }>)
       .map((column) => column.name)).toContain('candidate_id')
     expect(database.database.prepare('SELECT id FROM messages WHERE id = ?').get(message.id))
       .toEqual({ id: message.id })
+  })
+
+  it('upgrades migration 20 Thread Summaries with empty watermarks without losing content', async () => {
+    const { repositories, databasePath } = await createRepositories()
+    const channel = createChannel(repositories)
+    const root = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Legacy Thread root.',
+    })
+    database!.database.prepare(`
+      INSERT INTO thread_summaries (channel_id, thread_root_message_id, content, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(channel.id, root.id, 'Legacy summary.', root.createdAt, root.updatedAt)
+    database!.close()
+    database = undefined
+    downgradeThreadSummariesToVersion20(databasePath)
+
+    database = createSqliteDatabase(databasePath)
+    const upgraded = new SqliteRepositories(database, new RecordingPublisher())
+
+    expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 21').get())
+      .toEqual({ version: 21 })
+    expect(upgraded.getThreadSummary(channel.id, root.id)).toMatchObject({
+      content: 'Legacy summary.', throughMessageCreatedAt: null, throughMessageId: null,
+    })
   })
 
   it('upgrades original migration 19 Dream sources without losing provenance and supports later Global reuse', async () => {
@@ -2005,7 +2053,7 @@ describe('SQLite workspace repositories', () => {
       DROP TABLE dream_run_sources;
       DROP TABLE dream_runs;
       DROP TABLE thread_summaries;
-      DELETE FROM schema_migrations WHERE version IN (19, 20);
+      DELETE FROM schema_migrations WHERE version IN (19, 20, 21);
       COMMIT;
     `)
     legacy.close()
@@ -2042,7 +2090,7 @@ describe('SQLite workspace repositories', () => {
       DROP INDEX dream_runs_channel_watermark_unique_idx;
       CREATE UNIQUE INDEX dream_runs_channel_watermark_unique_idx
         ON dream_runs(scope_id, to_message_created_at, to_message_id);
-      DELETE FROM schema_migrations WHERE version = 20;
+      DELETE FROM schema_migrations WHERE version IN (20, 21);
       COMMIT;
     `)
     legacy.close()
@@ -2052,7 +2100,20 @@ describe('SQLite workspace repositories', () => {
     const legacy = new DatabaseSync(databasePath)
     legacy.exec(`
       BEGIN;
-      DELETE FROM schema_migrations WHERE version = 20;
+      DELETE FROM schema_migrations WHERE version IN (20, 21);
+      COMMIT;
+    `)
+    legacy.close()
+  }
+
+  function downgradeThreadSummariesToVersion20(databasePath: string): void {
+    const legacy = new DatabaseSync(databasePath)
+    legacy.exec(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN;
+      ALTER TABLE thread_summaries DROP COLUMN through_message_id;
+      ALTER TABLE thread_summaries DROP COLUMN through_message_created_at;
+      DELETE FROM schema_migrations WHERE version = 21;
       COMMIT;
     `)
     legacy.close()

@@ -716,6 +716,17 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(20, new Date().toISOString())
     }
 
+    const twentyFirstMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 21').get()
+    if (!twentyFirstMigration) {
+      if (!hasColumn(database, 'thread_summaries', 'through_message_created_at')) {
+        database.exec('ALTER TABLE thread_summaries ADD COLUMN through_message_created_at TEXT')
+      }
+      if (!hasColumn(database, 'thread_summaries', 'through_message_id')) {
+        database.exec('ALTER TABLE thread_summaries ADD COLUMN through_message_id TEXT REFERENCES messages(id)')
+      }
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(21, new Date().toISOString())
+    }
+
     database.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS conversation_sessions_grain_unique_idx
         ON conversation_sessions(channel_id, COALESCE(thread_root_message_id, ''), agent_id);

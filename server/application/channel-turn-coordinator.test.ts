@@ -19,6 +19,7 @@ import { parsePublicResponse } from './agent-conversation-protocol'
 import { ConversationInvocationCancelledError } from './conversation-session-service'
 import { ChannelTurnCoordinator } from './channel-turn-coordinator'
 import type { HandoffPolicy } from './handoff-policy'
+import type { ThreadSummaryService } from './thread-summary-service'
 
 describe('ChannelTurnCoordinator', () => {
   let temporaryDirectory: string | undefined
@@ -316,6 +317,111 @@ describe('ChannelTurnCoordinator', () => {
     ])
   })
 
+  it('gives response and Handoff calls the same bounded Context with role and invocation boundaries', async () => {
+    const fixture = await createFixture()
+    const source = fixture.createAgent('Source', ['triage requests'])
+    const target = fixture.createAgent('Target', ['complete handoffs'])
+    fixture.postHuman('Earlier public context')
+    fixture.sessions.handle = async (input) => input.agent.id === source.id
+      ? publicReply('source reply', [{ agentId: target.id, question: 'Please complete this.' }])
+      : publicReply('target reply')
+
+    await fixture.coordinator.dispatch(fixture.postHuman('@Source begin'))
+
+    const response = fixture.sessions.calls.find((call) => call.conversation?.kind === 'response')!
+    const handoff = fixture.sessions.calls.find((call) => call.conversation?.kind === 'handoff_response')!
+    for (const call of [response, handoff]) {
+      expect(call.context).toContain('系统与 Agent 职责：')
+      expect(call.context).toContain('近期公开消息：')
+      expect(call.context).toContain('当前调用指令：')
+      expect(call.context).toContain('Earlier public context')
+    }
+    expect(response.context).toContain('生成一条可公开发布的回复。')
+    expect(handoff.context).toContain('回应交接问题，并生成一条可公开发布的回复。')
+  })
+
+  it('refreshes a Thread Summary once before assembling the first invocation context', async () => {
+    const refresh = vi.fn<ThreadSummaryService['refresh']>()
+    const fixture = await createFixture({ threadSummaryService: { refresh } })
+    const agent = fixture.createAgent('Summarizer', [])
+    const root = fixture.postHuman('Thread root')
+    const prior = fixture.postHuman('Prior Thread reply', root.id)
+    refresh.mockImplementation(async () => fixture.repositories.upsertThreadSummary({
+      channelId: fixture.channel.id,
+      threadRootMessageId: root.id,
+      content: 'Fresh Thread Summary.',
+      throughMessageCreatedAt: prior.createdAt,
+      throughMessageId: prior.id,
+    }))
+    fixture.sessions.handle = async () => publicReply('thread answer')
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('@Summarizer continue', root.id))
+
+    expect(turn.status).toBe('completed')
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(refresh).toHaveBeenCalledWith(fixture.channel.id, root.id)
+    expect(fixture.sessions.calls[0]!.context).toContain('Fresh Thread Summary.')
+  })
+
+  it('does not block a Thread reply when Summary refresh fails', async () => {
+    const refresh = vi.fn<ThreadSummaryService['refresh']>(async () => { throw new Error('summary unavailable') })
+    const fixture = await createFixture({ threadSummaryService: { refresh } })
+    fixture.createAgent('Responder', [])
+    const root = fixture.postHuman('Thread root')
+    fixture.sessions.handle = async () => publicReply('fallback thread answer')
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('@Responder continue', root.id))
+
+    expect(turn.status).toBe('completed')
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(fixture.agentMessages()).toEqual([
+      expect.objectContaining({ body: 'fallback thread answer' }),
+    ])
+  })
+
+  it('does not refresh a Thread Summary for Timeline turns', async () => {
+    const refresh = vi.fn<ThreadSummaryService['refresh']>()
+    const fixture = await createFixture({ threadSummaryService: { refresh } })
+    fixture.createAgent('Timeline', [])
+    fixture.sessions.handle = async () => publicReply('timeline answer')
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('@Timeline continue'))
+
+    expect(turn.status).toBe('completed')
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('gives participation and duplicate calls the bounded Context with their own invocation boundaries', async () => {
+    const fixture = await createFixture()
+    fixture.createAgent('First', ['all-context topic'])
+    fixture.createAgent('Second', ['all-context topic'])
+    fixture.postHuman('Earlier public context for all calls')
+    fixture.sessions.handle = async (input) => {
+      if (input.conversation?.kind === 'participation') return participation('speak', 0.9)
+      if (input.conversation?.kind === 'duplicate_check') return duplicate('silent')
+      return publicReply('first persisted answer')
+    }
+
+    await fixture.coordinator.dispatch(fixture.postHuman('all-context topic'))
+
+    const participationCalls = fixture.sessions.calls.filter((call) => call.conversation?.kind === 'participation')
+    const duplicateCall = fixture.sessions.calls.find((call) => call.conversation?.kind === 'duplicate_check')!
+    const responseCall = fixture.sessions.calls.find((call) => call.conversation?.kind === 'response')!
+    for (const call of [...participationCalls, duplicateCall, responseCall]) {
+      expect(call.context).toContain('系统与 Agent 职责：')
+      expect(call.context).toContain('近期公开消息：')
+      expect(call.context).toContain('当前调用指令：')
+      expect(call.context).toContain('Earlier public context for all calls')
+      expect(call.context.split('Earlier public context for all calls')).toHaveLength(2)
+    }
+    expect(participationCalls).toHaveLength(2)
+    expect(participationCalls[0]!.context).toContain('Decide whether this agent should contribute')
+    expect(duplicateCall.context).toContain('Check whether your proposed contribution duplicates')
+    expect(duplicateCall.context).toContain('first persisted answer')
+    expect(duplicateCall.initialMessage).not.toContain('first persisted answer')
+    expect(responseCall.context).toContain('生成一条可公开发布的回复。')
+  })
+
   it('queues a busy direct Agent and runs its reply after the active Invocation settles', async () => {
     const fixture = await createFixture({ realQueue: true })
     const agent = fixture.createAgent('Solo', [])
@@ -485,7 +591,8 @@ describe('ChannelTurnCoordinator', () => {
         expect(fixture.agentMessages()).toEqual([
           expect.objectContaining({ authorName: first.identity, body: 'first persisted answer' }),
         ])
-        expect(input.initialMessage).toContain('first persisted answer')
+        expect(input.context).toContain('first persisted answer')
+        expect(input.initialMessage).not.toContain('first persisted answer')
         return duplicate('silent')
       }
       return publicReply('first persisted answer')
@@ -1847,6 +1954,7 @@ describe('ChannelTurnCoordinator', () => {
     realQueue?: boolean
     handoffPolicy?: HandoffPolicy
     channelSystemKey?: string
+    threadSummaryService?: Pick<ThreadSummaryService, 'refresh'>
   } = {}) {
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-turn-'))
     database = createSqliteDatabase(path.join(temporaryDirectory, 'sinapsis.sqlite'))
@@ -1875,6 +1983,7 @@ describe('ChannelTurnCoordinator', () => {
       sessions,
       participationProbeTimeoutMs: options.participationProbeTimeoutMs ?? 50,
       handoffPolicy: options.handoffPolicy,
+      threadSummaryService: options.threadSummaryService,
       ...(options.realQueue ? {} : { queue: {
         enqueue: (invocation) => invocation.run(),
         cancel: () => undefined,
