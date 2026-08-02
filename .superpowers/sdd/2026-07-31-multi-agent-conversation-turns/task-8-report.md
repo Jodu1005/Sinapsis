@@ -74,3 +74,13 @@
 - 聚焦测试：6 files / 70 tests passed。
 - 全量测试：50 files / 421 tests passed。
 - `npm run build` 与 `git diff --check`：通过。
+
+## 修复轮次 3
+
+- 新增跨 Turn 取消竞态测试：取消 Turn A 的 Bootstrap 刷新完成时，如果用户已切到 Turn B，不得跳过 B 的详情刷新，也不得把 A 的错误显示到 B。
+- 新增 Bootstrap 失败恢复测试：取消已经生效但 Bootstrap 失败时，重试会同时恢复工作空间快照和 Turn 详情。
+- 详情请求改为按 `channelId:turnId` 分桶的 single-flight；晚到的刷新会在旧 Promise 收尾后补拉，不再复用已完成但尚未清理的旧结果。
+- 自动快照刷新抑制绑定到具体 `WorkspaceSnapshot + Turn key`，避免全局标志跨 Turn 泄漏；取消后的手动刷新不再重复请求。
+- 聚焦测试：6 files / 72 tests passed。
+- 全量测试：50 files / 423 tests passed。
+- `npm run build` 与 `git diff --check`：通过。

@@ -508,6 +508,7 @@ describe('WorkspaceShell', () => {
     await user.click(screen.getByRole('button', { name: '确认取消 Turn turn-1' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Turn 已取消，但详情刷新失败')
+    expect(getConversationTurn).toHaveBeenCalledTimes(2)
     expect(screen.getByText('已取消')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '取消 Turn' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '确认取消 Turn turn-1' })).not.toBeInTheDocument()
@@ -515,6 +516,90 @@ describe('WorkspaceShell', () => {
     await user.click(screen.getByRole('button', { name: '重试 Turn 详情' }))
 
     await waitFor(() => expect(getConversationTurn).toHaveBeenCalledTimes(3))
+    expect(screen.getByText('已取消')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('keeps cancellation refresh and errors scoped to the turn selected when they complete', async () => {
+    const activeSnapshot = structuredClone(snapshot)
+    activeSnapshot.activeTurnsByChannel = {
+      'channel-general': [
+        { turnId: 'turn-1', agentId: 'agent-1', phase: 'queued', queuePosition: 1 },
+        { turnId: 'turn-2', agentId: 'agent-1', phase: 'preparing', queuePosition: null },
+      ],
+      'channel-build': [],
+    }
+    const terminalSnapshot = structuredClone(activeSnapshot)
+    terminalSnapshot.activeTurnsByChannel = { 'channel-general': [], 'channel-build': [] }
+    const turnTwo = { ...turnDetail, turn: { ...turnDetail.turn, id: 'turn-2', status: 'responding' as const } }
+    const completedTurnTwo = {
+      ...turnTwo,
+      turn: { ...turnTwo.turn, status: 'completed' as const, completedAt: '2026-07-31T08:05:00.000Z' },
+    }
+    let resolveCancellationRefresh: (value: WorkspaceSnapshot) => void = () => undefined
+    let turnTwoReads = 0
+    const getConversationTurn = vi.fn().mockImplementation((_channelId: string, turnId: string) => {
+      if (turnId === 'turn-2') return Promise.resolve(turnTwoReads++ === 0 ? turnTwo : completedTurnTwo)
+      return Promise.resolve(turnDetail)
+    })
+    const api = makeApi({
+      getBootstrap: vi.fn()
+        .mockResolvedValueOnce(activeSnapshot)
+        .mockImplementationOnce(() => new Promise<WorkspaceSnapshot>((resolve) => { resolveCancellationRefresh = resolve })),
+      getConversationTurn,
+      cancelConversationTurn: vi.fn().mockResolvedValue(undefined),
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await user.click(await screen.findByRole('button', { name: '查看 Turn turn-1 活动详情' }))
+    await user.click(screen.getByRole('button', { name: '取消 Turn' }))
+    await user.click(screen.getByRole('button', { name: '确认取消 Turn turn-1' }))
+    await user.click(screen.getByRole('button', { name: '查看 Turn turn-2 活动详情' }))
+    expect(await screen.findByRole('heading', { name: 'Turn turn-2' })).toBeInTheDocument()
+
+    await act(async () => {
+      resolveCancellationRefresh(terminalSnapshot)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(await screen.findByText('已完成')).toBeInTheDocument()
+    expect(screen.queryByText(/Turn 已取消，但/)).not.toBeInTheDocument()
+  })
+
+  it('retries bootstrap and details after a confirmed cancellation bootstrap failure', async () => {
+    const activeSnapshot = structuredClone(snapshot)
+    activeSnapshot.activeTurnsByChannel = {
+      'channel-general': [{ turnId: 'turn-1', agentId: 'agent-1', phase: 'queued', queuePosition: 1 }],
+      'channel-build': [],
+    }
+    const cancelledSnapshot = structuredClone(activeSnapshot)
+    cancelledSnapshot.activeTurnsByChannel = { 'channel-general': [], 'channel-build': [] }
+    const cancelledDetail = {
+      ...turnDetail,
+      turn: { ...turnDetail.turn, status: 'cancelled' as const, completedAt: '2026-07-31T08:04:00.000Z' },
+    }
+    const getBootstrap = vi.fn()
+      .mockResolvedValueOnce(activeSnapshot)
+      .mockRejectedValueOnce(new Error('Bootstrap 暂时不可用'))
+      .mockResolvedValueOnce(cancelledSnapshot)
+    const getConversationTurn = vi.fn().mockResolvedValueOnce(turnDetail).mockResolvedValueOnce(cancelledDetail)
+    const api = makeApi({ getBootstrap, getConversationTurn, cancelConversationTurn: vi.fn().mockResolvedValue(undefined) })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await user.click(await screen.findByRole('button', { name: '查看 Turn turn-1 活动详情' }))
+    await user.click(screen.getByRole('button', { name: '取消 Turn' }))
+    await user.click(screen.getByRole('button', { name: '确认取消 Turn turn-1' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Turn 已取消，但工作空间刷新失败')
+    expect(screen.getByRole('button', { name: '查看 Turn turn-1 活动详情' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '重试 Turn 详情' }))
+
+    await waitFor(() => expect(getBootstrap).toHaveBeenCalledTimes(3))
+    expect(screen.queryByRole('button', { name: '查看 Turn turn-1 活动详情' })).not.toBeInTheDocument()
     expect(screen.getByText('已取消')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
