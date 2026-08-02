@@ -21,6 +21,10 @@ import { TaskExecutionCoordinator } from './application/task-execution-coordinat
 import { TaskReviewService } from './application/task-review-service'
 import { TaskScheduler } from './application/task-scheduler'
 import { TaskService } from './application/task-service'
+import {
+  DeterministicRollingThreadSummaryGenerator,
+  ThreadSummaryService,
+} from './application/thread-summary-service'
 import { NotFoundError, ValidationError, WorkspaceService, type WorkspaceCatalog, type WorkspaceMutationCatalog } from './application/workspace-service'
 import { getServiceConfig } from './config'
 import type {
@@ -149,6 +153,10 @@ export function createApp(options: CreateAppOptions = {}): Express {
     runtimes: options.conversationRuntimes ?? runtimes,
     messages,
     conversationDirectory: path.join(path.dirname(databasePath), 'conversations'),
+    threadSummaryService: new ThreadSummaryService(
+      repositories,
+      new DeterministicRollingThreadSummaryGenerator(),
+    ),
   })
   const channelContextResetService = new ChannelContextResetService(repositories, {
     cancelChannel: async (channelId) => conversationCoordinator.cancelChannel?.(channelId),

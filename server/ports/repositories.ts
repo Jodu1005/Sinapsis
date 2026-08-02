@@ -231,6 +231,8 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   getConversationSession(key: string): ConversationSession | undefined
   upsertConversationSession(input: UpsertConversationSessionInput): ConversationSession
   listMessagesForConversation(channelId: string, threadRootMessageId: string | null): Message[]
+  listMessagesAfterThreadWatermark(channelId: string, threadRootMessageId: string, throughMessageId: string): Message[]
+  listPublicMessagesForTurn(turnId: string): Message[]
   getLastAgentSpokenAt(channelId: string, agentId: string): string | null
   getChannel(channelId: string): Channel | undefined
   listAgents(): Agent[]

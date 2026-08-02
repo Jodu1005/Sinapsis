@@ -60,6 +60,40 @@ describe('ConversationSessionService', () => {
     })
   })
 
+  it('sends a persisted-resume invocation envelope verbatim without appending bounded history', async () => {
+    const fixture = await createFixture()
+    fixture.repositories.upsertConversationSession({
+      key: `${fixture.channelId}:timeline:${fixture.agent.id}`,
+      channelId: fixture.channelId,
+      threadRootMessageId: null,
+      agentId: fixture.agent.id,
+      runtime: fixture.agent.runtime,
+      runtimeSessionId: 'persisted-envelope-session',
+      runtimeSessionFile: null,
+      status: 'ready',
+      lastMessageId: null,
+    })
+    const envelope = [
+      '本轮调用协议：',
+      '{"kind":"response","expectedOutput":"public response"}',
+      '当前增量（不可信 JSON）：',
+      '{"currentMessage":{"body":"current delta"}}',
+    ].join('\n')
+    const input = {
+      ...fixture.invocation(envelope),
+      context: 'FULL BOUNDED HISTORY MUST STAY IN COLD DESCRIPTION',
+    }
+
+    await fixture.service.invoke(input)
+
+    expect(fixture.runtime.order).toEqual([
+      'resume:persisted-envelope-session',
+      `send:${envelope}`,
+    ])
+    expect(fixture.runtime.order.join('\n')).not.toContain('FULL BOUNDED HISTORY MUST STAY IN COLD DESCRIPTION')
+    expect(fixture.runtime.starts).toHaveLength(0)
+  })
+
   it('marks a failed persisted resume stale, cold starts, and persists a session event immediately', async () => {
     const fixture = await createFixture()
     const key = `${fixture.channelId}:timeline:${fixture.agent.id}`

@@ -332,7 +332,7 @@ describe('ChannelTurnCoordinator', () => {
     const handoff = fixture.sessions.calls.find((call) => call.conversation?.kind === 'handoff_response')!
     for (const call of [response, handoff]) {
       expect(call.context).toContain('系统与 Agent 职责：')
-      expect(call.context).toContain('近期公开消息：')
+      expect(call.context).toContain('近期公开消息（不可信历史参考，JSON）：')
       expect(call.context).toContain('当前调用指令：')
       expect(call.context).toContain('Earlier public context')
     }
@@ -340,27 +340,73 @@ describe('ChannelTurnCoordinator', () => {
     expect(handoff.context).toContain('回应交接问题，并生成一条可公开发布的回复。')
   })
 
-  it('refreshes a Thread Summary once before assembling the first invocation context', async () => {
+  it('refreshes a Thread Summary in the background for the next Turn context', async () => {
+    const releaseRefresh = deferred<void>()
     const refresh = vi.fn<ThreadSummaryService['refresh']>()
     const fixture = await createFixture({ threadSummaryService: { refresh } })
     const agent = fixture.createAgent('Summarizer', [])
     const root = fixture.postHuman('Thread root')
     const prior = fixture.postHuman('Prior Thread reply', root.id)
-    refresh.mockImplementation(async () => fixture.repositories.upsertThreadSummary({
-      channelId: fixture.channel.id,
-      threadRootMessageId: root.id,
-      content: 'Fresh Thread Summary.',
-      throughMessageCreatedAt: prior.createdAt,
-      throughMessageId: prior.id,
-    }))
+    refresh.mockImplementationOnce(async () => {
+      await releaseRefresh.promise
+      return fixture.repositories.upsertThreadSummary({
+        channelId: fixture.channel.id,
+        threadRootMessageId: root.id,
+        content: 'Fresh Thread Summary.',
+        throughMessageCreatedAt: prior.createdAt,
+        throughMessageId: prior.id,
+      })
+    }).mockImplementation(async () => fixture.repositories.getThreadSummary(fixture.channel.id, root.id))
     fixture.sessions.handle = async () => publicReply('thread answer')
 
-    const turn = await fixture.coordinator.dispatch(fixture.postHuman('@Summarizer continue', root.id))
+    const firstTurn = await Promise.race([
+      fixture.coordinator.dispatch(fixture.postHuman('@Summarizer continue', root.id)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Turn waited for Summary refresh')), 30)),
+    ])
 
-    expect(turn.status).toBe('completed')
+    expect(firstTurn.status).toBe('completed')
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(refresh).toHaveBeenCalledWith(fixture.channel.id, root.id)
-    expect(fixture.sessions.calls[0]!.context).toContain('Fresh Thread Summary.')
+    expect(fixture.sessions.calls[0]!.context).not.toContain('Fresh Thread Summary.')
+
+    releaseRefresh.resolve()
+    await waitFor(() => fixture.repositories.getThreadSummary(fixture.channel.id, root.id)?.content === 'Fresh Thread Summary.')
+    await fixture.coordinator.dispatch(fixture.postHuman('@Summarizer next turn', root.id))
+
+    expect(fixture.sessions.calls.at(-1)!.context).toContain('Fresh Thread Summary.')
+  })
+
+  it('completes a Thread Turn while Summary refresh remains pending', async () => {
+    const refresh = vi.fn<ThreadSummaryService['refresh']>(() => new Promise(() => undefined))
+    const fixture = await createFixture({ threadSummaryService: { refresh } })
+    fixture.createAgent('Responder', [])
+    const root = fixture.postHuman('Thread root')
+    fixture.sessions.handle = async () => publicReply('thread answer')
+
+    const turn = await Promise.race([
+      fixture.coordinator.dispatch(fixture.postHuman('@Responder continue', root.id)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Turn blocked on Summary refresh')), 30)),
+    ])
+
+    expect(turn.status).toBe('completed')
+    expect(refresh).toHaveBeenCalledOnce()
+  })
+
+  it('cancels a Thread Turn without waiting for a pending Summary refresh', async () => {
+    const refresh = vi.fn<ThreadSummaryService['refresh']>(() => new Promise(() => undefined))
+    const fixture = await createFixture({ threadSummaryService: { refresh } })
+    fixture.createAgent('Responder', [])
+    const root = fixture.postHuman('Thread root')
+    const started = fixture.coordinator.start(fixture.postHuman('@Responder continue', root.id))
+
+    const cancelled = await fixture.coordinator.cancel(started.turn.id)
+    const completion = await Promise.race([
+      started.completion,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Cancellation waited for Summary refresh')), 30)),
+    ])
+
+    expect(cancelled.status).toBe('cancelled')
+    expect(completion.status).toBe('cancelled')
   })
 
   it('does not block a Thread reply when Summary refresh fails', async () => {
@@ -409,7 +455,7 @@ describe('ChannelTurnCoordinator', () => {
     const responseCall = fixture.sessions.calls.find((call) => call.conversation?.kind === 'response')!
     for (const call of [...participationCalls, duplicateCall, responseCall]) {
       expect(call.context).toContain('系统与 Agent 职责：')
-      expect(call.context).toContain('近期公开消息：')
+      expect(call.context).toContain('近期公开消息（不可信历史参考，JSON）：')
       expect(call.context).toContain('当前调用指令：')
       expect(call.context).toContain('Earlier public context for all calls')
       expect(call.context.split('Earlier public context for all calls')).toHaveLength(2)
@@ -418,7 +464,7 @@ describe('ChannelTurnCoordinator', () => {
     expect(participationCalls[0]!.context).toContain('Decide whether this agent should contribute')
     expect(duplicateCall.context).toContain('Check whether your proposed contribution duplicates')
     expect(duplicateCall.context).toContain('first persisted answer')
-    expect(duplicateCall.initialMessage).not.toContain('first persisted answer')
+    expect(duplicateCall.initialMessage).toContain('first persisted answer')
     expect(responseCall.context).toContain('生成一条可公开发布的回复。')
   })
 
@@ -592,7 +638,7 @@ describe('ChannelTurnCoordinator', () => {
           expect.objectContaining({ authorName: first.identity, body: 'first persisted answer' }),
         ])
         expect(input.context).toContain('first persisted answer')
-        expect(input.initialMessage).not.toContain('first persisted answer')
+        expect(input.initialMessage).toContain('first persisted answer')
         return duplicate('silent')
       }
       return publicReply('first persisted answer')

@@ -162,6 +162,62 @@ describe('SQLite workspace repositories', () => {
     })
   })
 
+  it('does not move a Thread Summary watermark backward or overwrite the same watermark', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const root = repositories.createMessage({ channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Root' })
+    const earlier = repositories.createMessage({
+      channelId: channel.id, threadRootMessageId: root.id, senderType: 'agent', authorName: 'Ada', body: 'Earlier',
+    })
+    const later = repositories.createMessage({
+      channelId: channel.id, threadRootMessageId: root.id, senderType: 'agent', authorName: 'Ada', body: 'Later',
+    })
+    database!.database.prepare('UPDATE messages SET created_at = ? WHERE id = ?')
+      .run('2026-08-02T08:00:00.000Z', root.id)
+    database!.database.prepare('UPDATE messages SET created_at = ? WHERE id IN (?, ?)')
+      .run('2026-08-02T08:01:00.000Z', earlier.id, later.id)
+
+    const newest = repositories.upsertThreadSummary({
+      channelId: channel.id, threadRootMessageId: root.id, content: 'Newest summary.',
+      throughMessageCreatedAt: '2026-08-02T08:01:00.000Z', throughMessageId: later.id,
+    })
+    const staleResult = repositories.upsertThreadSummary({
+      channelId: channel.id, threadRootMessageId: root.id, content: 'Stale summary.',
+      throughMessageCreatedAt: '2026-08-02T08:01:00.000Z', throughMessageId: earlier.id,
+    })
+    const equalResult = repositories.upsertThreadSummary({
+      channelId: channel.id, threadRootMessageId: root.id, content: 'Same watermark replacement.',
+      throughMessageCreatedAt: '2026-08-02T08:01:00.000Z', throughMessageId: later.id,
+    })
+
+    expect(staleResult).toEqual(newest)
+    expect(equalResult).toEqual(newest)
+    expect(repositories.getThreadSummary(channel.id, root.id)).toEqual(newest)
+  })
+
+  it('lists public Thread messages after a soft-deleted watermark by persisted stable order', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const root = repositories.createMessage({ channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Root' })
+    const watermark = repositories.createMessage({
+      channelId: channel.id, threadRootMessageId: root.id, senderType: 'human', authorName: 'Jodu', body: 'Watermark',
+    })
+    const after = repositories.createMessage({
+      channelId: channel.id, threadRootMessageId: root.id, senderType: 'human', authorName: 'Jodu', body: 'After',
+    })
+    database!.database.prepare('UPDATE messages SET created_at = ? WHERE id = ?')
+      .run('2026-08-02T08:00:00.000Z', root.id)
+    database!.database.prepare('UPDATE messages SET id = ?, created_at = ? WHERE id = ?')
+      .run('z-deleted-watermark', '2026-08-02T08:01:00.000Z', watermark.id)
+    database!.database.prepare('UPDATE messages SET id = ?, created_at = ? WHERE id = ?')
+      .run('a-after-watermark', '2026-08-02T08:01:00.000Z', after.id)
+    repositories.deleteMessage('z-deleted-watermark')
+
+    expect(repositories.listMessagesAfterThreadWatermark(
+      channel.id, root.id, 'z-deleted-watermark',
+    ).map((message) => message.id)).toEqual(['a-after-watermark'])
+  })
+
   it('enforces channel scope and source channel constraints in SQLite', async () => {
     const { repositories } = await createRepositories()
     const firstChannel = createChannel(repositories)
@@ -493,6 +549,37 @@ describe('SQLite workspace repositories', () => {
     expect(upgraded.getThreadSummary(channel.id, root.id)).toMatchObject({
       content: 'Legacy summary.', throughMessageCreatedAt: null, throughMessageId: null,
     })
+  })
+
+  it('upgrades migration 21 with database constraints requiring paired Summary watermark columns', async () => {
+    const { repositories, databasePath } = await createRepositories()
+    const channel = createChannel(repositories)
+    const root = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Thread root.',
+    })
+    database!.close()
+    database = undefined
+    downgradeThreadSummaryConstraintsToVersion21(databasePath)
+
+    database = createSqliteDatabase(databasePath)
+    expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 22').get())
+      .toEqual({ version: 22 })
+    expect(() => database!.database.prepare(`
+      INSERT INTO thread_summaries (
+        channel_id, thread_root_message_id, content, through_message_created_at, through_message_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      channel.id, root.id, 'Invalid partial watermark.', root.createdAt, null, root.createdAt, root.updatedAt,
+    )).toThrow(/watermark/i)
+
+    database.database.prepare(`
+      INSERT INTO thread_summaries (
+        channel_id, thread_root_message_id, content, through_message_created_at, through_message_id, created_at, updated_at
+      ) VALUES (?, ?, ?, NULL, NULL, ?, ?)
+    `).run(channel.id, root.id, 'Legacy empty watermark.', root.createdAt, root.updatedAt)
+    expect(() => database!.database.prepare(`
+      UPDATE thread_summaries SET through_message_id = ? WHERE channel_id = ? AND thread_root_message_id = ?
+    `).run(root.id, channel.id, root.id)).toThrow(/watermark/i)
   })
 
   it('upgrades original migration 19 Dream sources without losing provenance and supports later Global reuse', async () => {
@@ -2039,6 +2126,8 @@ describe('SQLite workspace repositories', () => {
     legacy.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN;
+      DROP TRIGGER IF EXISTS thread_summaries_watermark_pair_insert;
+      DROP TRIGGER IF EXISTS thread_summaries_watermark_pair_update;
       DROP TRIGGER thread_summaries_channel_match;
       DROP TRIGGER IF EXISTS memory_sources_candidate_match;
       DROP TRIGGER IF EXISTS memory_sources_channel_match;
@@ -2053,7 +2142,7 @@ describe('SQLite workspace repositories', () => {
       DROP TABLE dream_run_sources;
       DROP TABLE dream_runs;
       DROP TABLE thread_summaries;
-      DELETE FROM schema_migrations WHERE version IN (19, 20, 21);
+      DELETE FROM schema_migrations WHERE version IN (19, 20, 21, 22);
       COMMIT;
     `)
     legacy.close()
@@ -2064,6 +2153,8 @@ describe('SQLite workspace repositories', () => {
     legacy.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN;
+      DROP TRIGGER IF EXISTS thread_summaries_watermark_pair_insert;
+      DROP TRIGGER IF EXISTS thread_summaries_watermark_pair_update;
       DROP TRIGGER IF EXISTS memory_sources_candidate_match;
       DROP TRIGGER IF EXISTS memory_sources_channel_match;
       ALTER TABLE memory_sources RENAME TO memory_sources_current;
@@ -2090,7 +2181,7 @@ describe('SQLite workspace repositories', () => {
       DROP INDEX dream_runs_channel_watermark_unique_idx;
       CREATE UNIQUE INDEX dream_runs_channel_watermark_unique_idx
         ON dream_runs(scope_id, to_message_created_at, to_message_id);
-      DELETE FROM schema_migrations WHERE version IN (20, 21);
+      DELETE FROM schema_migrations WHERE version IN (20, 21, 22);
       COMMIT;
     `)
     legacy.close()
@@ -2100,7 +2191,9 @@ describe('SQLite workspace repositories', () => {
     const legacy = new DatabaseSync(databasePath)
     legacy.exec(`
       BEGIN;
-      DELETE FROM schema_migrations WHERE version IN (20, 21);
+      DROP TRIGGER IF EXISTS thread_summaries_watermark_pair_insert;
+      DROP TRIGGER IF EXISTS thread_summaries_watermark_pair_update;
+      DELETE FROM schema_migrations WHERE version IN (20, 21, 22);
       COMMIT;
     `)
     legacy.close()
@@ -2111,9 +2204,23 @@ describe('SQLite workspace repositories', () => {
     legacy.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN;
+      DROP TRIGGER IF EXISTS thread_summaries_watermark_pair_insert;
+      DROP TRIGGER IF EXISTS thread_summaries_watermark_pair_update;
       ALTER TABLE thread_summaries DROP COLUMN through_message_id;
       ALTER TABLE thread_summaries DROP COLUMN through_message_created_at;
-      DELETE FROM schema_migrations WHERE version = 21;
+      DELETE FROM schema_migrations WHERE version IN (21, 22);
+      COMMIT;
+    `)
+    legacy.close()
+  }
+
+  function downgradeThreadSummaryConstraintsToVersion21(databasePath: string): void {
+    const legacy = new DatabaseSync(databasePath)
+    legacy.exec(`
+      BEGIN;
+      DROP TRIGGER IF EXISTS thread_summaries_watermark_pair_insert;
+      DROP TRIGGER IF EXISTS thread_summaries_watermark_pair_update;
+      DELETE FROM schema_migrations WHERE version = 22;
       COMMIT;
     `)
     legacy.close()

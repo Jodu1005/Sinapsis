@@ -727,6 +727,28 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(21, new Date().toISOString())
     }
 
+    const twentySecondMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 22').get()
+    if (!twentySecondMigration) {
+      database.exec(`
+        CREATE TRIGGER thread_summaries_watermark_pair_insert
+        BEFORE INSERT ON thread_summaries
+        WHEN (NEW.through_message_created_at IS NULL AND NEW.through_message_id IS NOT NULL)
+          OR (NEW.through_message_created_at IS NOT NULL AND NEW.through_message_id IS NULL)
+        BEGIN
+          SELECT RAISE(ABORT, 'Thread Summary watermark columns must both be NULL or both be non-NULL.');
+        END;
+
+        CREATE TRIGGER thread_summaries_watermark_pair_update
+        BEFORE UPDATE OF through_message_created_at, through_message_id ON thread_summaries
+        WHEN (NEW.through_message_created_at IS NULL AND NEW.through_message_id IS NOT NULL)
+          OR (NEW.through_message_created_at IS NOT NULL AND NEW.through_message_id IS NULL)
+        BEGIN
+          SELECT RAISE(ABORT, 'Thread Summary watermark columns must both be NULL or both be non-NULL.');
+        END;
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(22, new Date().toISOString())
+    }
+
     database.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS conversation_sessions_grain_unique_idx
         ON conversation_sessions(channel_id, COALESCE(thread_root_message_id, ''), agent_id);

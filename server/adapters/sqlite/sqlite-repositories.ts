@@ -1380,6 +1380,12 @@ export class SqliteRepositories implements WorkspaceRepositories {
       const content = requireText(input.content, 'Thread summary content')
       const updatedAt = now()
       const existing = this.getThreadSummary(input.channelId, input.threadRootMessageId)
+      if (existing?.throughMessageId) {
+        const existingPosition = readMessagePosition(database, existing.throughMessageId)
+        const nextPosition = readMessagePosition(database, input.throughMessageId)
+        if (!existingPosition || !nextPosition) throw new Error('Thread summary watermark message does not exist.')
+        if (compareMessagePositions(nextPosition, existingPosition) <= 0) return existing
+      }
       database.prepare(`
         INSERT INTO thread_summaries (
           channel_id, thread_root_message_id, content, through_message_created_at, through_message_id, created_at, updated_at
@@ -1393,11 +1399,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
         input.channelId, input.threadRootMessageId, content, input.throughMessageCreatedAt, input.throughMessageId,
         existing?.createdAt ?? updatedAt, updatedAt,
       )
-      return {
-        channelId: input.channelId, threadRootMessageId: input.threadRootMessageId, content,
-        throughMessageCreatedAt: input.throughMessageCreatedAt, throughMessageId: input.throughMessageId,
-        createdAt: existing?.createdAt ?? updatedAt, updatedAt,
-      }
+      return this.getThreadSummary(input.channelId, input.threadRootMessageId)!
     })
   }
 
@@ -1973,6 +1975,53 @@ export class SqliteRepositories implements WorkspaceRepositories {
           ORDER BY messages.created_at, messages.rowid
         `).all(channelId, threadRootMessageId, threadRootMessageId)
     return (rows as unknown as MessageRow[]).map(mapMessage)
+  }
+
+  listMessagesAfterThreadWatermark(
+    channelId: string,
+    threadRootMessageId: string,
+    throughMessageId: string,
+  ): Message[] {
+    const rows = this.sqlite.database.prepare(`
+      WITH watermark AS (
+        SELECT messages.created_at, messages.rowid
+        FROM messages
+        WHERE messages.id = ?
+          AND messages.channel_id = ?
+          AND (messages.id = ? OR messages.thread_root_id = ?)
+      )
+      SELECT messages.*
+      FROM messages
+      JOIN channels ON channels.id = messages.channel_id
+      JOIN watermark
+      WHERE messages.channel_id = ?
+        AND (messages.id = ? OR messages.thread_root_id = ?)
+        AND messages.deleted_at IS NULL
+        AND (channels.context_reset_at IS NULL OR messages.created_at > channels.context_reset_at)
+        AND (
+          messages.created_at > watermark.created_at
+          OR (messages.created_at = watermark.created_at AND messages.rowid > watermark.rowid)
+        )
+      ORDER BY messages.created_at, messages.rowid
+    `).all(
+      throughMessageId, channelId, threadRootMessageId, threadRootMessageId,
+      channelId, threadRootMessageId, threadRootMessageId,
+    )
+    return (rows as unknown as MessageRow[]).map(mapMessage)
+  }
+
+  listPublicMessagesForTurn(turnId: string): Message[] {
+    const rows = this.sqlite.database.prepare(`
+      SELECT messages.*
+      FROM agent_invocations
+      JOIN conversation_invocation_messages
+        ON conversation_invocation_messages.invocation_id = agent_invocations.id
+      JOIN messages ON messages.id = conversation_invocation_messages.message_id
+      WHERE agent_invocations.turn_id = ?
+        AND messages.deleted_at IS NULL
+      ORDER BY messages.created_at, messages.rowid
+    `).all(turnId) as unknown as MessageRow[]
+    return rows.map(mapMessage)
   }
 
   getLastAgentSpokenAt(channelId: string, agentId: string): string | null {
@@ -2692,6 +2741,21 @@ function mapThreadSummary(row: ThreadSummaryRow): ThreadSummary {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
+}
+
+interface MessagePosition {
+  createdAt: string
+  rowId: number
+}
+
+function readMessagePosition(database: DatabaseSync, messageId: string): MessagePosition | undefined {
+  return database.prepare(`
+    SELECT created_at AS createdAt, rowid AS rowId FROM messages WHERE id = ?
+  `).get(messageId) as MessagePosition | undefined
+}
+
+function compareMessagePositions(left: MessagePosition, right: MessagePosition): number {
+  return left.createdAt.localeCompare(right.createdAt) || left.rowId - right.rowId
 }
 
 function mapConversationTurn(row: ConversationTurnRow): ConversationTurn {

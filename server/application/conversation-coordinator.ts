@@ -7,6 +7,7 @@ import { ChannelMessageService } from './channel-message-service'
 import { ChannelTurnCoordinator, type TurnActivity } from './channel-turn-coordinator'
 import { ContextAssembler } from './context-assembler'
 import { ConversationSessionService } from './conversation-session-service'
+import type { ThreadSummaryService } from './thread-summary-service'
 
 export interface ConversationCoordinatorOptions {
   repositories?: WorkspaceRepositories
@@ -15,6 +16,7 @@ export interface ConversationCoordinatorOptions {
   messages?: ChannelMessageService
   sessions?: ConversationSessionService
   contextAssembler?: ContextAssembler
+  threadSummaryService?: Pick<ThreadSummaryService, 'refresh'>
   turnCoordinator?: ChannelTurnCoordinator
 }
 
@@ -34,6 +36,7 @@ export class ConversationCoordinator {
       messages: options.messages,
       sessions: options.sessions,
       contextAssembler: options.contextAssembler,
+      threadSummaryService: options.threadSummaryService,
     })
   }
 

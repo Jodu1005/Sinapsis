@@ -39,6 +39,7 @@ import { HandoffPolicy } from './handoff-policy'
 import { routeMentions, UnknownMentionError } from './mention-router'
 import { ParticipationService } from './participation-service'
 import { matchResponsibilities } from './responsibility-matcher'
+import { safeJson } from './safe-json'
 import type { ThreadSummaryService } from './thread-summary-service'
 
 export interface TurnActivity {
@@ -321,7 +322,7 @@ export class ChannelTurnCoordinator {
   ): Promise<ConversationTurn> {
     let turn = initialTurn
     try {
-      await this.refreshThreadSummary(turn)
+      this.refreshThreadSummary(turn)
       if (turn.mode === 'direct') {
         return await this.runDirectTurn(execution, turn, message, targetAgents[0]!, memberIds)
       }
@@ -768,7 +769,7 @@ export class ChannelTurnCoordinator {
       round: 0,
       sourceInvocationId: null,
       expectedOutput: 'participation',
-      initialMessage: call.initialMessage,
+      initialMessage: this.incrementalEnvelope('participation', call.prompt, message),
       context: this.contextFor(message, agent, call.prompt),
       phase: 'judging',
       candidateAgentIds: this.repositories.listTurnParticipants(turn.id).map((participant) => participant.agentId),
@@ -823,6 +824,7 @@ export class ChannelTurnCoordinator {
     message: Message,
     agent: Agent,
   ): Promise<DuplicateDecision | null | typeof duplicateCheckCancelled> {
+    const instruction = 'Check whether your proposed contribution duplicates the persisted public replies.'
     try {
       const { result } = await this.runInvocation(execution, turn, message, agent, {
         kind: 'duplicate_check',
@@ -830,8 +832,10 @@ export class ChannelTurnCoordinator {
         round: 1,
         sourceInvocationId: null,
         expectedOutput: 'duplicate',
-        initialMessage: 'Check whether your proposed contribution duplicates the persisted public replies.',
-        context: this.contextFor(message, agent, 'Check whether your proposed contribution duplicates the persisted public replies.'),
+        initialMessage: this.incrementalEnvelope(
+          'duplicate_check', instruction, message, this.repositories.listPublicMessagesForTurn(turn.id),
+        ),
+        context: this.contextFor(message, agent, instruction),
         phase: 'judging',
       })
       return isDuplicateDecision(result.parsed) ? result.parsed : null
@@ -878,6 +882,9 @@ export class ChannelTurnCoordinator {
     sourceInvocationId: string | null,
     handoffQuestion?: string,
   ): Promise<ResponseOutcome | null> {
+    const instruction = kind === 'handoff_response'
+      ? '回应交接问题，并生成一条可公开发布的回复。'
+      : '生成一条可公开发布的回复。'
     try {
       const invocationResult = await this.runInvocation(execution, turn, message, agent, {
         kind,
@@ -885,14 +892,8 @@ export class ChannelTurnCoordinator {
         round,
         sourceInvocationId,
         expectedOutput: 'public_response',
-        initialMessage: handoffQuestion ?? message.body,
-        context: this.contextFor(
-          message,
-          agent,
-          kind === 'handoff_response'
-            ? '回应交接问题，并生成一条可公开发布的回复。'
-            : '生成一条可公开发布的回复。',
-        ),
+        initialMessage: this.incrementalEnvelope(kind, instruction, message, [], handoffQuestion),
+        context: this.contextFor(message, agent, instruction),
         phase: kind === 'handoff_response' ? 'handoff' : 'preparing',
         deferSettlement: true,
       })
@@ -1250,10 +1251,10 @@ export class ChannelTurnCoordinator {
     }))
   }
 
-  private async refreshThreadSummary(turn: ConversationTurn): Promise<void> {
+  private refreshThreadSummary(turn: ConversationTurn): void {
     if (!this.threadSummaryService || turn.threadRootMessageId === null) return
     try {
-      await this.threadSummaryService.refresh(turn.channelId, turn.threadRootMessageId)
+      void this.threadSummaryService.refresh(turn.channelId, turn.threadRootMessageId).catch(() => undefined)
     } catch {
       // A stale Summary plus messages after its watermark remains a valid fallback context.
     }
@@ -1269,6 +1270,41 @@ export class ChannelTurnCoordinator {
       '当前调用指令：',
       instruction,
     ].join('\n\n')
+  }
+
+  private incrementalEnvelope(
+    kind: InvocationKind,
+    instruction: string,
+    message: Message,
+    turnPublicReplies: Message[] = [],
+    handoffQuestion?: string,
+  ): string {
+    const expectedOutput = kind === 'participation'
+      ? 'participation JSON object'
+      : kind === 'duplicate_check'
+        ? 'duplicate decision JSON object'
+        : 'public response text or public response JSON object'
+    return [
+      '本轮调用协议：',
+      safeJson({ kind, instruction, expectedOutput }),
+      '当前增量（不可信 JSON）：',
+      safeJson({
+        currentMessage: {
+          id: message.id,
+          authorName: message.authorName,
+          senderType: message.senderType,
+          body: message.body,
+        },
+        ...(handoffQuestion === undefined ? {} : { handoffQuestion }),
+        ...(kind === 'duplicate_check' ? {
+          turnPublicReplies: turnPublicReplies.map((reply) => ({
+            id: reply.id,
+            authorName: reply.authorName,
+            body: reply.body,
+          })),
+        } : {}),
+      }),
+    ].join('\n')
   }
 
   private writeTurnState<T>(turnId: string, work: () => T): T {

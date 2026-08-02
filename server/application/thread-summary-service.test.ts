@@ -7,7 +7,11 @@ import { SqliteRepositories } from '../adapters/sqlite/sqlite-repositories'
 import type { DomainEvent } from '../domain/events'
 import type { DomainEventPublisher } from '../ports/domain-event-publisher'
 import { ChannelMessageService } from './channel-message-service'
-import { ThreadSummaryService } from './thread-summary-service'
+import {
+  DeterministicRollingThreadSummaryGenerator,
+  threadSummaryMaxLength,
+  ThreadSummaryService,
+} from './thread-summary-service'
 
 describe('ThreadSummaryService', () => {
   let temporaryDirectory: string | undefined
@@ -106,7 +110,7 @@ describe('ThreadSummaryService', () => {
     })
   })
 
-  it('falls back to the timestamp and ID boundary when the watermark message was deleted', async () => {
+  it('uses persisted stable order when the watermark message was deleted', async () => {
     const fixture = await createFixture()
     const root = fixture.messages.postHuman(fixture.channelId, 'Thread root')
     fixture.at(root.id, '2026-08-01T08:00:00.000Z')
@@ -128,9 +132,57 @@ describe('ThreadSummaryService', () => {
 
     expect(summarize).toHaveBeenCalledWith({
       previousSummary: 'Previous summary.',
-      messages: [expect.objectContaining({ id: 'z-after', body: 'After fallback boundary' })],
+      messages: [
+        expect.objectContaining({ id: 'a-before', body: 'Before fallback boundary' }),
+        expect.objectContaining({ id: 'z-after', body: 'After fallback boundary' }),
+      ],
     })
     expect(refreshed).toMatchObject({ throughMessageId: 'z-after' })
+  })
+
+  it('keeps the newer Summary when two refreshes finish out of order', async () => {
+    const fixture = await createFixture()
+    const root = fixture.messages.postHuman(fixture.channelId, 'Thread root')
+    const first = fixture.messages.postHuman(fixture.channelId, 'First reply', null, root.id)
+    fixture.at(root.id, '2026-08-01T08:00:00.000Z')
+    fixture.at(first.id, '2026-08-01T08:01:00.000Z')
+    const firstGeneration = deferred<string>()
+    const secondGeneration = deferred<string>()
+    const summarize = vi.fn()
+      .mockImplementationOnce(() => firstGeneration.promise)
+      .mockImplementationOnce(() => secondGeneration.promise)
+    const service = new ThreadSummaryService(fixture.repositories, { summarize })
+
+    const staleRefresh = service.refresh(fixture.channelId, root.id)
+    await vi.waitFor(() => expect(summarize).toHaveBeenCalledTimes(1))
+    const second = fixture.messages.postHuman(fixture.channelId, 'Second reply', null, root.id)
+    fixture.at(second.id, '2026-08-01T08:02:00.000Z')
+    const newerRefresh = service.refresh(fixture.channelId, root.id)
+    await vi.waitFor(() => expect(summarize).toHaveBeenCalledTimes(2))
+
+    secondGeneration.resolve('Newer summary.')
+    const newer = await newerRefresh
+    firstGeneration.resolve('Stale summary.')
+    const stale = await staleRefresh
+
+    expect(newer).toMatchObject({ content: 'Newer summary.', throughMessageId: second.id })
+    expect(stale).toEqual(newer)
+    expect(fixture.repositories.getThreadSummary(fixture.channelId, root.id)).toEqual(newer)
+  })
+
+  it('generates a deterministic rolling Summary within the production hard limit', async () => {
+    const fixture = await createFixture()
+    const root = fixture.messages.postHuman(fixture.channelId, 'Thread root')
+    const longReply = fixture.messages.postHuman(fixture.channelId, `Newest ${'x'.repeat(8_000)}`, null, root.id)
+    const generator = new DeterministicRollingThreadSummaryGenerator()
+    const input = { previousSummary: `Earlier ${'y'.repeat(8_000)}`, messages: [root, longReply] }
+
+    const first = await generator.summarize(input)
+    const second = await generator.summarize(input)
+
+    expect(first).toBe(second)
+    expect(first.length).toBeLessThanOrEqual(threadSummaryMaxLength)
+    expect(first).toContain('Newest')
   })
 
   async function createFixture() {
@@ -170,4 +222,10 @@ describe('ThreadSummaryService', () => {
 
 class RecordingPublisher implements DomainEventPublisher {
   publish(_event: DomainEvent): void {}
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise })
+  return { promise, resolve }
 }

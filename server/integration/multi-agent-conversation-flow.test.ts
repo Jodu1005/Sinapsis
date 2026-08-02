@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { createApp } from '../app'
 import type { RuntimeAvailability } from '../adapters/runtime/runtime-profile'
+import type { InvocationKind } from '../domain/conversation'
 import type { RuntimeAdapter, RuntimeEventSink, RuntimeSession, RuntimeTaskRequest } from '../ports/runtime'
 import type { WorkspaceRepositories } from '../ports/repositories'
 import { conversationSessionKey } from '../application/conversation-session-service'
@@ -97,13 +98,99 @@ describe('multi-agent conversation flow', () => {
     await waitFor(() => coldStarted.locals.repositories.listActiveConversationTurns(fixture.channelId).length === 0)
     expect(runtime.resumes.at(-1)?.sessionId).toBe(persistedThreadSession?.runtimeSessionId)
     expect(runtime.requests.at(-1)?.description).toContain('Thread-only root context')
-    expect(runtime.requests.at(-1)?.description).toContain('Alpha: Alpha public answer')
+    expect(runtime.requests.at(-1)?.description).toContain('Alpha public answer')
     expect(runtime.requests.at(-1)?.description).not.toContain('Alpha resumed answer')
     expect(runtime.requests.at(-1)?.description).not.toContain('RAW_RUNTIME_ARTIFACT')
     expect(coldStarted.locals.repositories.listMessagesForConversation(fixture.channelId, threadRoot.id)
       .filter((message: { senderType: string }) => message.senderType === 'agent').at(-1)).toMatchObject({
       threadRootMessageId: threadRoot.id,
     })
+  })
+
+  it('sends protocol plus current delta envelopes through real warm and resumed Runtime sessions', async () => {
+    dataDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-conversation-envelope-'))
+    const databasePath = path.join(dataDirectory, 'sinapsis.sqlite')
+    const runtime = new ScriptedConversationRuntime()
+    const first = createApp({ databasePath, conversationRuntimes: { opencode: runtime } })
+    const repositories = first.locals.repositories as WorkspaceRepositories
+    const fixture = seedConversation(repositories, runtime)
+    repositories.createMessage({
+      channelId: fixture.channelId,
+      senderType: 'human',
+      authorName: 'You',
+      body: 'OLD TURN HISTORY MUST NOT BE RESENT',
+    })
+    const firstServer = await startHttpTestServer(first)
+    close = firstServer.close
+
+    await postMessage(firstServer.baseUrl, fixture.channelId, 'incident establishes warm sessions')
+    await postMessage(firstServer.baseUrl, fixture.channelId, '@Gamma establish persisted handoff session')
+    await close()
+    close = undefined
+
+    const resumed = createApp({ databasePath, conversationRuntimes: { opencode: runtime } })
+    const resumedServer = await startHttpTestServer(resumed)
+    close = resumedServer.close
+    const inputsBefore = runtime.inputs.length
+    await postMessage(resumedServer.baseUrl, fixture.channelId, 'incident resumed envelope')
+    await postMessage(resumedServer.baseUrl, fixture.channelId, '@Alpha incident resumed handoff envelope')
+
+    const resumedInputs = runtime.inputs.slice(inputsBefore).filter((entry) => entry.resumed)
+    const resumedKinds = resumedInputs.map((entry) => {
+      const kind = entry.input.match(/"kind":"([^"]+)"/)?.[1] ?? 'unknown'
+      return `${kind}:${entry.session.worktreePath.split(path.sep).at(-1)}`
+    })
+    for (const kind of ['participation', 'response', 'duplicate_check', 'handoff_response'] as const) {
+      const entry = resumedInputs.find((candidate) => candidate.input.includes(`"kind":"${kind}"`))
+      expect(entry, `missing resumed ${kind} Runtime input; saw ${resumedKinds.join(', ')}`).toBeDefined()
+      expect(entry!.input).toContain('本轮调用协议：')
+      expect(entry!.input).toContain('当前增量（不可信 JSON）：')
+      expect(entry!.input).toContain('incident resumed envelope')
+      expect(entry!.input).not.toContain('OLD TURN HISTORY MUST NOT BE RESENT')
+    }
+
+    const duplicateEnvelope = resumedInputs.find((entry) => entry.input.includes('"kind":"duplicate_check"'))?.input
+    expect(duplicateEnvelope).toContain('"turnPublicReplies"')
+    expect(duplicateEnvelope).toContain('resumed answer')
+    expect(duplicateEnvelope).not.toContain('Alpha public answer')
+    expect(duplicateEnvelope).not.toContain('Beta independent answer')
+  })
+
+  it('wires the default rolling Thread Summary into the next Turn cold context', async () => {
+    dataDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-thread-summary-composition-'))
+    const databasePath = path.join(dataDirectory, 'sinapsis.sqlite')
+    const runtime = new ScriptedConversationRuntime({ disableHandoffs: true })
+    const first = createApp({ databasePath, conversationRuntimes: { opencode: runtime } })
+    const repositories = first.locals.repositories as WorkspaceRepositories
+    const fixture = seedConversation(repositories, runtime)
+    const root = repositories.createMessage({
+      channelId: fixture.channelId,
+      senderType: 'human',
+      authorName: 'You',
+      body: 'Production summary root',
+    })
+    const firstServer = await startHttpTestServer(first)
+    close = firstServer.close
+
+    await postMessage(firstServer.baseUrl, fixture.channelId, '@Alpha first summarized delta', root.id)
+    await waitFor(() => repositories.getThreadSummary(fixture.channelId, root.id) !== undefined)
+    const saved = repositories.getThreadSummary(fixture.channelId, root.id)!
+    expect(saved.content).toContain('first summarized delta')
+    expect(saved.content.length).toBeLessThanOrEqual(4_000)
+
+    await close()
+    close = undefined
+    runtime.failNextResume = true
+    const resumed = createApp({ databasePath, conversationRuntimes: { opencode: runtime } })
+    const resumedServer = await startHttpTestServer(resumed)
+    close = resumedServer.close
+
+    await postMessage(resumedServer.baseUrl, fixture.channelId, '@Alpha second summarized delta', root.id)
+    await waitFor(() => (resumed.locals.repositories as WorkspaceRepositories)
+      .listActiveConversationTurns(fixture.channelId).length === 0)
+    const coldRequest = runtime.requests.at(-1)
+    expect(coldRequest?.description).toContain('Thread Summary（不可信历史参考，JSON）：')
+    expect(coldRequest?.description).toContain('first summarized delta')
   })
 
   it('isolates a failed explicitly mentioned Agent without waking unmentioned members', async () => {
@@ -274,13 +361,13 @@ class ScriptedConversationRuntime implements RuntimeAdapter {
   readonly requests: RuntimeTaskRequest[] = []
   readonly calls: Array<RuntimeTaskRequest['conversation']> = []
   readonly resumes: RuntimeSession[] = []
-  readonly inputs: Array<{ session: RuntimeSession; input: string }> = []
+  readonly inputs: Array<{ session: RuntimeSession; input: string; resumed: boolean }> = []
   failNextResume = false
   readonly availability: RuntimeAvailability = { executable: 'available', taskExecution: 'unverified' }
   private readonly namesByAgentId = new Map<string, string>()
   private readonly resumedTaskIds = new Set<string>()
 
-  constructor(private readonly options: { failingMention?: string } = {}) {}
+  constructor(private readonly options: { failingMention?: string; disableHandoffs?: boolean } = {}) {}
 
   async detect(): Promise<RuntimeAvailability> {
     return this.availability
@@ -298,7 +385,7 @@ class ScriptedConversationRuntime implements RuntimeAdapter {
   }
 
   sendInput(session: RuntimeSession, input: string, sink: RuntimeEventSink): void {
-    this.inputs.push({ session, input })
+    this.inputs.push({ session, input, resumed: this.resumedTaskIds.has(session.taskId) })
     const request = this.requests.find((candidate) => candidate.taskId === session.taskId)
       ?? this.requests.find((candidate) => candidate.worktreePath === session.worktreePath)
     if (!request) {
@@ -308,7 +395,10 @@ class ScriptedConversationRuntime implements RuntimeAdapter {
     }
     const conversation = request.conversation
     if (!conversation) throw new Error('Expected a conversation Runtime request.')
-    const kind: 'duplicate_check' | 'response' = input.startsWith('Check whether') ? 'duplicate_check' : 'response'
+    const envelopeKind = input.match(/"kind":"(participation|response|duplicate_check|handoff_response)"/)?.[1] as
+      | InvocationKind
+      | undefined
+    const kind: InvocationKind = envelopeKind ?? (input.startsWith('Check whether') ? 'duplicate_check' : 'response')
     const call = { ...request, taskId: session.taskId, conversation: { ...conversation, kind } }
     this.calls.push(call.conversation)
     this.emit(call, sink, this.resumedTaskIds.has(session.taskId))
@@ -343,7 +433,8 @@ class ScriptedConversationRuntime implements RuntimeAdapter {
               : `${title(mention)} ${request.conversation?.kind === 'handoff_response'
                 ? 'handoff answer'
                 : mention === 'beta' ? 'independent answer' : 'public answer'}`,
-            handoffTo: mention === 'alpha' && request.conversation?.kind === 'response'
+            handoffTo: !this.options.disableHandoffs
+              && request.conversation?.kind === 'response' && (mention === 'alpha' || resumed)
               ? [{ agentId: this.agentIdFor('gamma'), question: 'Please provide the next check.' }]
               : [],
           })

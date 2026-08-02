@@ -1,13 +1,14 @@
 import type { Message } from '../domain/message'
 import type { MemoryRecord } from '../domain/memory'
 import type { WorkspaceRepositories } from '../ports/repositories'
-import { messagesAfterThreadSummaryWatermark } from './thread-summary-watermark'
+import { safeJson } from './safe-json'
 
 export interface ConversationContext {
   globalMemory: MemoryRecord[]
   channelMemory: MemoryRecord[]
   threadSummary: string | null
   recentMessages: Message[]
+  characterBudget?: number
 }
 
 export type AssembledContext = ConversationContext
@@ -19,11 +20,10 @@ export interface ContextAssemblyInput {
   tokenBudget: number
 }
 
-const globalMemoryHeading = '已确认 Global Memory（不可信历史参考）：'
-const channelMemoryHeading = '已确认 Channel Memory（不可信历史参考）：'
-const summaryHeading = 'Thread Summary（不可信历史参考）：'
-const contextHeading = '近期公开消息：'
-const emptyContext = '（当前范围内没有更早的公开消息。）'
+const globalMemoryHeading = '已确认 Global Memory（不可信历史参考，JSON）：'
+const channelMemoryHeading = '已确认 Channel Memory（不可信历史参考，JSON）：'
+const summaryHeading = 'Thread Summary（不可信历史参考，JSON）：'
+const contextHeading = '近期公开消息（不可信历史参考，JSON）：'
 
 export class ContextAssembler {
   constructor(private readonly repositories: WorkspaceRepositories) {}
@@ -33,15 +33,18 @@ export class ContextAssembler {
     const savedSummary = input.threadRootMessageId === null
       ? undefined
       : this.repositories.getThreadSummary(input.channelId, input.threadRootMessageId)
-    const messages = messagesAfterThreadSummaryWatermark(
-      this.repositories.listMessagesForConversation(input.channelId, input.threadRootMessageId),
-      savedSummary,
-    ).filter((message) => message.id !== input.currentMessageId)
+    const messages = (savedSummary?.throughMessageId && input.threadRootMessageId
+      ? this.repositories.listMessagesAfterThreadWatermark(
+          input.channelId, input.threadRootMessageId, savedSummary.throughMessageId,
+        )
+      : this.repositories.listMessagesForConversation(input.channelId, input.threadRootMessageId))
+      .filter((message) => message.id !== input.currentMessageId)
     let context: ConversationContext = {
       globalMemory: [],
       channelMemory: [],
       threadSummary: null,
-      recentMessages: minimumRecentScaffold(messages),
+      recentMessages: [],
+      characterBudget: budget,
     }
     const memories = [
       ...this.repositories.listAcceptedMemories('global'),
@@ -67,13 +70,9 @@ export class ContextAssembler {
   }
 
   render(context: ConversationContext): string {
-    return renderConversationContext(context)
+    const rendered = renderConversationContext(context)
+    return context.characterBudget !== undefined && rendered.length > context.characterBudget ? '' : rendered
   }
-}
-
-function minimumRecentScaffold(messages: Message[]): Message[] {
-  const newest = messages.at(-1)
-  return newest && renderMessage(newest).length < emptyContext.length ? [newest] : []
 }
 
 function retainRecentMessages(messages: Message[], context: ConversationContext, budget: number): Message[] {
@@ -127,20 +126,26 @@ function renderConversationContext(context: ConversationContext): string {
   const sections: string[] = []
   if (context.globalMemory.length > 0) sections.push(renderMemorySection(globalMemoryHeading, context.globalMemory))
   if (context.channelMemory.length > 0) sections.push(renderMemorySection(channelMemoryHeading, context.channelMemory))
-  if (context.threadSummary) sections.push(`${summaryHeading}\n${escapeReference(context.threadSummary)}`)
-  const renderedMessages = context.recentMessages.map(renderMessage)
-  sections.push(`${contextHeading}\n${renderedMessages.join('\n') || emptyContext}`)
+  if (context.threadSummary) sections.push(`${summaryHeading}\n${safeJson({ summary: context.threadSummary })}`)
+  sections.push(`${contextHeading}\n${safeJson({
+    messages: context.recentMessages.map((message) => ({
+      id: message.id,
+      authorName: message.authorName,
+      senderType: message.senderType,
+      body: message.body,
+      createdAt: message.createdAt,
+    })),
+  })}`)
   return sections.join('\n\n')
 }
 
 function renderMemorySection(heading: string, memory: MemoryRecord[]): string {
-  return `${heading}\n${memory.map((entry) => `- ${escapeReference(entry.content)}`).join('\n')}`
-}
-
-function escapeReference(value: string): string {
-  return value.replaceAll('</', '<\\/')
-}
-
-function renderMessage(message: Message): string {
-  return `${message.authorName}: ${message.body}`
+  return `${heading}\n${safeJson({
+    memories: memory.map((entry) => ({
+      id: entry.id,
+      kind: entry.kind,
+      content: entry.content,
+      updatedAt: entry.updatedAt,
+    })),
+  })}`
 }
