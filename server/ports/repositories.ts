@@ -53,6 +53,22 @@ export interface ActiveConversationTurnProjection {
   invocations: AgentInvocation[]
 }
 
+export interface SettleConversationInvocationInput {
+  invocationId: string
+  recoveryOwnerId: string | null
+  resultJson: string
+  participantPatch?: ParticipantPatch
+  publicReply?: { authorName: string; body: string }
+  occurredAt: Date
+}
+
+export interface SettleConversationInvocationResult {
+  applied: boolean
+  invocation: AgentInvocation
+  participant?: TurnParticipant
+  message?: Message
+}
+
 export interface TaskClaim {
   task: Task
   lease: TaskLease
@@ -132,16 +148,25 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   getTaskArtifact(taskId: string, artifactId: string): TaskArtifact | undefined
   getMessage(messageId: string): Message | undefined
   createConversationTurn(input: CreateConversationTurnInput): ConversationTurn
+  createClaimedConversationTurn(
+    input: CreateConversationTurnInput,
+    ownerId: string,
+    occurredAt: Date,
+  ): ConversationTurn
   getConversationTurn(turnId: string): ConversationTurn | undefined
   getConversationTurnDetails(turnId: string): ConversationTurnDetails | undefined
   listActiveConversationActivity(channelId?: string): ActiveConversationTurnProjection[]
   listActiveConversationTurns(channelId?: string): ConversationTurn[]
+  claimRecoverableConversationTurns(ownerId: string, occurredAt: Date, staleBefore: Date): ActiveConversationTurnProjection[]
+  renewConversationTurnClaim(turnId: string, ownerId: string, occurredAt: Date): boolean
+  releaseConversationTurnClaim(turnId: string, ownerId: string): boolean
   updateConversationTurn(turnId: string, patch: ConversationTurnPatch): ConversationTurn
   createTurnParticipant(input: CreateTurnParticipantInput): TurnParticipant
   updateTurnParticipant(turnId: string, agentId: string, patch: ParticipantPatch): TurnParticipant
   listTurnParticipants(turnId: string): TurnParticipant[]
   createAgentInvocation(input: CreateAgentInvocationInput): AgentInvocation
   updateAgentInvocation(invocationId: string, patch: InvocationPatch): AgentInvocation
+  settleConversationInvocation(input: SettleConversationInvocationInput): SettleConversationInvocationResult
   listAgentInvocations(turnId: string): AgentInvocation[]
   createConversationHandoff(input: CreateConversationHandoffInput): ConversationHandoff
   updateConversationHandoff(handoffId: string, patch: ConversationHandoffPatch): ConversationHandoff

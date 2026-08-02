@@ -40,6 +40,21 @@ describe('multi-agent conversation flow', () => {
     expect(agentBodies(repositories, fixture.channelId)).toEqual(expect.arrayContaining([
       'Alpha public answer', 'Beta independent answer', 'Gamma handoff answer',
     ]))
+    const firstTurnId = runtime.calls.find((call) => call?.kind === 'response')?.turnId
+    expect(firstTurnId).toBeTruthy()
+    expect(repositories.listConversationHandoffs(firstTurnId!)).toEqual([
+      expect.objectContaining({ toAgentId: fixture.agentIds.gamma, round: 2, status: 'completed' }),
+    ])
+    expect(repositories.listAgentInvocations(firstTurnId!)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ agentId: fixture.agentIds.gamma, kind: 'handoff_response', round: 2, status: 'settled' }),
+    ]))
+    const timelineSessionKey = conversationSessionKey(fixture.channelId, null, fixture.agentIds.alpha)
+    const persistedTimelineSession = repositories.getConversationSession(timelineSessionKey)
+    expect(persistedTimelineSession).toMatchObject({
+      key: `${fixture.channelId}:timeline:${fixture.agentIds.alpha}`,
+      runtimeSessionId: expect.stringMatching(/^session-/),
+      status: 'ready',
+    })
 
     await close()
     close = undefined
@@ -48,10 +63,28 @@ describe('multi-agent conversation flow', () => {
     const resumedServer = await startHttpTestServer(resumed)
     close = resumedServer.close
 
+    const inputsBeforeResume = runtime.inputs.length
     await postMessage(resumedServer.baseUrl, fixture.channelId, '@Alpha second incident update')
     expect(runtime.resumes).toHaveLength(1)
+    expect(runtime.resumes[0]?.sessionId).toBe(persistedTimelineSession?.runtimeSessionId)
+    expect(runtime.inputs).toHaveLength(inputsBeforeResume + 1)
     expect(agentBodies(resumedRepositories, fixture.channelId).length).toBeGreaterThan(3)
     expect(runtime.calls).toContainEqual(expect.objectContaining({ kind: 'response' }))
+
+    const threadRoot = resumedRepositories.createMessage({
+      channelId: fixture.channelId,
+      senderType: 'human',
+      authorName: 'You',
+      body: 'Thread-only root context',
+    })
+    await postMessage(resumedServer.baseUrl, fixture.channelId, 'incident thread first update', threadRoot.id)
+    const threadSessionKey = conversationSessionKey(fixture.channelId, threadRoot.id, fixture.agentIds.alpha)
+    await waitFor(() => resumedRepositories.getConversationSession(threadSessionKey)?.runtimeSessionId !== null)
+    const persistedThreadSession = resumedRepositories.getConversationSession(threadSessionKey)
+    expect(persistedThreadSession).toMatchObject({
+      key: `${fixture.channelId}:${threadRoot.id}:${fixture.agentIds.alpha}`,
+      runtimeSessionId: expect.stringMatching(/^session-/),
+    })
 
     await close()
     close = undefined
@@ -60,9 +93,39 @@ describe('multi-agent conversation flow', () => {
     const coldServer = await startHttpTestServer(coldStarted)
     close = coldServer.close
 
-    await postMessage(coldServer.baseUrl, fixture.channelId, '@Alpha third incident update')
-    expect(runtime.requests.at(-1)?.description).toContain('Alpha: Alpha resumed answer')
+    await postMessage(coldServer.baseUrl, fixture.channelId, '@Alpha second thread update', threadRoot.id)
+    await waitFor(() => coldStarted.locals.repositories.listActiveConversationTurns(fixture.channelId).length === 0)
+    expect(runtime.resumes.at(-1)?.sessionId).toBe(persistedThreadSession?.runtimeSessionId)
+    expect(runtime.requests.at(-1)?.description).toContain('Thread-only root context')
+    expect(runtime.requests.at(-1)?.description).toContain('Alpha: Alpha public answer')
+    expect(runtime.requests.at(-1)?.description).not.toContain('Alpha resumed answer')
     expect(runtime.requests.at(-1)?.description).not.toContain('RAW_RUNTIME_ARTIFACT')
+    expect(coldStarted.locals.repositories.listMessagesForConversation(fixture.channelId, threadRoot.id)
+      .filter((message: { senderType: string }) => message.senderType === 'agent').at(-1)).toMatchObject({
+      threadRootMessageId: threadRoot.id,
+    })
+  })
+
+  it('isolates a failed explicitly mentioned Agent without waking unmentioned members', async () => {
+    dataDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-conversation-multi-mention-'))
+    const databasePath = path.join(dataDirectory, 'sinapsis.sqlite')
+    const runtime = new ScriptedConversationRuntime({ failingMention: 'beta' })
+    const app = createApp({ databasePath, conversationRuntimes: { opencode: runtime } })
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const fixture = seedConversation(repositories, runtime)
+    const server = await startHttpTestServer(app)
+    close = server.close
+
+    await postMessage(server.baseUrl, fixture.channelId, '@Alpha @Beta inspect explicitly')
+    const turnId = runtime.calls.find((call) => call?.kind === 'response')?.turnId
+    expect(turnId).toBeTruthy()
+    expect(repositories.getConversationTurn(turnId!)).toMatchObject({ mode: 'multi_direct', status: 'partial' })
+    expect(agentBodies(repositories, fixture.channelId)).toEqual(['Alpha public answer'])
+    expect(runtime.requests.some((request) => request.worktreePath.endsWith(fixture.agentIds.gamma))).toBe(false)
+    expect(repositories.listAgentInvocations(turnId!)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ agentId: fixture.agentIds.alpha, status: 'settled' }),
+      expect.objectContaining({ agentId: fixture.agentIds.beta, status: 'failed' }),
+    ]))
   })
 
   it('isolates parallel failures and keeps Runtime artifacts out of public channel data', async () => {
@@ -186,11 +249,16 @@ function seedConversation(repositories: WorkspaceRepositories, runtime: Scripted
   return { channelId: channel.id, agentIds }
 }
 
-async function postMessage(baseUrl: string, channelId: string, body: string): Promise<{ id: string }> {
+async function postMessage(
+  baseUrl: string,
+  channelId: string,
+  body: string,
+  threadRootMessageId?: string,
+): Promise<{ id: string }> {
   const response = await fetch(`${baseUrl}/api/channels/${channelId}/messages`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ body }),
+    body: JSON.stringify({ body, ...(threadRootMessageId ? { threadRootMessageId } : {}) }),
   })
   expect(response.status).toBe(201)
   return response.json() as Promise<{ id: string }>
@@ -206,6 +274,7 @@ class ScriptedConversationRuntime implements RuntimeAdapter {
   readonly requests: RuntimeTaskRequest[] = []
   readonly calls: Array<RuntimeTaskRequest['conversation']> = []
   readonly resumes: RuntimeSession[] = []
+  readonly inputs: Array<{ session: RuntimeSession; input: string }> = []
   failNextResume = false
   readonly availability: RuntimeAvailability = { executable: 'available', taskExecution: 'unverified' }
   private readonly namesByAgentId = new Map<string, string>()
@@ -229,6 +298,7 @@ class ScriptedConversationRuntime implements RuntimeAdapter {
   }
 
   sendInput(session: RuntimeSession, input: string, sink: RuntimeEventSink): void {
+    this.inputs.push({ session, input })
     const request = this.requests.find((candidate) => candidate.taskId === session.taskId)
       ?? this.requests.find((candidate) => candidate.worktreePath === session.worktreePath)
     if (!request) {

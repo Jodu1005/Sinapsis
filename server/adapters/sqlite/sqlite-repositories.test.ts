@@ -998,6 +998,8 @@ describe('SQLite workspace repositories', () => {
 
     expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 17').get())
       .toEqual({ version: 17 })
+    expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 18').get())
+      .toEqual({ version: 18 })
     expect(upgraded.getConversationTurn(turn.id)).toMatchObject({ status: 'screening' })
     expect(upgraded.listTurnParticipants(turn.id)).toEqual([expect.objectContaining({
       id: participant.id, agentId: source.id, status: 'spoken', reason: 'legacy_participant',
@@ -1017,6 +1019,177 @@ describe('SQLite workspace repositories', () => {
       WHERE type = 'index' AND name = 'conversation_turns_status_created_at_idx'
     `).get()).toEqual({ name: 'conversation_turns_status_created_at_idx' })
     expect(database.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+  })
+
+  it('claims recoverable Turns once across SQLite connections and atomically requeues running Invocations', async () => {
+    const { repositories, databasePath } = await createRepositories()
+    const channel = createChannel(repositories)
+    const agent = repositories.createAgent({
+      identity: 'Recovery Agent', mentionName: 'recovery-agent', runtime: 'opencode', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'opencode', args: [], model: '', env: {},
+    })
+    const createTurn = (status: 'screening' | 'completed' | 'cancelled', priority: 'human_direct' | 'automatic_handoff') => {
+      const message = repositories.createMessage({
+        channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: `${status}-${priority}`,
+      })
+      const turn = repositories.createConversationTurn({
+        channelId: channel.id, triggerMessageId: message.id, threadRootMessageId: null,
+        mode: 'direct', maxRounds: 3,
+      })
+      repositories.updateConversationTurn(turn.id, status === 'screening'
+        ? { status }
+        : { status, completedAt: '2026-08-01T00:00:00.000Z' })
+      const invocation = repositories.createAgentInvocation({
+        turnId: turn.id, agentId: agent.id, kind: 'response', priority, round: 1,
+        idempotencyKey: `${turn.id}:response`, sourceInvocationId: null,
+        status: 'running', startedAt: '2026-08-01T00:00:00.000Z',
+      })
+      return { turn, invocation }
+    }
+    const active = createTurn('screening', 'human_direct')
+    const lowerPriority = createTurn('screening', 'automatic_handoff')
+    repositories.updateAgentInvocation(lowerPriority.invocation.id, { status: 'queued', startedAt: null })
+    const completed = createTurn('completed', 'automatic_handoff')
+    const cancelled = createTurn('cancelled', 'human_direct')
+    const liveMessage = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'live claimed turn',
+    })
+    const live = repositories.createClaimedConversationTurn({
+      channelId: channel.id, triggerMessageId: liveMessage.id, threadRootMessageId: null,
+      mode: 'direct', maxRounds: 3,
+    }, 'live-owner', new Date('2026-08-02T00:00:00.000Z'))
+    const secondDatabase = createSqliteDatabase(databasePath)
+    const competing = new SqliteRepositories(secondDatabase, new RecordingPublisher())
+
+    try {
+      const claimed = repositories.claimRecoverableConversationTurns(
+        'owner-a',
+        new Date('2026-08-02T00:00:00.000Z'),
+        new Date('2026-08-01T23:59:00.000Z'),
+      )
+      const duplicateClaim = competing.claimRecoverableConversationTurns(
+        'owner-b',
+        new Date('2026-08-02T00:00:01.000Z'),
+        new Date('2026-08-01T23:59:01.000Z'),
+      )
+
+      expect(claimed.map((projection) => projection.turn.id)).toEqual([active.turn.id, lowerPriority.turn.id])
+      expect(claimed[0]?.invocations).toEqual([
+        expect.objectContaining({ id: active.invocation.id, status: 'queued', startedAt: null }),
+      ])
+      expect(claimed[1]?.invocations).toEqual([
+        expect.objectContaining({ id: lowerPriority.invocation.id, status: 'queued', startedAt: null }),
+      ])
+      expect(duplicateClaim).toEqual([])
+      expect(claimed.map((projection) => projection.turn.id)).not.toContain(live.id)
+      expect(repositories.getConversationTurn(completed.turn.id)?.status).toBe('completed')
+      expect(repositories.listAgentInvocations(completed.turn.id)[0]).toMatchObject({ status: 'running' })
+      expect(repositories.getConversationTurn(cancelled.turn.id)?.status).toBe('cancelled')
+    } finally {
+      secondDatabase.close()
+    }
+  })
+
+  it('settles a public Invocation idempotently with its message, result, and Participant in one transaction', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const agent = repositories.createAgent({
+      identity: 'Public Agent', mentionName: 'public-agent', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const trigger = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: '@Public Agent answer.',
+    })
+    const turn = repositories.createConversationTurn({
+      channelId: channel.id, triggerMessageId: trigger.id, threadRootMessageId: null,
+      mode: 'direct', maxRounds: 3,
+    })
+    repositories.createTurnParticipant({
+      turnId: turn.id, agentId: agent.id, source: 'direct', rank: 1, matcherScore: null,
+      decision: 'speak', status: 'selected',
+    })
+    const invocation = repositories.createAgentInvocation({
+      turnId: turn.id, agentId: agent.id, kind: 'response', priority: 'human_direct', round: 1,
+      idempotencyKey: `${turn.id}:response`, sourceInvocationId: null,
+      status: 'running', startedAt: '2026-08-02T00:00:00.000Z',
+    })
+    repositories.claimRecoverableConversationTurns(
+      'owner-a', new Date('2026-08-02T00:00:01.000Z'), new Date('2026-08-01T23:59:00.000Z'),
+    )
+    repositories.updateAgentInvocation(invocation.id, { status: 'running' })
+    const resultJson = JSON.stringify({ reply: 'Persisted once.', handoffTo: [] })
+
+    const first = repositories.settleConversationInvocation({
+      invocationId: invocation.id,
+      recoveryOwnerId: 'owner-a',
+      resultJson,
+      participantPatch: { status: 'spoken' },
+      publicReply: { authorName: agent.identity, body: 'Persisted once.' },
+      occurredAt: new Date('2026-08-02T00:00:02.000Z'),
+    })
+    const repeated = repositories.settleConversationInvocation({
+      invocationId: invocation.id,
+      recoveryOwnerId: 'owner-a',
+      resultJson,
+      participantPatch: { status: 'spoken' },
+      publicReply: { authorName: agent.identity, body: 'Persisted once.' },
+      occurredAt: new Date('2026-08-02T00:00:03.000Z'),
+    })
+    repositories.releaseConversationTurnClaim(turn.id, 'owner-a')
+    const staleOwner = repositories.settleConversationInvocation({
+      invocationId: invocation.id,
+      recoveryOwnerId: 'owner-a',
+      resultJson,
+      participantPatch: { status: 'spoken' },
+      publicReply: { authorName: agent.identity, body: 'Persisted once.' },
+      occurredAt: new Date('2026-08-02T00:00:04.000Z'),
+    })
+
+    expect(first).toMatchObject({ applied: true, message: { body: 'Persisted once.' } })
+    expect(repeated).toMatchObject({ applied: true, message: { id: first.message?.id } })
+    expect(staleOwner).toMatchObject({ applied: false })
+    expect(repositories.listAgentInvocations(turn.id)).toEqual([
+      expect.objectContaining({ id: invocation.id, status: 'settled', resultJson }),
+    ])
+    expect(repositories.listTurnParticipants(turn.id)).toEqual([
+      expect.objectContaining({ agentId: agent.id, status: 'spoken' }),
+    ])
+    expect(repositories.listMessagesForConversation(channel.id, null)
+      .filter((message) => message.senderType === 'agent')).toEqual([
+      expect.objectContaining({ id: first.message?.id, body: 'Persisted once.' }),
+    ])
+  })
+
+  it('rolls back public message creation when Participant settlement fails', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const agent = repositories.createAgent({
+      identity: 'Rollback Agent', mentionName: 'rollback-agent', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const trigger = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Rollback.',
+    })
+    const turn = repositories.createConversationTurn({
+      channelId: channel.id, triggerMessageId: trigger.id, threadRootMessageId: null,
+      mode: 'direct', maxRounds: 3,
+    })
+    const invocation = repositories.createAgentInvocation({
+      turnId: turn.id, agentId: agent.id, kind: 'response', priority: 'human_direct', round: 1,
+      idempotencyKey: `${turn.id}:response`, sourceInvocationId: null, status: 'running',
+    })
+
+    expect(() => repositories.settleConversationInvocation({
+      invocationId: invocation.id,
+      recoveryOwnerId: null,
+      resultJson: JSON.stringify({ reply: 'Must roll back.', handoffTo: [] }),
+      participantPatch: { status: 'spoken' },
+      publicReply: { authorName: agent.identity, body: 'Must roll back.' },
+      occurredAt: new Date('2026-08-02T00:00:00.000Z'),
+    })).toThrow(/participant/i)
+    expect(repositories.listAgentInvocations(turn.id)[0]).toMatchObject({ status: 'running', resultJson: null })
+    expect(repositories.listMessagesForConversation(channel.id, null)
+      .filter((message) => message.senderType === 'agent')).toEqual([])
   })
 
   it('restores the conversation session grain index for an already-migrated version 15 database', async () => {
@@ -1229,11 +1402,19 @@ describe('SQLite workspace repositories', () => {
         updated_at TEXT NOT NULL,
         completed_at TEXT
       );
-      INSERT INTO conversation_turns_v16 SELECT * FROM conversation_turns;
+      INSERT INTO conversation_turns_v16 (
+        id, channel_id, trigger_message_id, thread_root_message_id, mode, status,
+        current_round, max_rounds, created_at, updated_at, completed_at
+      ) SELECT
+        id, channel_id, trigger_message_id, thread_root_message_id, mode, status,
+        current_round, max_rounds, created_at, updated_at, completed_at
+      FROM conversation_turns;
       DROP TABLE conversation_turns;
       ALTER TABLE conversation_turns_v16 RENAME TO conversation_turns;
       CREATE INDEX conversation_turns_status_created_at_idx ON conversation_turns(status, created_at);
-      DELETE FROM schema_migrations WHERE version = 17;
+      DROP TABLE conversation_invocation_messages;
+      ALTER TABLE agent_invocations DROP COLUMN result_json;
+      DELETE FROM schema_migrations WHERE version IN (17, 18);
       COMMIT;
     `)
     legacy.close()

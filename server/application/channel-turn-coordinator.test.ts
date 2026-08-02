@@ -241,7 +241,7 @@ describe('ChannelTurnCoordinator', () => {
     expect(fixture.agentMessages().map((message) => message.body)).toEqual(['lane resumed'])
   })
 
-  it('keeps the Turn active when one cancellation fails and accepts that Runtime natural completion', async () => {
+  it('keeps the Turn retryable when cancellation fails but fences that Runtime natural completion', async () => {
     const fixture = await createFixture({ realQueue: true })
     fixture.createAgent('Alpha', [])
     fixture.createAgent('Beta', [])
@@ -263,17 +263,20 @@ describe('ChannelTurnCoordinator', () => {
 
     await expect(fixture.coordinator.cancel(started.turn.id)).rejects.toThrow('second runtime cancellation failed')
     gates.get(second.agentId)!.resolve(publicReply('runtime completed naturally'))
-    await expect(started.completion).resolves.toMatchObject({ status: 'completed' })
+    await expect(started.completion).resolves.toMatchObject({ status: 'responding' })
 
     expect(fixture.repositories.listAgentInvocations(started.turn.id)).toEqual([
       expect.objectContaining({ id: first.id, status: 'cancelled' }),
-      expect.objectContaining({ id: second.id, status: 'settled' }),
+      expect.objectContaining({ id: second.id, status: 'cancelled' }),
     ])
     expect(fixture.repositories.listTurnParticipants(started.turn.id)).toEqual([
       expect.objectContaining({ agentId: first.agentId, status: 'cancelled' }),
-      expect.objectContaining({ agentId: second.agentId, status: 'spoken' }),
+      expect.objectContaining({ agentId: second.agentId, status: 'selected' }),
     ])
-    expect(fixture.agentMessages().map((message) => message.body)).toEqual(['runtime completed naturally'])
+    expect(fixture.agentMessages()).toEqual([])
+
+    fixture.sessions.cancellationFailures.delete(second.id)
+    await expect(fixture.coordinator.cancel(started.turn.id)).resolves.toMatchObject({ status: 'cancelled' })
   })
 
   it('allows a direct reply to hand off to another channel member', async () => {
@@ -1130,6 +1133,120 @@ describe('ChannelTurnCoordinator', () => {
       runtimeSessionId: 'persisted-runtime-session',
       status: 'stale',
     })
+  })
+
+  it('recovers the full ordinary Turn state machine from persisted participation results through round-two handoff', async () => {
+    const fixture = await createFixture()
+    const alpha = fixture.createAgent('Alpha Recovery', ['recovery topic'])
+    const beta = fixture.createAgent('Beta Recovery', ['recovery topic'])
+    const gamma = fixture.createAgent('Gamma Recovery', ['follow-up'])
+    const message = fixture.postHuman('recovery topic')
+    const turn = fixture.repositories.createConversationTurn({
+      channelId: fixture.channel.id,
+      triggerMessageId: message.id,
+      threadRootMessageId: null,
+      mode: 'ordinary',
+      maxRounds: 3,
+    })
+    fixture.repositories.updateConversationTurn(turn.id, { status: 'judging' })
+    for (const [index, agent] of [alpha, beta].entries()) {
+      fixture.repositories.createTurnParticipant({
+        turnId: turn.id,
+        agentId: agent.id,
+        source: 'responsibility',
+        rank: index + 1,
+        matcherScore: 10 - index,
+      })
+      fixture.repositories.createAgentInvocation({
+        turnId: turn.id,
+        agentId: agent.id,
+        kind: 'participation',
+        priority: 'participation',
+        round: 0,
+        idempotencyKey: `${turn.id}:0:participation:${agent.id}`,
+        sourceInvocationId: null,
+        status: 'settled',
+        completedAt: '2026-08-01T00:00:00.000Z',
+        resultJson: JSON.stringify(participation('speak', 0.9 - index / 10)),
+      })
+    }
+    fixture.repositories.updateAgentResponsibilities(alpha.id, ['responsibility changed after crash'])
+    fixture.repositories.updateAgentResponsibilities(beta.id, ['responsibility changed after crash'])
+    fixture.sessions.handle = async (input) => {
+      if (input.conversation?.kind === 'duplicate_check') return duplicate('speak')
+      if (input.conversation?.kind === 'handoff_response') return publicReply('gamma recovered handoff')
+      if (input.agent.id === alpha.id) {
+        return publicReply('alpha recovered response', [{ agentId: gamma.id, question: 'continue recovery?' }])
+      }
+      return publicReply('beta recovered response')
+    }
+
+    await fixture.coordinator.recover()
+    await waitFor(() => fixture.repositories.getConversationTurn(turn.id)?.status === 'completed')
+
+    expect(fixture.sessions.calls.map((call) => call.conversation?.kind)).toEqual([
+      'response', 'duplicate_check', 'response', 'handoff_response',
+    ])
+    expect(fixture.agentMessages().map((persisted) => persisted.body)).toEqual([
+      'alpha recovered response', 'beta recovered response', 'gamma recovered handoff',
+    ])
+    expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({ toAgentId: gamma.id, round: 2, status: 'completed' }),
+    ])
+    expect(fixture.repositories.listAgentInvocations(turn.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ agentId: gamma.id, kind: 'handoff_response', round: 2, status: 'settled' }),
+    ]))
+  })
+
+  it('claims a recovered Turn once and cancellation fences a late Runtime result from settlement and publication', async () => {
+    const fixture = await createFixture()
+    const agent = fixture.createAgent('Claimed Recovery', ['restart'])
+    const message = fixture.postHuman('@Claimed Recovery restart')
+    const turn = fixture.repositories.createConversationTurn({
+      channelId: fixture.channel.id,
+      triggerMessageId: message.id,
+      threadRootMessageId: null,
+      mode: 'direct',
+      maxRounds: 3,
+    })
+    fixture.repositories.createTurnParticipant({
+      turnId: turn.id,
+      agentId: agent.id,
+      source: 'direct',
+      rank: 1,
+      matcherScore: null,
+      decision: 'speak',
+      speakingOrder: 1,
+      status: 'selected',
+    })
+    const invocation = fixture.repositories.createAgentInvocation({
+      turnId: turn.id,
+      agentId: agent.id,
+      kind: 'response',
+      priority: 'human_direct',
+      round: 1,
+      idempotencyKey: `${turn.id}:1:response:${agent.id}`,
+      sourceInvocationId: null,
+      status: 'running',
+      startedAt: '2026-08-01T00:00:00.000Z',
+    })
+    const responseGate = deferred<ConversationSessionResult>()
+    fixture.sessions.handle = () => responseGate.promise
+
+    await fixture.coordinator.recover()
+    await waitFor(() => fixture.sessions.calls.length === 1)
+    await fixture.coordinator.recover()
+    expect(fixture.sessions.calls).toHaveLength(1)
+
+    await fixture.coordinator.cancel(turn.id)
+    responseGate.resolve(publicReply('must not publish'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(fixture.repositories.getConversationTurn(turn.id)).toMatchObject({ status: 'cancelled' })
+    expect(fixture.repositories.listAgentInvocations(turn.id)).toEqual([
+      expect.objectContaining({ id: invocation.id, status: 'cancelled' }),
+    ])
+    expect(fixture.agentMessages()).toEqual([])
   })
 
   it('keeps a persisted Invocation retryable when stale persistence fails', async () => {

@@ -388,11 +388,11 @@ Raft 的“待办、进行中、审查中、完成、关闭”是灵感来源；
 
 频道中的非任务消息会创建持久化 Conversation Turn，并按四种模式路由：普通消息先从职责匹配的候选中征询，再选择最多两名发言者；单个 `@Agent` 是定向回合；多个 `@Agent` 是并行定向回合；`@all` 则并行通知全部频道成员。并行模式的单个 Runtime 失败只使该成员失败，不能阻断其余公开回复。
 
-每个 Agent 的对话会话键是 `channelId:threadRootMessageId-or-timeline:agentId`。同频道时间线和每条 Thread 因而独立；服务重启后可从 SQLite 读取该键对应的 Runtime Session 并尝试恢复。恢复失败会把旧会话标记为 stale 后冷启动，但 ContextAssembler 仍会注入相同频道或 Thread 的公开历史。启动会在一个数据库事务中把残留 `running` Invocation 改为 `queued`，按既有优先级恢复；已取消和已完成的 Turn 不会重放。
+每个 Agent 的对话会话键是 `channelId:threadRootMessageId-or-timeline:agentId`。同频道时间线和每条 Thread 因而独立；服务重启后可从 SQLite 读取该键对应的 Runtime Session 并尝试恢复。恢复失败会把旧会话标记为 stale 后冷启动，但 ContextAssembler 仍会注入相同频道或 Thread 的公开历史。migration 18 为 Conversation Turn 增加数据库租约 owner/CAS，为 Invocation 持久化结构化结果，并用 Invocation 到 Message 的唯一映射约束公开回复。启动恢复在 `BEGIN IMMEDIATE` 事务中领取整个 Turn、把残留 `running` Invocation 改为 `queued`，再按人工定向、普通回复、参与判断、重复检查、自动 Handoff 的优先级续跑完整状态机；已领取、取消和终态 Turn 不会重复恢复。公开回复、Invocation settle 与 Participant spoken 在同一事务内提交，因此重复恢复只复用既有公开 Message。长时间执行通过续租防止其他进程接管，取消则在 Runtime 返回前后同时检查 Turn 终态和租约 owner。
 
 Handoff 的结构化路由只保存在 Turn Handoff 记录中，指定下一个 Agent 和问题；频道里只展示该 Agent 的普通公开回复，不暴露内部 JSON、私有提示词或 Runtime Artifact。Turn 的内部阶段为筛选、判断、回复和交接；用户界面将其投影为筛选、判断、排队、准备、交接和最终回复，终态为完成、部分完成、取消或失败。
 
-Dream Memory 不属于这一回合实现，仍由 `2026-07-31-dream-memory.md` 的后续计划负责。
+Dream Memory 不属于这一回合实现，仍由 `2026-07-31-dream-memory.md` 的后续计划负责；其数据库变更从 migration 19 开始。
 
 ## 上线前的人工演练
 

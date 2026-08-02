@@ -48,6 +48,8 @@ import type {
   ExpiredLease,
   LeaseRecovery,
   TaskClaim,
+  SettleConversationInvocationInput,
+  SettleConversationInvocationResult,
   WorkspaceRepositories,
   WorkspaceUnitOfWork,
 } from '../../ports/repositories'
@@ -199,6 +201,8 @@ interface ConversationTurnRow {
   created_at: string
   updated_at: string
   completed_at: string | null
+  recovery_owner_id: string | null
+  recovery_claimed_at: string | null
 }
 
 interface TurnParticipantRow {
@@ -234,6 +238,7 @@ interface AgentInvocationRow {
   started_at: string | null
   completed_at: string | null
   error_code: string | null
+  result_json: string | null
 }
 
 interface ActiveConversationTurnRow extends ConversationTurnRow {
@@ -250,6 +255,7 @@ interface ActiveConversationTurnRow extends ConversationTurnRow {
   invocation_started_at: string | null
   invocation_completed_at: string | null
   invocation_error_code: string | null
+  invocation_result_json: string | null
 }
 
 interface ConversationHandoffRow {
@@ -620,6 +626,7 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
       startedAt: input.startedAt ?? null,
       completedAt: input.completedAt ?? null,
       errorCode: input.errorCode ?? null,
+      resultJson: input.resultJson ?? null,
     }
     const sequence = (this.database.prepare(`
       SELECT COALESCE(MAX(sequence), -1) + 1 AS sequence
@@ -629,12 +636,13 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     this.database.prepare(`
       INSERT INTO agent_invocations (
         id, turn_id, agent_id, kind, priority, round, status, idempotency_key,
-        source_invocation_id, sequence, queued_at, started_at, completed_at, error_code
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        source_invocation_id, sequence, queued_at, started_at, completed_at, error_code, result_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       invocation.id, invocation.turnId, invocation.agentId, invocation.kind, invocation.priority,
       invocation.round, invocation.status, invocation.idempotencyKey, invocation.sourceInvocationId,
       sequence, invocation.queuedAt, invocation.startedAt, invocation.completedAt, invocation.errorCode,
+      invocation.resultJson,
     )
     return invocation
   }
@@ -839,6 +847,23 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return this.inTransaction((unitOfWork) => unitOfWork.createConversationTurn(input))
   }
 
+  createClaimedConversationTurn(
+    input: CreateConversationTurnInput,
+    ownerId: string,
+    occurredAt: Date,
+  ): ConversationTurn {
+    return this.inTransaction((unitOfWork) => {
+      const turn = unitOfWork.createConversationTurn(input)
+      const occurredAtIso = occurredAt.toISOString()
+      this.sqlite.database.prepare(`
+        UPDATE conversation_turns
+        SET recovery_owner_id = ?, recovery_claimed_at = ?, updated_at = ?
+        WHERE id = ?
+      `).run(ownerId, occurredAtIso, occurredAtIso, turn.id)
+      return { ...turn, updatedAt: occurredAtIso }
+    })
+  }
+
   createTurnParticipant(input: CreateTurnParticipantInput): TurnParticipant {
     return this.inTransaction((unitOfWork) => unitOfWork.createTurnParticipant(input))
   }
@@ -1014,7 +1039,8 @@ export class SqliteRepositories implements WorkspaceRepositories {
         invocations.queued_at AS invocation_queued_at,
         invocations.started_at AS invocation_started_at,
         invocations.completed_at AS invocation_completed_at,
-        invocations.error_code AS invocation_error_code
+        invocations.error_code AS invocation_error_code,
+        invocations.result_json AS invocation_result_json
       FROM conversation_turns AS turns
       LEFT JOIN agent_invocations AS invocations
         ON invocations.turn_id = turns.id
@@ -1043,6 +1069,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
           started_at: row.invocation_started_at,
           completed_at: row.invocation_completed_at,
           error_code: row.invocation_error_code,
+          result_json: row.invocation_result_json,
         }))
       }
       projections.set(row.id, projection)
@@ -1064,6 +1091,90 @@ export class SqliteRepositories implements WorkspaceRepositories {
           ORDER BY created_at, id
         `).all(channelId)
     return (rows as unknown as ConversationTurnRow[]).map(mapConversationTurn)
+  }
+
+  claimRecoverableConversationTurns(
+    ownerId: string,
+    occurredAt: Date,
+    staleBefore: Date,
+  ): ActiveConversationTurnProjection[] {
+    return this.inTransaction(() => {
+      const occurredAtIso = occurredAt.toISOString()
+      const staleBeforeIso = staleBefore.toISOString()
+      const candidates = this.sqlite.database.prepare(`
+        SELECT turns.id
+        FROM conversation_turns AS turns
+        LEFT JOIN agent_invocations AS invocations
+          ON invocations.turn_id = turns.id
+          AND invocations.status IN ('queued', 'running')
+        WHERE turns.status NOT IN ('completed', 'partial', 'cancelled', 'failed')
+          AND (turns.recovery_owner_id IS NULL OR turns.recovery_claimed_at < ?)
+        GROUP BY turns.id
+        ORDER BY MIN(CASE invocations.priority
+          WHEN 'human_direct' THEN 0
+          WHEN 'human_ordinary' THEN 1
+          WHEN 'participation' THEN 2
+          WHEN 'duplicate_check' THEN 3
+          WHEN 'automatic_handoff' THEN 4
+          ELSE 5
+        END), turns.created_at, turns.id
+      `).all(staleBeforeIso) as Array<{ id: string }>
+      const claimedIds: string[] = []
+
+      for (const candidate of candidates) {
+        const claimed = this.sqlite.database.prepare(`
+          UPDATE conversation_turns
+          SET recovery_owner_id = ?, recovery_claimed_at = ?, updated_at = ?
+          WHERE id = ?
+            AND status NOT IN ('completed', 'partial', 'cancelled', 'failed')
+            AND (recovery_owner_id IS NULL OR recovery_claimed_at < ?)
+        `).run(ownerId, occurredAtIso, occurredAtIso, candidate.id, staleBeforeIso)
+        if (claimed.changes !== 1) continue
+
+        this.sqlite.database.prepare(`
+          UPDATE agent_invocations
+          SET status = 'queued', started_at = NULL, completed_at = NULL, error_code = NULL
+          WHERE turn_id = ? AND status = 'running'
+        `).run(candidate.id)
+        claimedIds.push(candidate.id)
+      }
+
+      if (claimedIds.length === 0) return []
+      const claimedIdSet = new Set(claimedIds)
+      const projectionsById = new Map(
+        this.listActiveConversationActivity()
+          .filter((projection) => claimedIdSet.has(projection.turn.id))
+          .map((projection) => [projection.turn.id, projection]),
+      )
+      return claimedIds.flatMap((turnId) => {
+        const projection = projectionsById.get(turnId)
+        return projection ? [projection] : []
+      })
+    })
+  }
+
+  renewConversationTurnClaim(turnId: string, ownerId: string, occurredAt: Date): boolean {
+    return this.inTransaction(() => {
+      const occurredAtIso = occurredAt.toISOString()
+      const renewed = this.sqlite.database.prepare(`
+        UPDATE conversation_turns
+        SET recovery_claimed_at = ?, updated_at = ?
+        WHERE id = ? AND recovery_owner_id = ?
+          AND status NOT IN ('completed', 'partial', 'cancelled', 'failed')
+      `).run(occurredAtIso, occurredAtIso, turnId, ownerId)
+      return renewed.changes === 1
+    })
+  }
+
+  releaseConversationTurnClaim(turnId: string, ownerId: string): boolean {
+    return this.inTransaction(() => {
+      const released = this.sqlite.database.prepare(`
+        UPDATE conversation_turns
+        SET recovery_owner_id = NULL, recovery_claimed_at = NULL
+        WHERE id = ? AND recovery_owner_id = ?
+      `).run(turnId, ownerId)
+      return released.changes === 1
+    })
   }
 
   updateConversationTurn(turnId: string, patch: ConversationTurnPatch): ConversationTurn {
@@ -1144,13 +1255,104 @@ export class SqliteRepositories implements WorkspaceRepositories {
         startedAt: patch.startedAt === undefined ? invocation.startedAt : patch.startedAt,
         completedAt: patch.completedAt === undefined ? invocation.completedAt : patch.completedAt,
         errorCode: patch.errorCode === undefined ? invocation.errorCode : patch.errorCode,
+        resultJson: patch.resultJson === undefined ? invocation.resultJson : patch.resultJson,
       }
       this.sqlite.database.prepare(`
         UPDATE agent_invocations
-        SET status = ?, started_at = ?, completed_at = ?, error_code = ?
+        SET status = ?, started_at = ?, completed_at = ?, error_code = ?, result_json = ?
         WHERE id = ?
-      `).run(updated.status, updated.startedAt, updated.completedAt, updated.errorCode, updated.id)
+      `).run(
+        updated.status, updated.startedAt, updated.completedAt, updated.errorCode,
+        updated.resultJson, updated.id,
+      )
       return updated
+    })
+  }
+
+  settleConversationInvocation(input: SettleConversationInvocationInput): SettleConversationInvocationResult {
+    return this.inTransaction((unitOfWork) => {
+      const invocationRow = this.sqlite.database.prepare('SELECT * FROM agent_invocations WHERE id = ?')
+        .get(input.invocationId) as AgentInvocationRow | undefined
+      if (!invocationRow) throw new Error(`Agent invocation ${input.invocationId} does not exist.`)
+      const invocation = mapAgentInvocation(invocationRow)
+      const turnRow = this.sqlite.database.prepare('SELECT * FROM conversation_turns WHERE id = ?')
+        .get(invocation.turnId) as ConversationTurnRow | undefined
+      if (!turnRow) throw new Error(`Conversation turn ${invocation.turnId} does not exist.`)
+      const mappedMessage = this.sqlite.database.prepare(`
+        SELECT messages.*
+        FROM conversation_invocation_messages AS invocation_messages
+        JOIN messages ON messages.id = invocation_messages.message_id
+        WHERE invocation_messages.invocation_id = ?
+      `).get(invocation.id) as MessageRow | undefined
+      const participantRow = this.sqlite.database.prepare(`
+        SELECT * FROM turn_participants WHERE turn_id = ? AND agent_id = ?
+      `).get(invocation.turnId, invocation.agentId) as TurnParticipantRow | undefined
+
+      const terminalStatuses: ConversationTurn['status'][] = ['completed', 'partial', 'cancelled', 'failed']
+      const ownsTurn = input.recoveryOwnerId === null
+        ? turnRow.recovery_owner_id === null
+        : turnRow.recovery_owner_id === input.recoveryOwnerId
+      if (terminalStatuses.includes(turnRow.status) || !ownsTurn) {
+        return { applied: false, invocation }
+      }
+      if (invocation.status === 'settled' && (!input.publicReply || mappedMessage)) {
+        return {
+          applied: true,
+          invocation,
+          ...(participantRow ? { participant: mapTurnParticipant(participantRow) } : {}),
+          ...(mappedMessage ? { message: mapMessage(mappedMessage) } : {}),
+        }
+      }
+      if (invocation.status !== 'running') return { applied: false, invocation }
+
+      let participant: TurnParticipant | undefined
+      if (input.participantPatch) {
+        participant = this.updateTurnParticipant(invocation.turnId, invocation.agentId, input.participantPatch)
+      }
+
+      let message: Message | undefined
+      if (input.publicReply) {
+        message = unitOfWork.createMessage({
+          channelId: turnRow.channel_id,
+          threadRootMessageId: turnRow.thread_root_message_id,
+          taskId: null,
+          senderType: 'agent',
+          senderId: invocation.agentId,
+          authorName: input.publicReply.authorName,
+          body: input.publicReply.body,
+        })
+        this.sqlite.database.prepare(`
+          INSERT INTO conversation_invocation_messages (invocation_id, message_id, created_at)
+          VALUES (?, ?, ?)
+        `).run(invocation.id, message.id, input.occurredAt.toISOString())
+      }
+
+      const completedAt = input.occurredAt.toISOString()
+      this.sqlite.database.prepare(`
+        UPDATE agent_invocations
+        SET status = 'settled', completed_at = ?, error_code = NULL, result_json = ?
+        WHERE id = ? AND status = 'running'
+      `).run(completedAt, input.resultJson, invocation.id)
+      if (input.recoveryOwnerId !== null) {
+        this.sqlite.database.prepare(`
+          UPDATE conversation_turns
+          SET recovery_claimed_at = ?, updated_at = ?
+          WHERE id = ? AND recovery_owner_id = ?
+        `).run(completedAt, completedAt, invocation.turnId, input.recoveryOwnerId)
+      }
+      const settled = mapAgentInvocation({
+        ...invocationRow,
+        status: 'settled',
+        completed_at: completedAt,
+        error_code: null,
+        result_json: input.resultJson,
+      })
+      return {
+        applied: true,
+        invocation: settled,
+        ...(participant ? { participant } : {}),
+        ...(message ? { message } : {}),
+      }
     })
   }
 
@@ -1946,6 +2148,7 @@ function mapAgentInvocation(row: AgentInvocationRow): AgentInvocation {
     startedAt: row.started_at,
     completedAt: row.completed_at,
     errorCode: row.error_code,
+    resultJson: row.result_json,
   }
 }
 

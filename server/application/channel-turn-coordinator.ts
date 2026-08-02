@@ -26,7 +26,7 @@ import type {
   PublicAgentResponse,
   RuntimeConversationCall,
 } from './agent-conversation-protocol'
-import { ChannelMessageService } from './channel-message-service'
+import type { ChannelMessageService } from './channel-message-service'
 import {
   conversationSessionKey,
   ConversationInvocationCancelledError,
@@ -79,6 +79,9 @@ export interface ChannelTurnCoordinatorOptions {
   events?: DomainEventPublisher
   participationProbeTimeoutMs?: number
   now?: () => Date
+  recoveryOwnerId?: string
+  recoveryClaimTtlMs?: number
+  recoveryHeartbeatMs?: number
 }
 
 interface TurnExecution {
@@ -88,6 +91,7 @@ interface TurnExecution {
   activities: Map<string, TurnActivity>
   invocationIds: Set<string>
   timedOutInvocationIds: Set<string>
+  recoveryOwnerId: string
 }
 
 interface RankedSpeaker {
@@ -109,6 +113,7 @@ interface HandoffWorkItem {
 interface ResponseOutcome {
   invocation: AgentInvocation
   response: PublicAgentResponse
+  result: ConversationSessionResult
 }
 
 interface InvocationCancellationBatch {
@@ -123,10 +128,11 @@ const maxInitialSpeakers = 2
 const maxConversationRounds = 3
 const defaultParticipationProbeTimeoutMs = 30_000
 const conversationContextBudget = 4_000
+const defaultRecoveryClaimTtlMs = 30_000
+const defaultRecoveryHeartbeatMs = 10_000
 
 export class ChannelTurnCoordinator {
   private readonly repositories: WorkspaceRepositories
-  private readonly messages: ChannelMessageService
   private readonly sessions: ConversationSessions
   private readonly contextAssembler: ContextAssembler
   private readonly queue: InvocationQueue
@@ -134,12 +140,14 @@ export class ChannelTurnCoordinator {
   private readonly events?: DomainEventPublisher
   private readonly participationProbeTimeoutMs: number
   private readonly now: () => Date
+  private readonly recoveryOwnerId: string
+  private readonly recoveryClaimTtlMs: number
+  private readonly recoveryHeartbeatMs: number
   private readonly executions = new Map<string, TurnExecution>()
   private invocationSequence = 0
 
   constructor(options: ChannelTurnCoordinatorOptions) {
     this.repositories = options.repositories
-    this.messages = options.messages ?? new ChannelMessageService(options.repositories)
     this.sessions = options.sessions ?? new ConversationSessionService({
       repositories: options.repositories,
       runtimes: options.runtimes ?? {},
@@ -151,6 +159,9 @@ export class ChannelTurnCoordinator {
     this.events = options.events
     this.participationProbeTimeoutMs = options.participationProbeTimeoutMs ?? defaultParticipationProbeTimeoutMs
     this.now = options.now ?? (() => new Date())
+    this.recoveryOwnerId = options.recoveryOwnerId ?? randomUUID()
+    this.recoveryClaimTtlMs = options.recoveryClaimTtlMs ?? defaultRecoveryClaimTtlMs
+    this.recoveryHeartbeatMs = options.recoveryHeartbeatMs ?? defaultRecoveryHeartbeatMs
   }
 
   dispatch(message: Message): Promise<ConversationTurn> {
@@ -171,13 +182,13 @@ export class ChannelTurnCoordinator {
       .map((agentId) => memberAgents.find((agent) => agent.id === agentId))
       .filter((agent): agent is Agent => agent !== undefined)
 
-    const turn = this.repositories.createConversationTurn({
+    const turn = this.repositories.createClaimedConversationTurn({
       channelId: message.channelId,
       triggerMessageId: message.id,
       threadRootMessageId: message.threadRootMessageId ?? null,
       mode: route.mode,
       maxRounds: maxConversationRounds,
-    })
+    }, this.recoveryOwnerId, this.now())
     this.publish('conversation.turn_created', 'conversation_turn', turn.id)
     const execution: TurnExecution = {
       turnId: turn.id,
@@ -186,129 +197,88 @@ export class ChannelTurnCoordinator {
       activities: new Map(),
       invocationIds: new Set(),
       timedOutInvocationIds: new Set(),
+      recoveryOwnerId: this.recoveryOwnerId,
     }
     this.executions.set(turn.id, execution)
     this.setActivity(execution, null, 'screening')
 
-    const completion = this.executeTurn(execution, turn, message, targetAgents, memberIds, memberAgents)
-      .finally(() => this.executions.delete(turn.id))
+    const completion = this.runClaimedTurn(execution, turn, message, targetAgents, memberIds, memberAgents)
     void completion.catch(() => undefined)
     return { turn, completion }
   }
 
   async recover(): Promise<void> {
-    const recoverable = this.repositories.inTransaction(() => this.repositories.listActiveConversationActivity()
-      .flatMap(({ turn, invocations }) => invocations
-        .filter((invocation) => invocation.status === 'queued' || invocation.status === 'running')
-        .map((invocation) => ({
-          turn,
-          invocation: invocation.status === 'running'
-            ? this.repositories.updateAgentInvocation(invocation.id, {
-                status: 'queued', startedAt: null, completedAt: null, errorCode: null,
-              })
-            : invocation,
-        }))))
+    const occurredAt = this.now()
+    const staleBefore = new Date(occurredAt.getTime() - this.recoveryClaimTtlMs)
+    const recoverable = this.repositories.claimRecoverableConversationTurns(
+      this.recoveryOwnerId,
+      occurredAt,
+      staleBefore,
+    )
 
-    recoverable
-      .sort((left, right) => recoveryPriority(left.invocation.priority) - recoveryPriority(right.invocation.priority)
-        || left.invocation.queuedAt.localeCompare(right.invocation.queuedAt))
-      .forEach(({ turn, invocation }) => {
-        void this.resumeInvocation(turn, invocation).catch(() => undefined)
-      })
+    for (const { turn, invocations } of recoverable) {
+      if (this.executions.has(turn.id)) continue
+      const message = this.repositories.getMessage(turn.triggerMessageId)
+      if (!message) {
+        this.failTurn(turn.id, new Error('trigger_message_missing'))
+        this.repositories.releaseConversationTurnClaim(turn.id, this.recoveryOwnerId)
+        continue
+      }
+      const memberIds = new Set(this.repositories.getChannelAgentIds(turn.channelId))
+      const memberAgents = this.repositories.listAgents().filter((agent) => memberIds.has(agent.id))
+      const persistedTargetIds = this.repositories.listTurnParticipants(turn.id)
+        .sort((left, right) => left.rank - right.rank)
+        .map((participant) => participant.agentId)
+      let targetIds = persistedTargetIds
+      if (targetIds.length === 0) {
+        try {
+          const route = routeMentions(message.body, memberAgents)
+          targetIds = route.mode === 'all' ? memberAgents.map((agent) => agent.id) : route.targetAgentIds
+        } catch (error) {
+          this.failTurn(turn.id, error)
+          this.repositories.releaseConversationTurnClaim(turn.id, this.recoveryOwnerId)
+          continue
+        }
+      }
+      const targetAgents = targetIds
+        .map((agentId) => this.repositories.getAgent(agentId))
+        .filter((agent): agent is Agent => agent !== undefined)
+      const execution: TurnExecution = {
+        turnId: turn.id,
+        channelId: turn.channelId,
+        cancelled: false,
+        activities: new Map(),
+        invocationIds: new Set(invocations.map((invocation) => invocation.id)),
+        timedOutInvocationIds: new Set(),
+        recoveryOwnerId: this.recoveryOwnerId,
+      }
+      this.executions.set(turn.id, execution)
+      if (invocations.length === 0) this.setActivity(execution, null, phaseForTurnStatus(turn.status))
+      for (const invocation of invocations) this.setActivity(execution, invocation.agentId, 'queued')
+      void this.runClaimedTurn(execution, turn, message, targetAgents, memberIds, memberAgents)
+        .catch(() => undefined)
+    }
   }
 
-  private async resumeInvocation(turn: ConversationTurn, invocation: AgentInvocation): Promise<void> {
-    const message = this.repositories.getMessage(turn.triggerMessageId)
-    const agent = this.repositories.getAgent(invocation.agentId)
-    if (!message || !agent) {
-      this.repositories.updateAgentInvocation(invocation.id, {
-        status: 'failed', completedAt: this.now().toISOString(), errorCode: message ? 'agent_missing' : 'trigger_message_missing',
-      })
-      return
-    }
-
-    const execution = this.executions.get(turn.id) ?? {
-      turnId: turn.id,
-      channelId: turn.channelId,
-      cancelled: false,
-      activities: new Map<string, TurnActivity>(),
-      invocationIds: new Set<string>(),
-      timedOutInvocationIds: new Set<string>(),
-    }
-    this.executions.set(turn.id, execution)
-    execution.invocationIds.add(invocation.id)
-    const context = this.renderContext(message)
-    const handoff = invocation.kind === 'handoff_response'
-      ? this.repositories.listConversationHandoffs(turn.id)
-        .find((candidate) => candidate.sourceInvocationId === invocation.sourceInvocationId && candidate.toAgentId === agent.id)
-      : undefined
-    const expectedOutput = invocation.kind === 'participation'
-      ? 'participation'
-      : invocation.kind === 'duplicate_check'
-        ? 'duplicate'
-        : 'public_response'
-    const initialMessage = invocation.kind === 'duplicate_check'
-      ? `Check whether your proposed contribution duplicates these persisted public replies.\n\n${context}`
-      : handoff?.question ?? message.body
-
-    this.setActivity(execution, agent.id, 'queued')
+  private async runClaimedTurn(
+    execution: TurnExecution,
+    turn: ConversationTurn,
+    message: Message,
+    targetAgents: Agent[],
+    memberIds: Set<string>,
+    memberAgents: Agent[],
+  ): Promise<ConversationTurn> {
+    const heartbeat = setInterval(() => {
+      if (!this.repositories.renewConversationTurnClaim(turn.id, execution.recoveryOwnerId, this.now())) {
+        execution.cancelled = true
+      }
+    }, this.recoveryHeartbeatMs)
+    heartbeat.unref?.()
     try {
-      const result = await this.queue.enqueue({
-        id: invocation.id,
-        agentId: agent.id,
-        priority: invocation.priority,
-        sequence: this.invocationSequence++,
-        run: async () => {
-          this.repositories.updateAgentInvocation(invocation.id, { status: 'running', startedAt: this.now().toISOString() })
-          this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
-          this.setActivity(execution, agent.id, invocation.kind === 'handoff_response' ? 'handoff' : 'preparing')
-          return this.sessions.invoke({
-            channelId: turn.channelId,
-            threadRootMessageId: turn.threadRootMessageId,
-            currentMessageId: message.id,
-            agent,
-            context,
-            initialMessage,
-            candidateAgentIds: this.repositories.listTurnParticipants(turn.id).map((participant) => participant.agentId),
-            conversation: {
-              turnId: turn.id,
-              invocationId: invocation.id,
-              kind: invocation.kind,
-              expectedOutput,
-            },
-          })
-        },
-      })
-      this.repositories.updateAgentInvocation(invocation.id, { status: 'settled', completedAt: this.now().toISOString() })
-      this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
-      if (isPublicResponse(result.parsed)) {
-        this.persistPublicReply(turn, agent, result.parsed.reply)
-        this.updateParticipant(turn.id, agent.id, { status: 'spoken' })
-        if (handoff) this.finishHandoff(handoff.id, 'completed', null)
-      }
-      if (isParticipationDecision(result.parsed)) {
-        this.updateParticipant(turn.id, agent.id, {
-          decision: result.parsed.decision,
-          confidence: result.parsed.confidence,
-          proposedAngle: result.parsed.proposedAngle,
-          dependsOnAgentId: result.parsed.dependsOnAgentId,
-          status: result.parsed.decision === 'speak' ? 'selected' : 'skipped',
-          reason: result.parsed.reason,
-        })
-      }
-    } catch (error) {
-      this.repositories.updateAgentInvocation(invocation.id, {
-        status: 'failed', completedAt: this.now().toISOString(), errorCode: errorMessage(error),
-      })
-      const participant = this.repositories.listTurnParticipants(turn.id).find((candidate) => candidate.agentId === agent.id)
-      if (participant && !isTerminalParticipant(participant)) {
-        this.updateParticipant(turn.id, agent.id, { status: 'failed', reason: `response_failed:${errorMessage(error)}` })
-      }
+      return await this.executeTurn(execution, turn, message, targetAgents, memberIds, memberAgents)
     } finally {
-      execution.activities.delete(agent.id)
-      const active = this.repositories.listAgentInvocations(turn.id)
-        .some((candidate) => candidate.status === 'queued' || candidate.status === 'running')
-      if (!active && !isTerminal(this.currentTurn(turn.id))) this.finishTurn(turn.id)
+      clearInterval(heartbeat)
+      this.repositories.releaseConversationTurnClaim(turn.id, execution.recoveryOwnerId)
       this.executions.delete(turn.id)
     }
   }
@@ -329,17 +299,30 @@ export class ChannelTurnCoordinator {
       if (turn.mode === 'multi_direct' || turn.mode === 'all') {
         return await this.runParallelExplicitTurn(execution, turn, message, targetAgents, memberIds)
       }
+      const persistedParticipants = this.repositories.listTurnParticipants(turn.id)
+      const existingParticipants = new Map(persistedParticipants.map((participant) => [participant.agentId, participant]))
+      for (const participant of persistedParticipants) {
+        const agent = this.repositories.getAgent(participant.agentId)
+        if (agent && memberIds.has(agent.id) && agent.status !== 'offline' && agent.status !== 'error') continue
+        this.failActiveInvocationsForAgent(turn.id, participant.agentId, 'agent_unavailable')
+        if (!isTerminalParticipant(participant)) {
+          this.updateParticipant(turn.id, participant.agentId, { status: 'failed', reason: 'agent_unavailable' })
+        }
+      }
       const agents = memberAgents.filter((agent) => agent.status !== 'offline' && agent.status !== 'error')
-      const candidates = matchResponsibilities(message.body, agents, maxParticipationCandidates)
+      const candidates = persistedParticipants.length > 0
+        ? persistedParticipants.flatMap((participant) => {
+            const agent = agents.find((candidate) => candidate.id === participant.agentId)
+            return agent ? [{ agent, score: participant.matcherScore ?? 0 }] : []
+          })
+        : matchResponsibilities(message.body, agents, maxParticipationCandidates)
       const participants = candidates.map((candidate, index) => {
-        const participant = this.repositories.createTurnParticipant({
-          turnId: turn.id,
-          agentId: candidate.agent.id,
-          source: 'responsibility',
-          rank: index + 1,
+        const existing = existingParticipants.get(candidate.agent.id)
+        const participant = existing ?? this.repositories.createTurnParticipant({
+          turnId: turn.id, agentId: candidate.agent.id, source: 'responsibility', rank: index + 1,
           matcherScore: candidate.score,
         })
-        this.publish('conversation.participant_updated', 'turn_participant', participant.id)
+        if (!existing) this.publish('conversation.participant_updated', 'turn_participant', participant.id)
         return { candidate, participant }
       })
 
@@ -351,19 +334,23 @@ export class ChannelTurnCoordinator {
       })))
 
       if (execution.cancelled) return this.currentTurn(turn.id)
-      const speakers = this.orderSpeakers(turn, decisions.filter((entry) => entry.participant.decision === 'speak'))
+      const speakers = this.orderSpeakers(turn, decisions.filter((entry) => entry.participant.decision === 'speak'
+        && entry.participant.status !== 'failed'
+        && entry.participant.status !== 'cancelled'))
       const selected = speakers.slice(0, maxInitialSpeakers)
       const selectedIds = new Set(selected.map((entry) => entry.agent.id))
       let speakingOrder = 1
       for (const entry of speakers) {
         const selectedForResponse = selectedIds.has(entry.agent.id)
-        entry.participant = this.updateParticipant(turn.id, entry.agent.id, selectedForResponse ? {
-          status: 'selected',
-          speakingOrder: speakingOrder++,
-        } : {
-          status: 'skipped',
-          reason: 'initial_speaker_limit',
-        })
+        if (entry.participant.status === 'spoken') {
+          speakingOrder = Math.max(speakingOrder, (entry.participant.speakingOrder ?? 0) + 1)
+        } else {
+          entry.participant = this.updateParticipant(turn.id, entry.agent.id, selectedForResponse ? {
+            status: 'selected', speakingOrder: speakingOrder++,
+          } : {
+            status: 'skipped', reason: 'initial_speaker_limit',
+          })
+        }
       }
 
       if (selected.length > 0) turn = this.transitionTurn(turn.id, { status: 'responding', currentRound: 1 })
@@ -393,7 +380,6 @@ export class ChannelTurnCoordinator {
         if (!outcome) continue
         publicResponseCount += 1
         spokenAgentIds.add(speaker.agent.id)
-        this.updateParticipant(turn.id, speaker.agent.id, { status: 'spoken' })
         handoffProposals.push({
           fromAgentId: speaker.agent.id,
           sourceInvocationId: outcome.invocation.id,
@@ -424,13 +410,13 @@ export class ChannelTurnCoordinator {
     if (isTerminal(turn)) return turn
     const execution = this.executions.get(turnId)
     if (execution) {
+      execution.cancelled = true
       const cancellation = await this.cancelInvocations(execution, this.repositories.listAgentInvocations(turnId))
       this.cancelParticipantsForInvocations(turnId, cancellation.cancelledInvocationIds, 'turn_cancelled')
       this.clearActivitiesForInvocations(execution, cancellation.cancelledInvocationIds)
       if (cancellation.failures.length > 0) {
         throw cancellation.failures[0]!.error
       }
-      execution.cancelled = true
       this.cancelParticipants(turnId)
       execution.activities.clear()
     } else {
@@ -553,18 +539,15 @@ export class ChannelTurnCoordinator {
     agent: Agent,
     memberIds: Set<string>,
   ): Promise<ConversationTurn> {
-    const participant = this.repositories.createTurnParticipant({
-      turnId: initialTurn.id,
-      agentId: agent.id,
-      source: 'direct',
-      rank: 1,
-      matcherScore: null,
-      decision: 'speak',
-      speakingOrder: 1,
-      status: 'selected',
+    const existing = this.repositories.listTurnParticipants(initialTurn.id)
+      .find((participant) => participant.agentId === agent.id)
+    const participant = existing ?? this.repositories.createTurnParticipant({
+      turnId: initialTurn.id, agentId: agent.id, source: 'direct', rank: 1, matcherScore: null,
+      decision: 'speak', speakingOrder: 1, status: 'selected',
     })
-    this.publish('conversation.participant_updated', 'turn_participant', participant.id)
+    if (!existing) this.publish('conversation.participant_updated', 'turn_participant', participant.id)
     if (agent.status === 'offline' || agent.status === 'error') {
+      this.failActiveInvocationsForAgent(initialTurn.id, agent.id, 'agent_unavailable')
       this.updateParticipant(initialTurn.id, agent.id, { status: 'failed', reason: 'agent_unavailable' })
       return this.finishTurn(initialTurn.id)
     }
@@ -572,7 +555,6 @@ export class ChannelTurnCoordinator {
     const turn = this.transitionTurn(initialTurn.id, { status: 'responding', currentRound: 1 })
     const outcome = await this.respond(execution, turn, message, agent, 'response', 'human_direct', 1, null)
     if (!outcome) return execution.cancelled ? this.currentTurn(turn.id) : this.finishTurn(turn.id)
-    this.updateParticipant(turn.id, agent.id, { status: 'spoken' })
     const spokenAgentIds = new Set([agent.id])
     const reservedAgentIds = new Set(spokenAgentIds)
     const edges: Array<{ fromAgentId: string; toAgentId: string }> = []
@@ -606,18 +588,15 @@ export class ChannelTurnCoordinator {
     const availableAgents: Agent[] = []
     for (const [index, agent] of agents.entries()) {
       const unavailable = agent.status === 'offline' || agent.status === 'error'
-      const participant = this.repositories.createTurnParticipant({
-        turnId: initialTurn.id,
-        agentId: agent.id,
-        source,
-        rank: index + 1,
-        matcherScore: null,
-        decision: 'speak',
-        speakingOrder: index + 1,
-        status: unavailable ? 'failed' : 'selected',
-        reason: unavailable ? 'agent_unavailable' : null,
+      const existing = this.repositories.listTurnParticipants(initialTurn.id)
+        .find((participant) => participant.agentId === agent.id)
+      const participant = existing ?? this.repositories.createTurnParticipant({
+        turnId: initialTurn.id, agentId: agent.id, source, rank: index + 1, matcherScore: null,
+        decision: 'speak', speakingOrder: index + 1,
+        status: unavailable ? 'failed' : 'selected', reason: unavailable ? 'agent_unavailable' : null,
       })
-      this.publish('conversation.participant_updated', 'turn_participant', participant.id)
+      if (!existing) this.publish('conversation.participant_updated', 'turn_participant', participant.id)
+      if (unavailable) this.failActiveInvocationsForAgent(initialTurn.id, agent.id, 'agent_unavailable')
       if (!unavailable) availableAgents.push(agent)
     }
     if (availableAgents.length === 0) return this.finishTurn(initialTurn.id)
@@ -646,10 +625,10 @@ export class ChannelTurnCoordinator {
       }
       const outcome = result.value
       if (!outcome) continue
-      this.persistPublicReply(turn, agent, outcome.response.reply)
-      this.updateParticipant(turn.id, agent.id, { status: 'spoken' })
+      if (!this.settlePublicResponse(execution, turn, agent, outcome)) continue
       this.rejectParallelHandoffs(turn, outcome, agent.id, memberIds)
     }
+    if (execution.cancelled) return this.currentTurn(turn.id)
     return this.finishTurn(turn.id)
   }
 
@@ -660,6 +639,7 @@ export class ChannelTurnCoordinator {
     agent: Agent,
     participant: TurnParticipant,
   ): Promise<TurnParticipant> {
+    if (participant.decision !== 'pending') return participant
     const candidateIds = this.repositories.listTurnParticipants(turn.id).map((candidate) => candidate.agentId)
     let participationInvocationId: string | undefined
     const service = new ParticipationService({
@@ -844,8 +824,8 @@ export class ChannelTurnCoordinator {
       sourceInvocationId,
       handoffQuestion,
     )
-    if (outcome) this.persistPublicReply(turn, agent, outcome.response.reply)
-    return outcome
+    if (!outcome) return null
+    return this.settlePublicResponse(execution, turn, agent, outcome) ? outcome : null
   }
 
   private async generateResponse(
@@ -869,9 +849,14 @@ export class ChannelTurnCoordinator {
         initialMessage: handoffQuestion ?? message.body,
         context: this.renderContext(message),
         phase: kind === 'handoff_response' ? 'handoff' : 'preparing',
+        deferSettlement: true,
       })
       if (!isPublicResponse(invocationResult.result.parsed)) throw new Error('Runtime returned no public response.')
-      return { invocation: invocationResult.invocation, response: invocationResult.result.parsed }
+      return {
+        invocation: invocationResult.invocation,
+        response: invocationResult.result.parsed,
+        result: invocationResult.result,
+      }
     } catch (error) {
       if (!isInvocationCancellation(error)) {
         this.updateParticipant(turn.id, agent.id, {
@@ -883,15 +868,30 @@ export class ChannelTurnCoordinator {
     }
   }
 
-  private persistPublicReply(turn: ConversationTurn, agent: Agent, reply: string): void {
-    this.messages.postAgent(
-      turn.channelId,
-      null,
-      agent.id,
-      agent.identity,
-      reply,
-      turn.threadRootMessageId,
-    )
+  private settlePublicResponse(
+    execution: TurnExecution,
+    turn: ConversationTurn,
+    agent: Agent,
+    outcome: ResponseOutcome,
+  ): boolean {
+    if (execution.cancelled) return false
+    const settled = this.repositories.settleConversationInvocation({
+      invocationId: outcome.invocation.id,
+      recoveryOwnerId: execution.recoveryOwnerId,
+      resultJson: JSON.stringify(outcome.result),
+      participantPatch: { status: 'spoken' },
+      publicReply: { authorName: agent.identity, body: outcome.response.reply },
+      occurredAt: this.now(),
+    })
+    if (!settled.applied) {
+      execution.cancelled = true
+      return false
+    }
+    this.publish('conversation.invocation_updated', 'agent_invocation', outcome.invocation.id)
+    if (settled.participant) {
+      this.publish('conversation.participant_updated', 'turn_participant', settled.participant.id)
+    }
+    return true
   }
 
   private rejectParallelHandoffs(
@@ -901,6 +901,8 @@ export class ChannelTurnCoordinator {
     memberIds: Set<string>,
   ): void {
     for (const target of outcome.response.handoffTo) {
+      const existing = this.findHandoff(turn.id, outcome.invocation.id, target.agentId)
+      if (existing) continue
       const handoff = this.repositories.createConversationHandoff({
         turnId: turn.id,
         sourceInvocationId: outcome.invocation.id,
@@ -925,7 +927,28 @@ export class ChannelTurnCoordinator {
     worklist: HandoffWorkItem[],
   ): void {
     if (proposal.targets.length === 0) return
-    const decision = this.handoffPolicy.validate(proposal.targets, {
+    const unresolvedTargets: PublicAgentResponse['handoffTo'] = []
+    for (const target of proposal.targets) {
+      const existing = this.findHandoff(turn.id, proposal.sourceInvocationId, target.agentId)
+      if (!existing) {
+        unresolvedTargets.push(target)
+        continue
+      }
+      if (existing.toAgentId && (existing.status === 'accepted' || existing.status === 'completed')) {
+        edges.push({ fromAgentId: existing.fromAgentId, toAgentId: existing.toAgentId })
+        reservedAgentIds.add(existing.toAgentId)
+        worklist.push({
+          handoffId: existing.id,
+          fromAgentId: existing.fromAgentId,
+          toAgentId: existing.toAgentId,
+          question: existing.question,
+          round: existing.round,
+          sourceInvocationId: existing.sourceInvocationId,
+        })
+      }
+    }
+    if (unresolvedTargets.length === 0) return
+    const decision = this.handoffPolicy.validate(unresolvedTargets, {
       turn: this.currentTurn(turn.id),
       fromAgentId: proposal.fromAgentId,
       channelMemberAgentIds: [...memberIds],
@@ -939,7 +962,7 @@ export class ChannelTurnCoordinator {
         fromAgentId: proposal.fromAgentId,
         requestedTargetAgentId: rejected.agentId,
         toAgentId: memberIds.has(rejected.agentId) ? rejected.agentId : null,
-        question: proposal.targets.find((target) => target.agentId === rejected.agentId)?.question ?? '',
+        question: unresolvedTargets.find((target) => target.agentId === rejected.agentId)?.question ?? '',
         round: this.currentTurn(turn.id).currentRound + 1,
         status: 'rejected',
         reason: rejected.reason,
@@ -972,6 +995,12 @@ export class ChannelTurnCoordinator {
     }
   }
 
+  private findHandoff(turnId: string, sourceInvocationId: string, requestedTargetAgentId: string) {
+    return this.repositories.listConversationHandoffs(turnId).find((handoff) =>
+      handoff.sourceInvocationId === sourceInvocationId
+      && handoff.requestedTargetAgentId === requestedTargetAgentId)
+  }
+
   private async runHandoffWorklist(
     execution: TurnExecution,
     initialTurn: ConversationTurn,
@@ -992,7 +1021,9 @@ export class ChannelTurnCoordinator {
       const turn = this.transitionTurn(initialTurn.id, { status: 'handoff', currentRound: item.round })
       const existing = this.repositories.listTurnParticipants(turn.id).find((participant) => participant.agentId === agent.id)
       const participant = existing
-        ? this.updateParticipant(turn.id, agent.id, {
+        ? existing.status === 'spoken'
+          ? existing
+          : this.updateParticipant(turn.id, agent.id, {
             source: 'handoff',
             matcherScore: null,
             decision: 'speak',
@@ -1002,7 +1033,7 @@ export class ChannelTurnCoordinator {
             status: 'selected',
             speakingOrder: nextSpeakingOrder(this.repositories, turn.id),
             reason: null,
-          }, { failedRecoverySource: 'handoff' })
+            }, { failedRecoverySource: 'handoff' })
         : this.repositories.createTurnParticipant({
             turnId: turn.id,
             agentId: agent.id,
@@ -1038,7 +1069,6 @@ export class ChannelTurnCoordinator {
       if (execution.cancelled) continue
       this.finishHandoff(item.handoffId, 'completed', null)
       spokenAgentIds.add(agent.id)
-      this.updateParticipant(turn.id, agent.id, { status: 'spoken' })
       this.addValidatedHandoffs(turn, {
         fromAgentId: agent.id,
         sourceInvocationId: outcome.invocation.id,
@@ -1062,33 +1092,46 @@ export class ChannelTurnCoordinator {
       context: string
       phase: TurnActivity['phase']
       candidateAgentIds?: string[]
+      deferSettlement?: boolean
     },
     onInvocationCreated?: (invocationId: string) => void,
   ): Promise<{ invocation: AgentInvocation; result: ConversationSessionResult }> {
-    const invocation = this.repositories.createAgentInvocation({
-      turnId: turn.id,
-      agentId: agent.id,
-      kind: input.kind,
-      priority: input.priority,
-      round: input.round,
-      idempotencyKey: `${turn.id}:${input.round}:${input.kind}:${agent.id}`,
-      sourceInvocationId: input.sourceInvocationId,
-    })
+    const idempotencyKey = `${turn.id}:${input.round}:${input.kind}:${agent.id}`
+    let invocation = this.repositories.listAgentInvocations(turn.id)
+      .find((candidate) => candidate.idempotencyKey === idempotencyKey)
+    if (!invocation) {
+      invocation = this.repositories.createAgentInvocation({
+        turnId: turn.id,
+        agentId: agent.id,
+        kind: input.kind,
+        priority: input.priority,
+        round: input.round,
+        idempotencyKey,
+        sourceInvocationId: input.sourceInvocationId,
+      })
+      this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
+    }
     onInvocationCreated?.(invocation.id)
     execution.invocationIds.add(invocation.id)
-    this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
+    if (invocation.status === 'settled') {
+      if (!invocation.resultJson) throw new Error(`Settled invocation ${invocation.id} has no persisted result.`)
+      return { invocation, result: parsePersistedInvocationResult(invocation) }
+    }
+    if (invocation.status === 'failed') throw new Error(invocation.errorCode ?? 'invocation_failed')
+    if (invocation.status === 'cancelled') throw new ConversationInvocationCancelledError(invocation.id)
+    const activeInvocation = invocation
     this.setActivity(execution, agent.id, 'queued')
 
     try {
       const result = await this.queue.enqueue({
-        id: invocation.id,
+        id: activeInvocation.id,
         agentId: agent.id,
         priority: input.priority,
         sequence: this.invocationSequence++,
         run: async () => {
-          if (execution.cancelled) throw new ConversationInvocationCancelledError(invocation.id)
-          this.repositories.updateAgentInvocation(invocation.id, { status: 'running', startedAt: this.now().toISOString() })
-          this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
+          if (execution.cancelled) throw new ConversationInvocationCancelledError(activeInvocation.id)
+          this.repositories.updateAgentInvocation(activeInvocation.id, { status: 'running', startedAt: this.now().toISOString() })
+          this.publish('conversation.invocation_updated', 'agent_invocation', activeInvocation.id)
           this.setActivity(execution, agent.id, input.phase)
           return this.sessions.invoke({
             channelId: turn.channelId,
@@ -1100,24 +1143,37 @@ export class ChannelTurnCoordinator {
             candidateAgentIds: input.candidateAgentIds,
             conversation: {
               turnId: turn.id,
-              invocationId: invocation.id,
+              invocationId: activeInvocation.id,
               kind: input.kind,
               expectedOutput: input.expectedOutput,
             },
           })
         },
       })
-      if (execution.cancelled) throw new ConversationInvocationCancelledError(invocation.id)
-      if (execution.timedOutInvocationIds.has(invocation.id)) throw new Error('timeout')
-      this.repositories.updateAgentInvocation(invocation.id, { status: 'settled', completedAt: this.now().toISOString() })
-      this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
+      if (execution.cancelled) throw new ConversationInvocationCancelledError(activeInvocation.id)
+      if (execution.timedOutInvocationIds.has(activeInvocation.id)) throw new Error('timeout')
+      if (!this.repositories.renewConversationTurnClaim(turn.id, execution.recoveryOwnerId, this.now())) {
+        execution.cancelled = true
+        throw new ConversationInvocationCancelledError(activeInvocation.id)
+      }
+      if (!input.deferSettlement) {
+        const settled = this.repositories.settleConversationInvocation({
+          invocationId: activeInvocation.id,
+          recoveryOwnerId: execution.recoveryOwnerId,
+          resultJson: JSON.stringify(result),
+          occurredAt: this.now(),
+        })
+        if (!settled.applied) throw new ConversationInvocationCancelledError(activeInvocation.id)
+        invocation = settled.invocation
+        this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
+      }
       return { invocation, result }
     } catch (error) {
-      if (!execution.timedOutInvocationIds.has(invocation.id)) {
+      if (!execution.timedOutInvocationIds.has(activeInvocation.id)) {
         const current = this.repositories.listAgentInvocations(turn.id)
-          .find((candidate) => candidate.id === invocation.id)
+          .find((candidate) => candidate.id === activeInvocation.id)
         if (current && (current.status === 'queued' || current.status === 'running')) {
-          this.repositories.updateAgentInvocation(invocation.id, {
+          this.repositories.updateAgentInvocation(activeInvocation.id, {
             status: execution.cancelled
               || isInvocationCancellation(error)
               ? 'cancelled'
@@ -1125,7 +1181,7 @@ export class ChannelTurnCoordinator {
             completedAt: this.now().toISOString(),
             errorCode: errorMessage(error),
           })
-          this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
+          this.publish('conversation.invocation_updated', 'agent_invocation', activeInvocation.id)
         }
       }
       throw error
@@ -1281,6 +1337,18 @@ export class ChannelTurnCoordinator {
     this.publish('conversation.invocation_updated', 'agent_invocation', invocationId)
   }
 
+  private failActiveInvocationsForAgent(turnId: string, agentId: string, errorCode: string): void {
+    for (const invocation of this.repositories.listAgentInvocations(turnId)) {
+      if (invocation.agentId !== agentId || (invocation.status !== 'queued' && invocation.status !== 'running')) continue
+      this.repositories.updateAgentInvocation(invocation.id, {
+        status: 'failed',
+        completedAt: this.now().toISOString(),
+        errorCode,
+      })
+      this.publish('conversation.invocation_updated', 'agent_invocation', invocation.id)
+    }
+  }
+
   private cancelPersistedInvocation(turn: ConversationTurn, invocation: AgentInvocation): void {
     const sessionKey = conversationSessionKey(turn.channelId, turn.threadRootMessageId, invocation.agentId)
     const session = this.repositories.getConversationSession(sessionKey)
@@ -1422,16 +1490,6 @@ function phaseForInvocation(invocation: AgentInvocation): TurnActivity['phase'] 
   return 'preparing'
 }
 
-function recoveryPriority(priority: InvocationPriority): number {
-  return {
-    human_direct: 0,
-    human_ordinary: 1,
-    participation: 2,
-    duplicate_check: 3,
-    automatic_handoff: 4,
-  }[priority]
-}
-
 function isParticipationDecision(value: ConversationSessionResult['parsed']): value is ParticipationDecision {
   return value !== null && 'decision' in value && 'confidence' in value && 'proposedAngle' in value
 }
@@ -1442,6 +1500,16 @@ function isDuplicateDecision(value: ConversationSessionResult['parsed']): value 
 
 function isPublicResponse(value: ConversationSessionResult['parsed']): value is PublicAgentResponse {
   return value !== null && 'reply' in value && 'handoffTo' in value
+}
+
+function parsePersistedInvocationResult(invocation: AgentInvocation): ConversationSessionResult {
+  try {
+    const result = JSON.parse(invocation.resultJson ?? '') as ConversationSessionResult
+    if (!result || typeof result.text !== 'string' || !('parsed' in result)) throw new Error('invalid result shape')
+    return result
+  } catch (error) {
+    throw new Error(`Invocation ${invocation.id} has an invalid persisted result: ${errorMessage(error)}`)
+  }
 }
 
 function nextParticipantRank(repositories: WorkspaceRepositories, turnId: string): number {

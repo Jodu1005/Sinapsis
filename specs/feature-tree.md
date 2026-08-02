@@ -29,6 +29,7 @@
 |       |-- 普通、单提及、多提及与 @all 四种路由模式
 |       |-- 筛选、判断、排队、准备、交接与最终回复状态
 |       |-- Thread 隔离的持久化 Session 与重启恢复
+|       |-- Turn 级租约 CAS、Invocation 结果重放与公开消息幂等提交
 |       `-- 结构化 Handoff 路由与仅公开文本回复
 |
 |-- F2 Agent 与 Runtime
@@ -107,6 +108,6 @@
 
 - F0-F6 已实现并由服务端、前端或完整集成测试覆盖。
 - 本机流程测试验证：FIFO 领取、同仓不同 worktree、忙碌 Agent 输入、任务分支提交、人工验收与不自动合并。
-- F1.5 验证普通筛选与去重、Handoff、持久化会话恢复、resume 失败冷启动、并行失败隔离和 Artifact 隔离；Dream Memory 仍在下一份计划中。
+- F1.5 验证普通筛选与去重、第二轮 Handoff、持久化会话恢复、resume 失败后的 timeline/Thread 冷启动、单提及与多提及并行失败隔离、Turn 级原子领取、取消发布栅栏和 Artifact 隔离；migration 18 归属 Conversation Turn，Dream Memory 仍在下一份计划并从 migration 19 开始。
 - 浏览器检查验证：创建工作空间与仓库、添加 Agent、频道消息、任务输入、证据读取、接受任务，以及 700px 窄屏下抽屉关闭时消息输入可用。
 - F7 保持后续能力，不属于当前交付。

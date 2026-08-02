@@ -458,6 +458,23 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(17, new Date().toISOString())
     }
 
+    const eighteenthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 18').get()
+    if (!eighteenthMigration) {
+      database.exec(`
+        ALTER TABLE conversation_turns ADD COLUMN recovery_owner_id TEXT;
+        ALTER TABLE conversation_turns ADD COLUMN recovery_claimed_at TEXT;
+        ALTER TABLE agent_invocations ADD COLUMN result_json TEXT;
+        CREATE TABLE conversation_invocation_messages (
+          invocation_id TEXT PRIMARY KEY REFERENCES agent_invocations(id),
+          message_id TEXT NOT NULL UNIQUE REFERENCES messages(id),
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX conversation_turns_recovery_claim_idx
+          ON conversation_turns(recovery_owner_id, recovery_claimed_at, status);
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(18, new Date().toISOString())
+    }
+
     database.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS conversation_sessions_grain_unique_idx
         ON conversation_sessions(channel_id, COALESCE(thread_root_message_id, ''), agent_id);

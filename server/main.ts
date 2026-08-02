@@ -1,4 +1,5 @@
 import type { Server } from 'node:http'
+import path from 'node:path'
 import { createApp } from './app'
 import { LeaseReaper, LeaseReaperLoop } from './application/lease-reaper'
 import { SchedulerLoop, TaskScheduler } from './application/task-scheduler'
@@ -9,7 +10,7 @@ import type { WorkspaceRepositories } from './ports/repositories'
 const config = getServiceConfig()
 await ensureDataDirectory(config.dataDir)
 
-const app = createApp()
+const app = createApp({ databasePath: path.join(config.dataDir, 'sinapsis.sqlite') })
 const repositories = app.locals.repositories as WorkspaceRepositories
 repositories.recoverOrphanedAgents(new Date())
 const conversationCoordinator = app.locals.conversationCoordinator as { recover?: () => Promise<void> }

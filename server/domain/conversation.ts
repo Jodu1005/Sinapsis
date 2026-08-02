@@ -88,16 +88,17 @@ export interface AgentInvocation {
   startedAt: string | null
   completedAt: string | null
   errorCode: string | null
+  resultJson: string | null
 }
 
 export type CreateAgentInvocationInput = Pick<
   AgentInvocation,
   'turnId' | 'agentId' | 'kind' | 'priority' | 'round' | 'idempotencyKey' | 'sourceInvocationId'
-> & Partial<Pick<AgentInvocation, 'status' | 'startedAt' | 'completedAt' | 'errorCode'>>
+> & Partial<Pick<AgentInvocation, 'status' | 'startedAt' | 'completedAt' | 'errorCode' | 'resultJson'>>
 
 export type InvocationPatch = Partial<Pick<
   AgentInvocation,
-  'status' | 'startedAt' | 'completedAt' | 'errorCode'
+  'status' | 'startedAt' | 'completedAt' | 'errorCode' | 'resultJson'
 >>
 
 export interface ConversationHandoff {
