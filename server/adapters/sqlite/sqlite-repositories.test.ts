@@ -108,6 +108,174 @@ describe('SQLite workspace repositories', () => {
     expect(repositories.getBootstrap().recentMessages).toEqual([])
   })
 
+  it('persists Dream runs, candidates, and their channel message sources', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const message = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Frontend uses React.',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'manual',
+      from: null, to: { createdAt: message.createdAt, id: message.id },
+    })
+    const candidate = repositories.createMemoryCandidate({
+      dreamRunId: run.id,
+      proposedScope: 'channel',
+      channelId: channel.id,
+      kind: 'fact',
+      proposedContent: 'Frontend uses React.',
+      rationale: 'Repeated discussions confirm this.',
+      confidence: 0.92,
+      importance: 0.8,
+      sourceMessageIds: [message.id],
+    })
+
+    expect(repositories.getDreamRun(run.id)).toMatchObject({
+      id: run.id, status: 'queued', candidateCount: 1,
+      toMessageCreatedAt: message.createdAt, toMessageId: message.id,
+    })
+    expect(repositories.listMemoryCandidates({ status: 'pending' })).toEqual([
+      expect.objectContaining({ id: candidate.id, dreamRunId: run.id, channelId: channel.id }),
+    ])
+    expect(repositories.listDreamSourceMessages(run.id).map((item) => item.id)).toEqual([message.id])
+  })
+
+  it('enforces channel scope and source channel constraints in SQLite', async () => {
+    const { repositories } = await createRepositories()
+    const firstChannel = createChannel(repositories)
+    const secondWorkspace = repositories.createWorkspace({ name: 'Second' })
+    repositories.createRepository({ workspaceId: secondWorkspace.id, name: 'second-repository', path: '/projects/second' })
+    const secondChannel = repositories.createChannel({ name: 'operations' })
+    const source = repositories.createMessage({
+      channelId: firstChannel.id, senderType: 'human', authorName: 'Jodu', body: 'A source message.',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: secondChannel.id, trigger: 'manual', from: null, to: null,
+    })
+
+    expect(() => repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: null, kind: 'fact',
+      proposedContent: 'Channel-specific fact.', rationale: 'Test.', confidence: 0.9, importance: 0.5,
+      sourceMessageIds: [],
+    })).toThrow(/channel/i)
+    expect(() => repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: secondChannel.id, kind: 'fact',
+      proposedContent: 'Wrong source channel.', rationale: 'Test.', confidence: 0.9, importance: 0.5,
+      sourceMessageIds: [source.id],
+    })).toThrow(/source|channel/i)
+    expect(() => database!.database.prepare(`
+      INSERT INTO memory_candidates (
+        id, dream_run_id, proposed_scope, channel_id, kind, proposed_content, rationale, confidence,
+        importance, content_hash, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'invalid-channel-candidate', run.id, 'channel', null, 'fact', 'Invalid.', 'Test.', 0.9,
+      0.5, 'invalid', 'pending', '2026-08-02T00:00:00.000Z',
+    )).toThrow(/CHECK constraint failed/)
+    const validCandidate = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: secondChannel.id, kind: 'fact',
+      proposedContent: 'Valid source constraint fixture.', rationale: 'Test.', confidence: 0.9, importance: 0.5,
+      sourceMessageIds: [],
+    })
+    expect(() => database!.database.prepare(`
+      INSERT INTO memory_candidate_sources (candidate_id, message_id, turn_id) VALUES (?, ?, ?)
+    `).run(validCandidate.id, source.id, null)).toThrow(/Dream channel/)
+  })
+
+  it('accepts a candidate atomically, reuses matching Memory, inherits sources, and supersedes duplicates', async () => {
+    const { repositories, publisher } = await createRepositories()
+    const channel = createChannel(repositories)
+    const firstSource = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Use React.',
+    })
+    const secondSource = repositories.createMessage({
+      channelId: channel.id, senderType: 'agent', authorName: 'Ada', body: 'React is established.',
+    })
+    const thirdSource = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Use React for the frontend.',
+    })
+    const fourthSource = repositories.createMessage({
+      channelId: channel.id, senderType: 'agent', authorName: 'Ada', body: 'React remains the frontend standard.',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'scheduled', from: null,
+      to: { createdAt: secondSource.createdAt, id: secondSource.id },
+    })
+    const first = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Frontend uses React.', rationale: 'Confirmed.', confidence: 0.9, importance: 0.7,
+      sourceMessageIds: [firstSource.id, secondSource.id],
+    })
+    const duplicateRun = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'scheduled',
+      from: { createdAt: secondSource.createdAt, id: secondSource.id },
+      to: { createdAt: thirdSource.createdAt, id: thirdSource.id },
+    })
+    const duplicate = repositories.createMemoryCandidate({
+      dreamRunId: duplicateRun.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Frontend uses React.', rationale: 'Same fact.', confidence: 0.8, importance: 0.6,
+      sourceMessageIds: [secondSource.id],
+    })
+
+    const memory = repositories.createMemoryFromCandidate({
+      candidateId: first.id, reviewedContent: 'Frontend uses React.', reviewedScope: 'channel',
+      occurredAt: new Date('2026-08-02T00:00:00.000Z'),
+    })
+
+    expect(repositories.getMemoryCandidate(first.id)).toMatchObject({ status: 'accepted' })
+    expect(repositories.getMemoryCandidate(duplicate.id)).toMatchObject({ status: 'superseded' })
+    expect(repositories.listAcceptedMemories('channel', channel.id)).toEqual([
+      expect.objectContaining({ id: memory.id, sourceCandidateId: first.id, content: 'Frontend uses React.' }),
+    ])
+    expect(database!.database.prepare(`
+      SELECT message_id FROM memory_sources WHERE memory_id = ? ORDER BY message_id
+    `).all(memory.id)).toEqual([
+      { message_id: firstSource.id },
+      { message_id: secondSource.id },
+    ].sort((left, right) => left.message_id.localeCompare(right.message_id)))
+    expect(publisher.events.map((item) => item.type)).toContain('memory.candidate_reviewed')
+    expect(publisher.events.map((item) => item.type)).toContain('memory.changed')
+
+    const reuseRun = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'manual',
+      from: { createdAt: thirdSource.createdAt, id: thirdSource.id },
+      to: { createdAt: fourthSource.createdAt, id: fourthSource.id },
+    })
+    const reusedCandidate = repositories.createMemoryCandidate({
+      dreamRunId: reuseRun.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Frontend uses React.', rationale: 'Still confirmed.', confidence: 0.95, importance: 0.8,
+      sourceMessageIds: [fourthSource.id],
+    })
+    const reusedMemory = repositories.createMemoryFromCandidate({
+      candidateId: reusedCandidate.id, reviewedContent: 'Frontend uses React.', reviewedScope: 'channel',
+      occurredAt: new Date('2026-08-02T00:01:00.000Z'),
+    })
+
+    expect(reusedMemory.id).toBe(memory.id)
+    expect(repositories.getMemoryCandidate(reusedCandidate.id)).toMatchObject({ status: 'accepted' })
+    expect(database!.database.prepare(`
+      SELECT message_id FROM memory_sources WHERE memory_id = ? ORDER BY message_id
+    `).all(memory.id)).toContainEqual({ message_id: fourthSource.id })
+  })
+
+  it('upgrades an existing migration 18 database through migration 19', async () => {
+    const { repositories, databasePath } = await createRepositories()
+    const channel = createChannel(repositories)
+    const message = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Existing data survives.',
+    })
+    database!.close()
+    database = undefined
+    downgradeDreamMemoryToVersion18(databasePath)
+
+    database = createSqliteDatabase(databasePath)
+
+    expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 19').get())
+      .toEqual({ version: 19 })
+    expect(database.database.prepare('SELECT id FROM messages WHERE id = ?').get(message.id))
+      .toEqual({ id: message.id })
+  })
+
   it('rejects moving an accepted task back to queued', () => {
     const acceptedTask: Task = {
       id: 'task-1',
@@ -1494,6 +1662,30 @@ describe('SQLite workspace repositories', () => {
       DROP TABLE conversation_invocation_messages;
       ALTER TABLE agent_invocations DROP COLUMN result_json;
       DELETE FROM schema_migrations WHERE version IN (17, 18);
+      COMMIT;
+    `)
+    legacy.close()
+  }
+
+  function downgradeDreamMemoryToVersion18(databasePath: string): void {
+    const legacy = new DatabaseSync(databasePath)
+    legacy.exec(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN;
+      DROP TRIGGER thread_summaries_channel_match;
+      DROP TRIGGER memory_sources_channel_match;
+      DROP TRIGGER memory_candidate_sources_channel_match;
+      DROP TRIGGER memory_candidates_channel_match;
+      DROP TRIGGER dream_run_sources_channel_match;
+      DROP TRIGGER dream_runs_boundary_channel_match;
+      DROP TABLE memory_sources;
+      DROP TABLE memories;
+      DROP TABLE memory_candidate_sources;
+      DROP TABLE memory_candidates;
+      DROP TABLE dream_run_sources;
+      DROP TABLE dream_runs;
+      DROP TABLE thread_summaries;
+      DELETE FROM schema_migrations WHERE version = 19;
       COMMIT;
     `)
     legacy.close()

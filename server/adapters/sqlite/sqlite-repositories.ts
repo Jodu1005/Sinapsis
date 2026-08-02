@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import type { Agent, AgentStatus, CreateAgentInput } from '../../domain/agent'
 import type {
@@ -19,6 +19,21 @@ import type {
 } from '../../domain/conversation'
 import type { DomainEvent } from '../../domain/events'
 import type { CreateMessageInput, Message, MessageSenderType } from '../../domain/message'
+import type {
+  CreateDreamRunInput,
+  CreateMemoryCandidateInput,
+  CreateMemoryFromCandidateInput,
+  DreamRun,
+  DreamRunFilter,
+  DreamRunPatch,
+  DreamWatermark,
+  MemoryCandidate,
+  MemoryCandidateFilter,
+  MemoryKind,
+  MemoryRecord,
+  MemoryScope,
+  ReviewMemoryCandidateInput,
+} from '../../domain/memory'
 import {
   DomainError,
   type CreateTaskInput,
@@ -172,6 +187,55 @@ interface MessageRow {
   created_at: string
   updated_at: string
   deleted_at: string | null
+}
+
+interface DreamRunRow {
+  id: string
+  scope: 'channel'
+  scope_id: string
+  trigger: DreamRun['trigger']
+  status: DreamRun['status']
+  from_message_created_at: string | null
+  from_message_id: string | null
+  to_message_created_at: string | null
+  to_message_id: string | null
+  candidate_count: number
+  error: string | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+}
+
+interface MemoryCandidateRow {
+  id: string
+  dream_run_id: string
+  proposed_scope: MemoryScope
+  channel_id: string | null
+  kind: MemoryKind
+  proposed_content: string
+  rationale: string
+  confidence: number
+  importance: number
+  content_hash: string
+  status: MemoryCandidate['status']
+  reviewed_content: string | null
+  reviewed_scope: MemoryScope | null
+  reviewed_at: string | null
+  created_at: string
+}
+
+interface MemoryRow {
+  id: string
+  scope: MemoryScope
+  channel_id: string | null
+  kind: MemoryKind
+  content: string
+  content_hash: string
+  status: MemoryRecord['status']
+  source_candidate_id: string
+  archived_at: string | null
+  created_at: string
+  updated_at: string
 }
 
 interface AgentRow {
@@ -1007,6 +1071,273 @@ export class SqliteRepositories implements WorkspaceRepositories {
 
   getMessage(messageId: string): Message | undefined {
     return readMessage(this.sqlite.database, messageId)
+  }
+
+  createDreamRun(input: CreateDreamRunInput): DreamRun {
+    return this.inTransaction(() => {
+      const database = this.sqlite.database
+      if (!readChannel(database, input.scopeId)) throw new Error(`Channel ${input.scopeId} does not exist.`)
+      assertDreamBoundary(database, input.scopeId, input.from)
+      assertDreamBoundary(database, input.scopeId, input.to)
+      const createdAt = now()
+      const run: DreamRun = {
+        id: randomUUID(), scope: input.scope, scopeId: input.scopeId, trigger: input.trigger, status: 'queued',
+        fromMessageCreatedAt: input.from?.createdAt ?? null, fromMessageId: input.from?.id ?? null,
+        toMessageCreatedAt: input.to?.createdAt ?? null, toMessageId: input.to?.id ?? null,
+        candidateCount: 0, error: null, createdAt, startedAt: null, completedAt: null,
+      }
+      database.prepare(`
+        INSERT INTO dream_runs (
+          id, scope, scope_id, trigger, status, from_message_created_at, from_message_id,
+          to_message_created_at, to_message_id, candidate_count, error, created_at, started_at, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        run.id, run.scope, run.scopeId, run.trigger, run.status, run.fromMessageCreatedAt, run.fromMessageId,
+        run.toMessageCreatedAt, run.toMessageId, run.candidateCount, run.error, run.createdAt, run.startedAt, run.completedAt,
+      )
+      for (const messageId of new Set([run.fromMessageId, run.toMessageId].filter((id): id is string => id !== null))) {
+        database.prepare('INSERT INTO dream_run_sources (dream_run_id, message_id, turn_id) VALUES (?, ?, ?)').run(
+          run.id, messageId, sourceTurnId(database, messageId),
+        )
+      }
+      return run
+    })
+  }
+
+  updateDreamRun(runId: string, patch: DreamRunPatch): DreamRun {
+    return this.inTransaction(() => {
+      const existing = this.getDreamRun(runId)
+      if (!existing) throw new Error(`Dream run ${runId} does not exist.`)
+      const updated = { ...existing, ...patch }
+      this.sqlite.database.prepare(`
+        UPDATE dream_runs
+        SET status = ?, candidate_count = ?, error = ?, started_at = ?, completed_at = ?
+        WHERE id = ?
+      `).run(updated.status, updated.candidateCount, updated.error, updated.startedAt, updated.completedAt, runId)
+      return updated
+    })
+  }
+
+  getDreamRun(runId: string): DreamRun | undefined {
+    const row = this.sqlite.database.prepare('SELECT * FROM dream_runs WHERE id = ?').get(runId) as DreamRunRow | undefined
+    return row ? mapDreamRun(row) : undefined
+  }
+
+  listDreamRuns(filter: DreamRunFilter = {}): DreamRun[] {
+    const clauses: string[] = []
+    const values: string[] = []
+    if (filter.channelId !== undefined) {
+      clauses.push('scope_id = ?')
+      values.push(filter.channelId)
+    }
+    if (filter.status !== undefined) {
+      clauses.push('status = ?')
+      values.push(filter.status)
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
+    return (this.sqlite.database.prepare(`SELECT * FROM dream_runs ${where} ORDER BY created_at, id`).all(...values) as unknown as DreamRunRow[])
+      .map(mapDreamRun)
+  }
+
+  getDreamWatermark(channelId: string): DreamWatermark | undefined {
+    const row = this.sqlite.database.prepare(`
+      SELECT scope_id, to_message_created_at, to_message_id
+      FROM dream_runs
+      WHERE scope_id = ? AND status = 'completed' AND to_message_id IS NOT NULL
+      ORDER BY to_message_created_at DESC, to_message_id DESC
+      LIMIT 1
+    `).get(channelId) as { scope_id: string; to_message_created_at: string; to_message_id: string } | undefined
+    return row && {
+      channelId: row.scope_id,
+      toMessageCreatedAt: row.to_message_created_at,
+      toMessageId: row.to_message_id,
+    }
+  }
+
+  createMemoryCandidate(input: CreateMemoryCandidateInput): MemoryCandidate {
+    return this.inTransaction(() => {
+      const database = this.sqlite.database
+      const run = this.getDreamRun(input.dreamRunId)
+      if (!run) throw new Error(`Dream run ${input.dreamRunId} does not exist.`)
+      assertMemoryScope(input.proposedScope, input.channelId)
+      if (input.proposedScope === 'channel' && input.channelId !== run.scopeId) {
+        throw new Error('Channel Memory candidate must match the Dream channel.')
+      }
+      const sourceMessageIds = [...new Set(input.sourceMessageIds)]
+      for (const sourceMessageId of sourceMessageIds) assertDreamSource(database, run.scopeId, sourceMessageId)
+      const createdAt = now()
+      const candidate: MemoryCandidate = {
+        id: randomUUID(), dreamRunId: input.dreamRunId, proposedScope: input.proposedScope, channelId: input.channelId,
+        kind: input.kind, proposedContent: requireText(input.proposedContent, 'Memory candidate content'),
+        rationale: requireText(input.rationale, 'Memory candidate rationale'),
+        confidence: unitInterval(input.confidence, 'Memory candidate confidence'),
+        importance: unitInterval(input.importance, 'Memory candidate importance'),
+        contentHash: contentHash(input.proposedContent), status: 'pending', reviewedContent: null,
+        reviewedScope: null, reviewedAt: null, createdAt,
+      }
+      database.prepare(`
+        INSERT INTO memory_candidates (
+          id, dream_run_id, proposed_scope, channel_id, kind, proposed_content, rationale, confidence,
+          importance, content_hash, status, reviewed_content, reviewed_scope, reviewed_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        candidate.id, candidate.dreamRunId, candidate.proposedScope, candidate.channelId, candidate.kind,
+        candidate.proposedContent, candidate.rationale, candidate.confidence, candidate.importance, candidate.contentHash,
+        candidate.status, candidate.reviewedContent, candidate.reviewedScope, candidate.reviewedAt, candidate.createdAt,
+      )
+      for (const sourceMessageId of sourceMessageIds) {
+        database.prepare('INSERT INTO memory_candidate_sources (candidate_id, message_id, turn_id) VALUES (?, ?, ?)').run(
+          candidate.id, sourceMessageId, sourceTurnId(database, sourceMessageId),
+        )
+      }
+      database.prepare('UPDATE dream_runs SET candidate_count = candidate_count + 1 WHERE id = ?').run(run.id)
+      return candidate
+    })
+  }
+
+  getMemoryCandidate(candidateId: string): MemoryCandidate | undefined {
+    const row = this.sqlite.database.prepare('SELECT * FROM memory_candidates WHERE id = ?').get(candidateId) as MemoryCandidateRow | undefined
+    return row ? mapMemoryCandidate(row) : undefined
+  }
+
+  listMemoryCandidates(filter: MemoryCandidateFilter = {}): MemoryCandidate[] {
+    const clauses: string[] = []
+    const values: string[] = []
+    if (filter.dreamRunId !== undefined) {
+      clauses.push('dream_run_id = ?')
+      values.push(filter.dreamRunId)
+    }
+    if (filter.status !== undefined) {
+      clauses.push('status = ?')
+      values.push(filter.status)
+    }
+    if (filter.proposedScope !== undefined) {
+      clauses.push('proposed_scope = ?')
+      values.push(filter.proposedScope)
+    }
+    if (filter.channelId !== undefined) {
+      clauses.push('channel_id = ?')
+      values.push(filter.channelId)
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
+    return (this.sqlite.database.prepare(`SELECT * FROM memory_candidates ${where} ORDER BY created_at, id`).all(...values) as unknown as MemoryCandidateRow[])
+      .map(mapMemoryCandidate)
+  }
+
+  reviewMemoryCandidate(input: ReviewMemoryCandidateInput): MemoryCandidate {
+    return this.inTransaction(() => {
+      const candidate = this.getMemoryCandidate(input.candidateId)
+      if (!candidate) throw new Error(`Memory candidate ${input.candidateId} does not exist.`)
+      if (candidate.status !== 'pending') throw new Error(`Memory candidate ${input.candidateId} is already reviewed.`)
+      const reviewedAt = input.occurredAt.toISOString()
+      this.sqlite.database.prepare(`
+        UPDATE memory_candidates SET status = ?, reviewed_at = ? WHERE id = ? AND status = 'pending'
+      `).run(input.status, reviewedAt, candidate.id)
+      this.sqlite.afterCommit(() => this.publisher.publish(event('memory.candidate_reviewed', 'memory_candidate', candidate.id, reviewedAt)))
+      return { ...candidate, status: input.status, reviewedAt }
+    })
+  }
+
+  createMemoryFromCandidate(input: CreateMemoryFromCandidateInput): MemoryRecord {
+    return this.inTransaction(() => {
+      const database = this.sqlite.database
+      const candidate = this.getMemoryCandidate(input.candidateId)
+      if (!candidate) throw new Error(`Memory candidate ${input.candidateId} does not exist.`)
+      if (candidate.status !== 'pending') throw new Error(`Memory candidate ${input.candidateId} is already reviewed.`)
+      const reviewedContent = requireText(input.reviewedContent, 'Reviewed Memory content')
+      const reviewedChannelId = input.reviewedScope === 'channel' ? candidate.channelId : null
+      assertMemoryScope(input.reviewedScope, reviewedChannelId)
+      const reviewedContentHash = contentHash(reviewedContent)
+      const reviewedAt = input.occurredAt.toISOString()
+      const existing = database.prepare(`
+        SELECT * FROM memories
+        WHERE scope = ? AND channel_id IS ? AND content_hash = ? AND archived_at IS NULL
+      `).get(input.reviewedScope, reviewedChannelId, reviewedContentHash) as MemoryRow | undefined
+      const memory = existing ? mapMemory(existing) : {
+        id: randomUUID(), scope: input.reviewedScope, channelId: reviewedChannelId, kind: candidate.kind,
+        content: reviewedContent, contentHash: reviewedContentHash, status: 'active' as const,
+        sourceCandidateId: candidate.id, archivedAt: null, createdAt: reviewedAt, updatedAt: reviewedAt,
+      }
+      if (!existing) {
+        database.prepare(`
+          INSERT INTO memories (
+            id, scope, channel_id, kind, content, content_hash, status, source_candidate_id,
+            archived_at, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          memory.id, memory.scope, memory.channelId, memory.kind, memory.content, memory.contentHash, memory.status,
+          memory.sourceCandidateId, memory.archivedAt, memory.createdAt, memory.updatedAt,
+        )
+      }
+      database.prepare(`
+        INSERT OR IGNORE INTO memory_sources (memory_id, message_id, turn_id)
+        SELECT ?, message_id, turn_id FROM memory_candidate_sources WHERE candidate_id = ?
+      `).run(memory.id, candidate.id)
+      const accepted = database.prepare(`
+        UPDATE memory_candidates
+        SET status = 'accepted', reviewed_content = ?, reviewed_scope = ?, reviewed_at = ?
+        WHERE id = ? AND status = 'pending'
+      `).run(reviewedContent, input.reviewedScope, reviewedAt, candidate.id)
+      if (accepted.changes !== 1) throw new Error(`Memory candidate ${candidate.id} is already reviewed.`)
+      database.prepare(`
+        UPDATE memory_candidates
+        SET status = 'superseded', reviewed_at = ?
+        WHERE id != ? AND status = 'pending' AND proposed_scope = ? AND channel_id IS ? AND content_hash = ?
+      `).run(reviewedAt, candidate.id, input.reviewedScope, reviewedChannelId, reviewedContentHash)
+      this.sqlite.afterCommit(() => this.publisher.publish(event('memory.candidate_reviewed', 'memory_candidate', candidate.id, reviewedAt)))
+      this.sqlite.afterCommit(() => this.publisher.publish(event('memory.changed', 'memory', memory.id, reviewedAt)))
+      return memory
+    })
+  }
+
+  listAcceptedMemories(scope: MemoryScope, channelId?: string): MemoryRecord[] {
+    assertMemoryScope(scope, channelId ?? null)
+    const rows = this.sqlite.database.prepare(`
+      SELECT * FROM memories
+      WHERE scope = ? AND channel_id IS ? AND status = 'active'
+      ORDER BY updated_at DESC, id
+    `).all(scope, channelId ?? null) as unknown as MemoryRow[]
+    return rows.map(mapMemory)
+  }
+
+  updateMemory(memoryId: string, content: string): MemoryRecord {
+    return this.inTransaction(() => {
+      const existing = readMemory(this.sqlite.database, memoryId)
+      if (!existing) throw new Error(`Memory ${memoryId} does not exist.`)
+      if (existing.status !== 'active') throw new Error(`Memory ${memoryId} is archived.`)
+      const updatedContent = requireText(content, 'Memory content')
+      const updatedAt = now()
+      const updatedContentHash = contentHash(updatedContent)
+      this.sqlite.database.prepare(`
+        UPDATE memories SET content = ?, content_hash = ?, updated_at = ? WHERE id = ?
+      `).run(updatedContent, updatedContentHash, updatedAt, memoryId)
+      this.sqlite.afterCommit(() => this.publisher.publish(event('memory.changed', 'memory', memoryId, updatedAt)))
+      return { ...existing, content: updatedContent, contentHash: updatedContentHash, updatedAt }
+    })
+  }
+
+  archiveMemory(memoryId: string, occurredAt: Date): MemoryRecord {
+    return this.inTransaction(() => {
+      const existing = readMemory(this.sqlite.database, memoryId)
+      if (!existing) throw new Error(`Memory ${memoryId} does not exist.`)
+      if (existing.status === 'archived') return existing
+      const archivedAt = occurredAt.toISOString()
+      this.sqlite.database.prepare(`
+        UPDATE memories SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?
+      `).run(archivedAt, archivedAt, memoryId)
+      this.sqlite.afterCommit(() => this.publisher.publish(event('memory.changed', 'memory', memoryId, archivedAt)))
+      return { ...existing, status: 'archived', archivedAt, updatedAt: archivedAt }
+    })
+  }
+
+  listDreamSourceMessages(runId: string): Message[] {
+    const rows = this.sqlite.database.prepare(`
+      SELECT messages.* FROM dream_run_sources
+      JOIN messages ON messages.id = dream_run_sources.message_id
+      WHERE dream_run_sources.dream_run_id = ?
+      ORDER BY messages.created_at, messages.id
+    `).all(runId) as unknown as MessageRow[]
+    return rows.map(mapMessage)
   }
 
   getConversationTurn(turnId: string): ConversationTurn | undefined {
@@ -2016,6 +2347,49 @@ function readMessage(database: DatabaseSync, messageId: string): Message | undef
   return row ? mapMessage(row) : undefined
 }
 
+function readMemory(database: DatabaseSync, memoryId: string): MemoryRecord | undefined {
+  const row = database.prepare('SELECT * FROM memories WHERE id = ?').get(memoryId) as MemoryRow | undefined
+  return row ? mapMemory(row) : undefined
+}
+
+function assertDreamBoundary(
+  database: DatabaseSync,
+  channelId: string,
+  boundary: { createdAt: string; id: string } | null,
+): void {
+  if (!boundary) return
+  const message = readMessage(database, boundary.id)
+  if (!message || message.channelId !== channelId || message.createdAt !== boundary.createdAt) {
+    throw new Error('Dream boundary must be a message from the Dream channel at the recorded time.')
+  }
+}
+
+function assertDreamSource(database: DatabaseSync, channelId: string, messageId: string): void {
+  const message = readMessage(database, messageId)
+  if (!message || message.channelId !== channelId) {
+    throw new Error('Memory candidate source message must belong to the Dream channel.')
+  }
+}
+
+function assertMemoryScope(scope: MemoryScope, channelId: string | null): void {
+  if ((scope === 'channel' && channelId === null) || (scope === 'global' && channelId !== null)) {
+    throw new Error(`A ${scope} Memory record must ${scope === 'channel' ? 'have' : 'not have'} a channel.`)
+  }
+}
+
+function sourceTurnId(database: DatabaseSync, messageId: string): string | null {
+  const row = database.prepare(`
+    SELECT id FROM conversation_turns WHERE trigger_message_id = ?
+    UNION
+    SELECT agent_invocations.turn_id AS id
+    FROM conversation_invocation_messages
+    JOIN agent_invocations ON agent_invocations.id = conversation_invocation_messages.invocation_id
+    WHERE conversation_invocation_messages.message_id = ?
+    LIMIT 1
+  `).get(messageId, messageId) as { id: string } | undefined
+  return row?.id ?? null
+}
+
 function readConversationTurn(database: DatabaseSync, turnId: string): ConversationTurn | undefined {
   const row = database.prepare('SELECT * FROM conversation_turns WHERE id = ?').get(turnId) as ConversationTurnRow | undefined
   return row ? mapConversationTurn(row) : undefined
@@ -2190,6 +2564,61 @@ function mapMessage(row: MessageRow): Message {
   }
 }
 
+function mapDreamRun(row: DreamRunRow): DreamRun {
+  return {
+    id: row.id,
+    scope: row.scope,
+    scopeId: row.scope_id,
+    trigger: row.trigger,
+    status: row.status,
+    fromMessageCreatedAt: row.from_message_created_at,
+    fromMessageId: row.from_message_id,
+    toMessageCreatedAt: row.to_message_created_at,
+    toMessageId: row.to_message_id,
+    candidateCount: row.candidate_count,
+    error: row.error,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+  }
+}
+
+function mapMemoryCandidate(row: MemoryCandidateRow): MemoryCandidate {
+  return {
+    id: row.id,
+    dreamRunId: row.dream_run_id,
+    proposedScope: row.proposed_scope,
+    channelId: row.channel_id,
+    kind: row.kind,
+    proposedContent: row.proposed_content,
+    rationale: row.rationale,
+    confidence: row.confidence,
+    importance: row.importance,
+    contentHash: row.content_hash,
+    status: row.status,
+    reviewedContent: row.reviewed_content,
+    reviewedScope: row.reviewed_scope,
+    reviewedAt: row.reviewed_at,
+    createdAt: row.created_at,
+  }
+}
+
+function mapMemory(row: MemoryRow): MemoryRecord {
+  return {
+    id: row.id,
+    scope: row.scope,
+    channelId: row.channel_id,
+    kind: row.kind,
+    content: row.content,
+    contentHash: row.content_hash,
+    status: row.status,
+    sourceCandidateId: row.source_candidate_id,
+    archivedAt: row.archived_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
 function mapConversationTurn(row: ConversationTurnRow): ConversationTurn {
   return {
     id: row.id,
@@ -2305,6 +2734,17 @@ function event(type: string, entityType: string, entityId: string, occurredAt: s
 
 function now(): string {
   return new Date().toISOString()
+}
+
+function contentHash(content: string): string {
+  return createHash('sha256').update(requireText(content, 'Memory content')).digest('hex')
+}
+
+function unitInterval(value: number, label: string): number {
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`${label} must be between 0 and 1.`)
+  }
+  return value
 }
 
 function requireText(value: string, label: string): string {

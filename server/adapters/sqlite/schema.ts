@@ -475,6 +475,151 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(18, new Date().toISOString())
     }
 
+    const nineteenthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 19').get()
+    if (!nineteenthMigration) {
+      database.exec(`
+        CREATE TABLE dream_runs (
+          id TEXT PRIMARY KEY,
+          scope TEXT NOT NULL CHECK(scope = 'channel'),
+          scope_id TEXT NOT NULL REFERENCES channels(id),
+          trigger TEXT NOT NULL CHECK(trigger IN ('scheduled', 'manual')),
+          status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
+          from_message_created_at TEXT,
+          from_message_id TEXT REFERENCES messages(id),
+          to_message_created_at TEXT,
+          to_message_id TEXT REFERENCES messages(id),
+          candidate_count INTEGER NOT NULL DEFAULT 0 CHECK(candidate_count >= 0),
+          error TEXT,
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          completed_at TEXT,
+          CHECK((from_message_created_at IS NULL) = (from_message_id IS NULL)),
+          CHECK((to_message_created_at IS NULL) = (to_message_id IS NULL))
+        );
+        CREATE UNIQUE INDEX dream_runs_channel_watermark_unique_idx
+          ON dream_runs(scope_id, to_message_created_at, to_message_id);
+
+        CREATE TABLE dream_run_sources (
+          dream_run_id TEXT NOT NULL REFERENCES dream_runs(id),
+          message_id TEXT NOT NULL REFERENCES messages(id),
+          turn_id TEXT REFERENCES conversation_turns(id),
+          PRIMARY KEY (dream_run_id, message_id)
+        );
+
+        CREATE TABLE memory_candidates (
+          id TEXT PRIMARY KEY,
+          dream_run_id TEXT NOT NULL REFERENCES dream_runs(id),
+          proposed_scope TEXT NOT NULL CHECK(proposed_scope IN ('global', 'channel')),
+          channel_id TEXT REFERENCES channels(id),
+          kind TEXT NOT NULL CHECK(kind IN ('preference', 'decision', 'constraint', 'fact', 'workflow')),
+          proposed_content TEXT NOT NULL,
+          rationale TEXT NOT NULL,
+          confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+          importance REAL NOT NULL CHECK(importance >= 0 AND importance <= 1),
+          content_hash TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('pending', 'accepted', 'ignored', 'superseded')),
+          reviewed_content TEXT,
+          reviewed_scope TEXT CHECK(reviewed_scope IN ('global', 'channel')),
+          reviewed_at TEXT,
+          created_at TEXT NOT NULL,
+          CHECK((proposed_scope = 'global' AND channel_id IS NULL) OR (proposed_scope = 'channel' AND channel_id IS NOT NULL))
+        );
+        CREATE UNIQUE INDEX memory_candidates_run_content_unique_idx
+          ON memory_candidates(dream_run_id, content_hash, proposed_scope, COALESCE(channel_id, ''));
+
+        CREATE TABLE memory_candidate_sources (
+          candidate_id TEXT NOT NULL REFERENCES memory_candidates(id),
+          message_id TEXT NOT NULL REFERENCES messages(id),
+          turn_id TEXT REFERENCES conversation_turns(id),
+          PRIMARY KEY (candidate_id, message_id)
+        );
+
+        CREATE TABLE memories (
+          id TEXT PRIMARY KEY,
+          scope TEXT NOT NULL CHECK(scope IN ('global', 'channel')),
+          channel_id TEXT REFERENCES channels(id),
+          kind TEXT NOT NULL CHECK(kind IN ('preference', 'decision', 'constraint', 'fact', 'workflow')),
+          content TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('active', 'archived')),
+          source_candidate_id TEXT NOT NULL REFERENCES memory_candidates(id),
+          archived_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK((scope = 'global' AND channel_id IS NULL) OR (scope = 'channel' AND channel_id IS NOT NULL)),
+          CHECK((status = 'active' AND archived_at IS NULL) OR (status = 'archived' AND archived_at IS NOT NULL))
+        );
+        CREATE UNIQUE INDEX memories_active_content_unique_idx
+          ON memories(scope, COALESCE(channel_id, ''), content_hash)
+          WHERE archived_at IS NULL;
+
+        CREATE TABLE memory_sources (
+          memory_id TEXT NOT NULL REFERENCES memories(id),
+          message_id TEXT NOT NULL REFERENCES messages(id),
+          turn_id TEXT REFERENCES conversation_turns(id),
+          PRIMARY KEY (memory_id, message_id)
+        );
+
+        CREATE TABLE thread_summaries (
+          channel_id TEXT NOT NULL REFERENCES channels(id),
+          thread_root_message_id TEXT NOT NULL REFERENCES messages(id),
+          content TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (channel_id, thread_root_message_id)
+        );
+
+        CREATE TRIGGER dream_runs_boundary_channel_match
+        BEFORE INSERT ON dream_runs
+        WHEN (NEW.from_message_id IS NOT NULL AND (SELECT channel_id FROM messages WHERE id = NEW.from_message_id) != NEW.scope_id)
+          OR (NEW.to_message_id IS NOT NULL AND (SELECT channel_id FROM messages WHERE id = NEW.to_message_id) != NEW.scope_id)
+        BEGIN
+          SELECT RAISE(ABORT, 'Dream boundaries must belong to the Dream channel.');
+        END;
+        CREATE TRIGGER dream_run_sources_channel_match
+        BEFORE INSERT ON dream_run_sources
+        WHEN (SELECT channel_id FROM messages WHERE id = NEW.message_id)
+          != (SELECT scope_id FROM dream_runs WHERE id = NEW.dream_run_id)
+        BEGIN
+          SELECT RAISE(ABORT, 'Dream source message must belong to the Dream channel.');
+        END;
+        CREATE TRIGGER memory_candidates_channel_match
+        BEFORE INSERT ON memory_candidates
+        WHEN NEW.proposed_scope = 'channel' AND NEW.channel_id
+          != (SELECT scope_id FROM dream_runs WHERE id = NEW.dream_run_id)
+        BEGIN
+          SELECT RAISE(ABORT, 'Channel Memory candidate must match the Dream channel.');
+        END;
+        CREATE TRIGGER memory_candidate_sources_channel_match
+        BEFORE INSERT ON memory_candidate_sources
+        WHEN (SELECT channel_id FROM messages WHERE id = NEW.message_id)
+          != (SELECT scope_id FROM dream_runs JOIN memory_candidates
+              ON memory_candidates.dream_run_id = dream_runs.id
+              WHERE memory_candidates.id = NEW.candidate_id)
+        BEGIN
+          SELECT RAISE(ABORT, 'Memory candidate source message must belong to the Dream channel.');
+        END;
+        CREATE TRIGGER memory_sources_channel_match
+        BEFORE INSERT ON memory_sources
+        WHEN (SELECT channel_id FROM messages WHERE id = NEW.message_id)
+          != (SELECT dream_runs.scope_id
+              FROM memories
+              JOIN memory_candidates ON memory_candidates.id = memories.source_candidate_id
+              JOIN dream_runs ON dream_runs.id = memory_candidates.dream_run_id
+              WHERE memories.id = NEW.memory_id)
+        BEGIN
+          SELECT RAISE(ABORT, 'Memory source message must belong to the Dream channel.');
+        END;
+        CREATE TRIGGER thread_summaries_channel_match
+        BEFORE INSERT ON thread_summaries
+        WHEN (SELECT channel_id FROM messages WHERE id = NEW.thread_root_message_id) != NEW.channel_id
+        BEGIN
+          SELECT RAISE(ABORT, 'Thread summary root message must belong to its channel.');
+        END;
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(19, new Date().toISOString())
+    }
+
     database.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS conversation_sessions_grain_unique_idx
         ON conversation_sessions(channel_id, COALESCE(thread_root_message_id, ''), agent_id);

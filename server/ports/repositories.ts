@@ -17,6 +17,20 @@ import type {
 } from '../domain/conversation'
 import type { DomainEvent } from '../domain/events'
 import type { CreateMessageInput, Message } from '../domain/message'
+import type {
+  CreateDreamRunInput,
+  CreateMemoryCandidateInput,
+  CreateMemoryFromCandidateInput,
+  DreamRun,
+  DreamRunFilter,
+  DreamRunPatch,
+  DreamWatermark,
+  MemoryCandidate,
+  MemoryCandidateFilter,
+  MemoryRecord,
+  MemoryScope,
+  ReviewMemoryCandidateInput,
+} from '../domain/memory'
 import type { CreateTaskInput, Task, TaskArtifact, TaskDetails, TaskInput, TaskLease, TaskSession, TaskStatus } from '../domain/task'
 import type { TaskSessionStore } from './task-session-store'
 import type {
@@ -166,6 +180,20 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   getTaskDetails(taskId: string): TaskDetails | undefined
   getTaskArtifact(taskId: string, artifactId: string): TaskArtifact | undefined
   getMessage(messageId: string): Message | undefined
+  createDreamRun(input: CreateDreamRunInput): DreamRun
+  updateDreamRun(runId: string, patch: DreamRunPatch): DreamRun
+  getDreamRun(runId: string): DreamRun | undefined
+  listDreamRuns(filter?: DreamRunFilter): DreamRun[]
+  getDreamWatermark(channelId: string): DreamWatermark | undefined
+  createMemoryCandidate(input: CreateMemoryCandidateInput): MemoryCandidate
+  getMemoryCandidate(candidateId: string): MemoryCandidate | undefined
+  listMemoryCandidates(filter?: MemoryCandidateFilter): MemoryCandidate[]
+  reviewMemoryCandidate(input: ReviewMemoryCandidateInput): MemoryCandidate
+  createMemoryFromCandidate(input: CreateMemoryFromCandidateInput): MemoryRecord
+  listAcceptedMemories(scope: MemoryScope, channelId?: string): MemoryRecord[]
+  updateMemory(memoryId: string, content: string): MemoryRecord
+  archiveMemory(memoryId: string, occurredAt: Date): MemoryRecord
+  listDreamSourceMessages(runId: string): Message[]
   createConversationTurn(input: CreateConversationTurnInput): ConversationTurn
   createClaimedConversationTurn(
     input: CreateConversationTurnInput,
