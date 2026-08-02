@@ -604,6 +604,98 @@ describe('WorkspaceShell', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
+  it('never reuses another turn detail when switching A to B to A with A still loading', async () => {
+    const activeSnapshot = structuredClone(snapshot)
+    activeSnapshot.activeTurnsByChannel = {
+      'channel-general': [
+        { turnId: 'turn-1', agentId: 'agent-1', phase: 'queued', queuePosition: 1 },
+        { turnId: 'turn-2', agentId: 'agent-1', phase: 'preparing', queuePosition: null },
+      ],
+      'channel-build': [],
+    }
+    const turnTwo = { ...turnDetail, turn: { ...turnDetail.turn, id: 'turn-2' } }
+    let resolveFirstTurnOneRead: (value: ConversationTurnDetailView) => void = () => undefined
+    let turnOneReads = 0
+    const getConversationTurn = vi.fn().mockImplementation((_channelId: string, turnId: string) => {
+      if (turnId === 'turn-2') return Promise.resolve(turnTwo)
+      turnOneReads += 1
+      return turnOneReads === 1
+        ? new Promise<ConversationTurnDetailView>((resolve) => { resolveFirstTurnOneRead = resolve })
+        : Promise.resolve(turnDetail)
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={makeApi({ getBootstrap: vi.fn().mockResolvedValue(activeSnapshot), getConversationTurn })} />)
+
+    await user.click(await screen.findByRole('button', { name: '查看 Turn turn-1 活动详情' }))
+    await user.click(screen.getByRole('button', { name: '查看 Turn turn-2 活动详情' }))
+    expect(await screen.findByRole('heading', { name: 'Turn turn-2' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '查看 Turn turn-1 活动详情' }))
+
+    expect(screen.queryByRole('heading', { name: 'Turn turn-2' })).not.toBeInTheDocument()
+    expect(screen.getByText('正在读取 Turn 详情...')).toBeInTheDocument()
+    await act(async () => { resolveFirstTurnOneRead(turnDetail) })
+    expect(await screen.findByRole('heading', { name: 'Turn turn-1' })).toBeInTheDocument()
+    expect(getConversationTurn.mock.calls.filter(([, turnId]) => turnId === 'turn-1')).toHaveLength(2)
+  })
+
+  it('preserves bootstrap retry errors per turn while another turn fails to load', async () => {
+    const activeSnapshot = structuredClone(snapshot)
+    activeSnapshot.activeTurnsByChannel = {
+      'channel-general': [
+        { turnId: 'turn-1', agentId: 'agent-1', phase: 'queued', queuePosition: 1 },
+        { turnId: 'turn-2', agentId: 'agent-1', phase: 'queued', queuePosition: 2 },
+      ],
+      'channel-build': [],
+    }
+    const getBootstrap = vi.fn()
+      .mockResolvedValueOnce(activeSnapshot)
+      .mockRejectedValueOnce(new Error('Bootstrap 暂时不可用'))
+      .mockResolvedValueOnce({ ...activeSnapshot, activeTurnsByChannel: { 'channel-general': [], 'channel-build': [] } })
+    const getConversationTurn = vi.fn().mockImplementation((_channelId: string, turnId: string) => turnId === 'turn-1'
+      ? Promise.resolve(turnDetail)
+      : Promise.reject(new Error('Turn 2 详情失败')))
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={makeApi({ getBootstrap, getConversationTurn, cancelConversationTurn: vi.fn().mockResolvedValue(undefined) })} />)
+
+    await user.click(await screen.findByRole('button', { name: '查看 Turn turn-1 活动详情' }))
+    await user.click(screen.getByRole('button', { name: '取消 Turn' }))
+    await user.click(screen.getByRole('button', { name: '确认取消 Turn turn-1' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('工作空间刷新失败')
+    await user.click(screen.getByRole('button', { name: '查看 Turn turn-2 活动详情' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Turn 2 详情失败')
+    await user.click(screen.getByRole('button', { name: '查看 Turn turn-1 活动详情' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('工作空间刷新失败')
+    await user.click(screen.getByRole('button', { name: '重试 Turn 详情' }))
+    await waitFor(() => expect(getBootstrap).toHaveBeenCalledTimes(3))
+  })
+
+  it('keeps retry locks scoped to their own turn', async () => {
+    const activeSnapshot = structuredClone(snapshot)
+    activeSnapshot.activeTurnsByChannel = {
+      'channel-general': [
+        { turnId: 'turn-1', agentId: 'agent-1', phase: 'queued', queuePosition: 1 },
+        { turnId: 'turn-2', agentId: 'agent-1', phase: 'queued', queuePosition: 2 },
+      ],
+      'channel-build': [],
+    }
+    const never = new Promise<ConversationTurnDetailView>(() => undefined)
+    let turnOneReads = 0
+    const getConversationTurn = vi.fn().mockImplementation((_channelId: string, turnId: string) => {
+      if (turnId === 'turn-1') return ++turnOneReads === 1 ? Promise.reject(new Error('Turn 1 详情失败')) : never
+      return Promise.reject(new Error('Turn 2 详情失败'))
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={makeApi({ getBootstrap: vi.fn().mockResolvedValue(activeSnapshot), getConversationTurn })} />)
+
+    await user.click(await screen.findByRole('button', { name: '查看 Turn turn-1 活动详情' }))
+    await user.click(await screen.findByRole('button', { name: '重试 Turn 详情' }))
+    await user.click(screen.getByRole('button', { name: '查看 Turn turn-2 活动详情' }))
+
+    const retryTurnTwo = await screen.findByRole('button', { name: '重试 Turn 详情' })
+    expect(retryTurnTwo).toBeEnabled()
+  })
+
   it('opens a Thread and sends replies under its root message', async () => {
     const threadedSnapshot = structuredClone(snapshot)
     threadedSnapshot.recentMessages.push({

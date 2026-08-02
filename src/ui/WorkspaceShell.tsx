@@ -47,12 +47,12 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const [selectedThreadRootId, setSelectedThreadRootId] = useState<string | null>(null)
   const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null)
   const [turnDetails, setTurnDetails] = useState<ConversationTurnDetailView | null>(null)
-  const [turnDetailsError, setTurnDetailsError] = useState<TurnDetailsError | null>(null)
-  const [retryingTurnDetails, setRetryingTurnDetails] = useState(false)
+  const [turnDetailsErrorsByKey, setTurnDetailsErrorsByKey] = useState<Map<string, TurnDetailsError>>(() => new Map())
+  const [retryingTurnKeys, setRetryingTurnKeys] = useState<Set<string>>(() => new Set())
   const [confirmedCancelledTurnKeys, setConfirmedCancelledTurnKeys] = useState<Set<string>>(() => new Set())
   const turnDetailsInFlight = useRef(new Map<string, Promise<ConversationTurnDetailView | null>>())
   const pendingTurnDetailsRefresh = useRef(new Set<string>())
-  const turnDetailsErrors = useRef(new Map<string, Error>())
+  const turnRequestErrors = useRef(new Map<string, Error>())
   const suppressedSnapshotTurnRefreshes = useRef(new WeakMap<WorkspaceSnapshot, string>())
   const selectedTurnRef = useRef<{ channelId: string; turnId: string } | null>(null)
   const previousSnapshotRef = useRef<WorkspaceSnapshot | null>(null)
@@ -117,19 +117,36 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   useEffect(() => {
     selectedTurnRef.current = selectedTurnChannelId && selectedTurnId ? { channelId: selectedTurnChannelId, turnId: selectedTurnId } : null
   }, [selectedTurnChannelId, selectedTurnId])
+  const setTurnDetailsError = useCallback((key: string, error: TurnDetailsError | null) => {
+    setTurnDetailsErrorsByKey((current) => {
+      const next = new Map(current)
+      if (error) next.set(key, error)
+      else next.delete(key)
+      return next
+    })
+  }, [])
+  const clearTurnDetailsError = useCallback((key: string, source?: TurnDetailsError['source']) => {
+    setTurnDetailsErrorsByKey((current) => {
+      if (!current.has(key) || source && current.get(key)?.source !== source) return current
+      const next = new Map(current)
+      next.delete(key)
+      return next
+    })
+  }, [])
   const loadConversationTurn = useCallback(async (channelId: string, turnId: string, clearExisting: boolean): Promise<ConversationTurnDetailView | null> => {
     const requestKey = `${channelId}:${turnId}`
+    if (clearExisting) {
+      setTurnDetails((current) => current?.turn.channelId === channelId && current.turn.id === turnId ? current : null)
+    }
     const existingRequest = turnDetailsInFlight.current.get(requestKey)
     if (existingRequest) {
-      if (clearExisting) return existingRequest
       pendingTurnDetailsRefresh.current.add(requestKey)
       const existingDetails = await existingRequest
       if (!pendingTurnDetailsRefresh.current.delete(requestKey)) return existingDetails
       if (turnDetailsInFlight.current.get(requestKey) === existingRequest) turnDetailsInFlight.current.delete(requestKey)
       return loadConversationTurn(channelId, turnId, false)
     }
-    if (clearExisting) setTurnDetails(null)
-    setTurnDetailsError((current) => current?.key === requestKey && current.source === 'detail' ? null : current)
+    clearTurnDetailsError(requestKey, 'detail')
     const promise = (async () => {
       let latestDetails: ConversationTurnDetailView | null = null
       while (true) {
@@ -138,17 +155,16 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
           const details = await api.getConversationTurn(channelId, turnId)
           const selected = selectedTurnRef.current
           latestDetails = details
-          turnDetailsErrors.current.delete(requestKey)
+          turnRequestErrors.current.delete(requestKey)
+          clearTurnDetailsError(requestKey, 'detail')
           if (selected?.channelId === channelId && selected.turnId === turnId) {
             setTurnDetails(details)
-            setTurnDetailsError((current) => current?.key === requestKey && current.source === 'detail' ? null : current)
           }
         } catch (cause) {
           const detailsError = cause instanceof Error ? cause : new Error('无法读取 Turn 详情。')
-          const selected = selectedTurnRef.current
           latestDetails = null
-          turnDetailsErrors.current.set(requestKey, detailsError)
-          if (selected?.channelId === channelId && selected.turnId === turnId) setTurnDetailsError({ key: requestKey, source: 'detail', message: detailsError.message })
+          turnRequestErrors.current.set(requestKey, detailsError)
+          setTurnDetailsError(requestKey, { key: requestKey, source: 'detail', message: detailsError.message })
         }
         const selected = selectedTurnRef.current
         if (!pendingTurnDetailsRefresh.current.has(requestKey)
@@ -163,7 +179,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     } finally {
       if (turnDetailsInFlight.current.get(requestKey) === promise) turnDetailsInFlight.current.delete(requestKey)
     }
-  }, [api])
+  }, [api, clearTurnDetailsError, setTurnDetailsError])
 
   useEffect(() => {
     if (!selectedTask) { setTaskDetails(null); setTaskDetailsError(null); return undefined }
@@ -179,9 +195,8 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   useEffect(() => {
     if (!selectedTurnChannelId || !selectedTurnId) {
       pendingTurnDetailsRefresh.current.clear()
-      turnDetailsErrors.current.clear()
+      turnRequestErrors.current.clear()
       setTurnDetails(null)
-      setTurnDetailsError(null)
       return
     }
     void loadConversationTurn(selectedTurnChannelId, selectedTurnId, true)
@@ -380,48 +395,49 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
       await refresh(turnKey)
     } catch (cause) {
       const refreshError = cause instanceof Error ? cause : new Error('工作空间刷新失败。')
-      if (selectedTurnRef.current?.channelId === channelId && selectedTurnRef.current.turnId === turnId) {
-        setTurnDetailsError({ key: turnKey, source: 'bootstrap', message: `Turn 已取消，但工作空间刷新失败：${refreshError.message}` })
-      }
+      setTurnDetailsError(turnKey, { key: turnKey, source: 'bootstrap', message: `Turn 已取消，但工作空间刷新失败：${refreshError.message}` })
       throw cause
     }
     const refreshedDetails = await loadConversationTurn(channelId, turnId, false)
     if (!refreshedDetails) {
-      const reason = turnDetailsErrors.current.get(turnKey)?.message ?? '无法读取最新详情。'
+      const reason = turnRequestErrors.current.get(turnKey)?.message ?? '无法读取最新详情。'
       const refreshError = new Error(`Turn 已取消，但详情刷新失败：${reason}`)
-      if (selectedTurnRef.current?.channelId === channelId && selectedTurnRef.current.turnId === turnId) {
-        setTurnDetailsError({ key: turnKey, source: 'detail', message: refreshError.message })
-      }
+      setTurnDetailsError(turnKey, { key: turnKey, source: 'detail', message: refreshError.message })
       throw refreshError
     }
   }
   const retrySelectedTurnDetails = async () => {
     const selected = selectedTurnRef.current
-    if (!selected || retryingTurnDetails) return
+    if (!selected) return
     const turnKey = `${selected.channelId}:${selected.turnId}`
-    const currentError = turnDetailsError?.key === turnKey ? turnDetailsError : null
-    setRetryingTurnDetails(true)
+    if (retryingTurnKeys.has(turnKey)) return
+    const currentError = turnDetailsErrorsByKey.get(turnKey) ?? null
+    setRetryingTurnKeys((current) => new Set(current).add(turnKey))
     try {
       if (currentError?.source === 'bootstrap') {
         await refresh(turnKey)
       }
       const details = await loadConversationTurn(selected.channelId, selected.turnId, false)
-      if (!details) throw turnDetailsErrors.current.get(turnKey) ?? new Error('无法读取最新详情。')
-      if (selectedTurnRef.current?.channelId === selected.channelId && selectedTurnRef.current.turnId === selected.turnId) setTurnDetailsError(null)
+      if (!details) throw turnRequestErrors.current.get(turnKey) ?? new Error('无法读取最新详情。')
+      setTurnDetailsError(turnKey, null)
     } catch (cause) {
       const retryError = cause instanceof Error ? cause : new Error('无法刷新 Turn 详情。')
-      if (selectedTurnRef.current?.channelId === selected.channelId && selectedTurnRef.current.turnId === selected.turnId) {
-        setTurnDetailsError({ key: turnKey, source: currentError?.source ?? 'detail', message: retryError.message })
-      }
+      setTurnDetailsError(turnKey, { key: turnKey, source: currentError?.source ?? 'detail', message: retryError.message })
     } finally {
-      setRetryingTurnDetails(false)
+      setRetryingTurnKeys((current) => {
+        const next = new Set(current)
+        next.delete(turnKey)
+        return next
+      })
     }
   }
   const selectedTurnKey = selectedTurnChannelId && selectedTurnId ? `${selectedTurnChannelId}:${selectedTurnId}` : null
-  const selectedTurnDetailsError = turnDetailsError?.key === selectedTurnKey ? turnDetailsError : null
-  const displayedTurnDetails = turnDetails && selectedTurnKey && confirmedCancelledTurnKeys.has(selectedTurnKey)
-    ? { ...turnDetails, turn: { ...turnDetails.turn, status: 'cancelled' as const } }
-    : turnDetails
+  const selectedTurnDetailsError = selectedTurnKey ? turnDetailsErrorsByKey.get(selectedTurnKey) ?? null : null
+  const retryingSelectedTurn = selectedTurnKey ? retryingTurnKeys.has(selectedTurnKey) : false
+  const matchingTurnDetails = turnDetails?.turn.channelId === selectedTurnChannelId && turnDetails.turn.id === selectedTurnId ? turnDetails : null
+  const displayedTurnDetails = matchingTurnDetails && selectedTurnKey && confirmedCancelledTurnKeys.has(selectedTurnKey)
+    ? { ...matchingTurnDetails, turn: { ...matchingTurnDetails.turn, status: 'cancelled' as const } }
+    : matchingTurnDetails
   return <div className="workspace-shell">
     <RepositorySidebar workspaces={snapshot.workspaces} agents={agents} channels={snapshot.channels} tasks={snapshot.tasks} selectedChannelId={selection.channel.id} selectedWorkspaceId={workspace?.id ?? null} selectedTaskId={selectedTask?.id ?? null} onSelectChannel={selectChannel} onSelectWorkspace={selectWorkspace} onSelectTask={selectTask} onCreateTask={(workspaceId) => setTaskComposerDraft({ initialWorkspaceId: workspaceId })} onCreateChannel={() => setCreatingChannel(true)} onArchiveChannel={archiveChannel} onRestoreChannel={restoreChannel} channelReadOnly={Boolean(selection.channel.archivedAt)} onCreateWorkspace={() => setCreatingWorkspace(true)} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
     <main className="conversation-panel">
@@ -434,8 +450,8 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
       <header className="context-header"><strong>上下文</strong><button type="button" className="icon-button context-close" aria-label="关闭上下文" data-tooltip="关闭上下文" onClick={() => setContextOpen(false)}><X size={17} /></button></header>
       {threadRoot && <ThreadPanel root={threadRoot} replies={threadReplies} agents={agents} readOnly={Boolean(selection.channel.archivedAt)} onSend={sendThreadMessage} onClose={() => setSelectedThreadRootId(null)} />}
       {selectedTurnId && <section className="context-section turn-details-context">
-        {selectedTurnDetailsError && <div className="turn-detail-refresh-error" role="alert"><span>{selectedTurnDetailsError.message}</span><button type="button" className="secondary-action" disabled={retryingTurnDetails} onClick={() => void retrySelectedTurnDetails()}>{retryingTurnDetails ? '正在重试...' : '重试 Turn 详情'}</button></div>}
-        {displayedTurnDetails ? <ConversationTurnDetail detail={displayedTurnDetails} agents={agents} onCancel={cancelSelectedTurn} /> : !selectedTurnDetailsError && <p className="context-empty">正在读取 Turn 详情...</p>}
+        {selectedTurnDetailsError && <div className="turn-detail-refresh-error" role="alert"><span>{selectedTurnDetailsError.message}</span><button type="button" className="secondary-action" disabled={retryingSelectedTurn} onClick={() => void retrySelectedTurnDetails()}>{retryingSelectedTurn ? '正在重试...' : '重试 Turn 详情'}</button></div>}
+        {displayedTurnDetails ? <ConversationTurnDetail key={displayedTurnDetails.turn.id} detail={displayedTurnDetails} agents={agents} onCancel={cancelSelectedTurn} /> : !selectedTurnDetailsError && <p className="context-empty">正在读取 Turn 详情...</p>}
       </section>}
       {taskScope && workspace && <section className="context-section"><div className="context-section-heading"><h2>{taskRepository ? `${taskRepository.name} 任务` : `${workspace.name} 任务`}</h2>{!selection.channel.archivedAt && <button type="button" className="icon-button" aria-label="新建当前上下文任务" data-tooltip="新建任务" onClick={() => setTaskComposerDraft({ initialWorkspaceId: workspace.id })}>+</button>}</div><TaskList tasks={taskScopeTasks} selectedTaskId={selectedTask?.id ?? null} onSelect={setSelectedTaskId} /></section>}
       {selectedTask && <section className="context-section task-details-context">{taskDetails ? <TaskDetailPanel details={taskDetails} onQueueInput={(body) => queueTaskInput(taskDetails.task.id, body)} onReview={(action) => reviewTask(taskDetails.task.id, action)} onRequeue={() => requeueTask(taskDetails.task.id)} onReadArtifact={(artifactId) => api.readArtifact(taskDetails.task.id, artifactId)} /> : <p className="context-empty">{taskDetailsError ?? '正在读取任务详情...'}</p>}</section>}

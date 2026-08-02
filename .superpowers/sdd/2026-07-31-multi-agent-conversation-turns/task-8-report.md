@@ -84,3 +84,11 @@
 - 聚焦测试：6 files / 72 tests passed。
 - 全量测试：50 files / 423 tests passed。
 - `npm run build` 与 `git diff --check`：通过。
+
+## 修复轮次 4
+
+- 独立复审发现 A→B→A 选择竞态、错误状态跨 Turn 覆盖和重试锁跨 Turn 泄漏。
+- 新增 3 个 RED 用例并完成修复：详情渲染严格校验当前 `channelId + turnId`，重新选择在途 Turn 会合并一次补拉；错误与重试状态均按 Turn key 隔离。
+- `ConversationTurnDetail` 使用 Turn id 作为 React key，切换 Turn 时不会继承上一条取消确认状态。
+- 聚焦测试：6 files / 75 tests passed；`WorkspaceShell` 49/49 passed。
+- A9 正在并行修改服务端装配，因此本轮只验证 A8 文件范围，待 A9 完成后统一运行全量测试和 Build。
