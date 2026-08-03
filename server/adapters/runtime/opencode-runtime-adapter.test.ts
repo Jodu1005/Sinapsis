@@ -6,6 +6,7 @@ import type { RuntimeEvent, RuntimeTaskRequest } from '../../ports/runtime'
 
 const task: RuntimeTaskRequest = {
   taskId: 'task-1',
+  mode: 'task',
   title: 'Implement the adapter',
   description: 'Use a worktree.',
   acceptanceCriteria: 'Tests pass.',
@@ -14,6 +15,134 @@ const task: RuntimeTaskRequest = {
 }
 
 describe('OpenCodeRuntimeAdapter', () => {
+  it('starts a conversation with a read-only prompt containing channel context and the human message', async () => {
+    const runner = new FakeProcessRunner()
+    const adapter = new OpenCodeRuntimeAdapter(runner)
+
+    await adapter.start({
+      ...task,
+      mode: 'conversation',
+      description: 'Recent channel context: the login issue is reproducible.',
+      initialMessage: 'What should we investigate first?',
+    }, () => {})
+
+    const prompt = runner.spawns[0]?.options.args.at(-1) ?? ''
+    expect(prompt).toContain('read-only')
+    expect(prompt).toMatch(/do not edit/i)
+    expect(prompt).toMatch(/do not commit/i)
+    expect(prompt).toMatch(/do not push/i)
+    expect(prompt).toMatch(/do not merge/i)
+    expect(prompt).toContain('Recent channel context: the login issue is reproducible.')
+    expect(prompt).toContain('What should we investigate first?')
+    expect(prompt).toContain('untrusted conversational context')
+  })
+
+  it('enforces request-local deny-all permissions for the read-only no-tools policy', async () => {
+    const runner = new FakeProcessRunner()
+    const adapter = new OpenCodeRuntimeAdapter(runner)
+
+    await adapter.start({
+      ...task,
+      executionPolicy: 'read-only-no-tools',
+      profile: resolveRuntimeProfile('opencode', {
+        command: 'opencode-bin',
+        args: ['--agent', 'build', '--auto'],
+        env: {
+          OPENCODE_CONFIG: '/Users/jodu/.config/opencode/unsafe.json',
+          OPENCODE_CONFIG_DIR: '/Users/jodu/.config/opencode',
+          OPENCODE_CONFIG_CONTENT: '{"permission":{"custom_tool":"allow"}}',
+          OPENCODE_PERMISSION: '{"custom_tool":"allow"}',
+          OPENCODE_TEST_HOME: '/Users/jodu',
+          XDG_CONFIG_HOME: '/Users/jodu/.config',
+          KEEP_ME: 'yes',
+        },
+      }),
+    }, () => {})
+
+    const spawn = runner.spawns[0]?.options
+    const args = spawn?.args ?? []
+    const agentIndex = args.lastIndexOf('--agent')
+    const config = JSON.parse(spawn?.env?.OPENCODE_CONFIG_CONTENT ?? '{}')
+    const deniedPermissions = {
+      '*': 'deny',
+      read: 'deny',
+      edit: 'deny',
+      glob: 'deny',
+      grep: 'deny',
+      list: 'deny',
+      bash: 'deny',
+      task: 'deny',
+      skill: 'deny',
+      lsp: 'deny',
+      todowrite: 'deny',
+      todoread: 'deny',
+      webfetch: 'deny',
+      websearch: 'deny',
+      codesearch: 'deny',
+      external_directory: 'deny',
+      doom_loop: 'deny',
+    }
+    expect(args[agentIndex + 1]).toBe('sinapsis-dream-maintenance')
+    expect(args).toContain('--pure')
+    expect(args).not.toContain('build')
+    expect(args).not.toContain('--auto')
+    expect(spawn?.env?.KEEP_ME).toBe('yes')
+    expect(spawn?.env).toMatchObject({
+      OPENCODE_CONFIG: '',
+      OPENCODE_CONFIG_DIR: '/tmp/task-1/.sinapsis-opencode-config',
+      OPENCODE_DISABLE_PROJECT_CONFIG: 'true',
+      OPENCODE_TEST_HOME: '/tmp/task-1/.sinapsis-opencode-home',
+      XDG_CONFIG_HOME: '/tmp/task-1/.sinapsis-opencode-config',
+    })
+    expect(JSON.parse(spawn?.env?.OPENCODE_PERMISSION ?? '{}')).toEqual(deniedPermissions)
+    expect(config.permission).toEqual(deniedPermissions)
+    expect(config.agent['sinapsis-dream-maintenance']).toEqual({
+      mode: 'primary',
+      permission: deniedPermissions,
+    })
+  })
+
+  it('falls back to the local OpenCode default for a legacy unqualified model name', async () => {
+    const runner = new FakeProcessRunner()
+    const adapter = new OpenCodeRuntimeAdapter(runner)
+
+    await adapter.start({
+      ...task,
+      profile: { ...task.profile, model: 'claude' },
+    }, () => {})
+
+    expect(runner.spawns[0]?.options.args).not.toContain('--model')
+  })
+
+  it('extracts text from current OpenCode JSON parts', async () => {
+    const runner = new FakeProcessRunner()
+    const events: RuntimeEvent[] = []
+    const adapter = new OpenCodeRuntimeAdapter(runner)
+
+    await adapter.start(task, (event) => events.push(event))
+    runner.spawns[0]?.process.emitStdout('{"type":"text","sessionID":"ses-123","part":{"type":"text","id":"prt-123","text":"OpenCode 已就绪。"}}\n')
+
+    expect(events).toContainEqual({ kind: 'text', taskId: task.taskId, text: 'OpenCode 已就绪。' })
+  })
+
+  it('cancels a channel turn that does not return within 90 seconds', async () => {
+    vi.useFakeTimers()
+    try {
+      const runner = new FakeProcessRunner()
+      const events: RuntimeEvent[] = []
+      const adapter = new OpenCodeRuntimeAdapter(runner)
+      const session = await adapter.start({ ...task, mode: 'conversation' }, (event) => events.push(event))
+      const kill = vi.spyOn(runner.spawns[0]!.process, 'kill')
+
+      vi.advanceTimersByTime(90_000)
+
+      expect(kill).toHaveBeenCalledOnce()
+      expect(events).toContainEqual({ kind: 'error', taskId: session.taskId, message: 'OpenCode 在 90 秒内没有返回回复。' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('starts a new task with an argument array and resumes later input with its saved session', async () => {
     const runner = new FakeProcessRunner()
     const events: RuntimeEvent[] = []
@@ -21,7 +150,7 @@ describe('OpenCodeRuntimeAdapter', () => {
 
     const session = await adapter.start(task, (event) => events.push(event))
 
-    expect(runner.spawns[0]?.options).toMatchObject({ command: 'opencode-bin', cwd: '/tmp/task-1' })
+    expect(runner.spawns[0]?.options).toMatchObject({ command: 'opencode-bin', cwd: '/tmp/task-1', stdinMode: 'ignore' })
     expect(runner.spawns[0]?.options.args).toEqual(expect.arrayContaining([
       'run', '--format', 'json', '--dir', '/tmp/task-1',
     ]))

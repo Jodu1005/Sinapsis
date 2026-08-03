@@ -18,8 +18,14 @@ export interface Repository {
 
 export interface Channel {
   id: string
-  repositoryId: string
   name: string
+  systemKey: string | null
+  memberAgentIds: string[]
+  boundWorkspaceIds: string[]
+  /** @deprecated Use memberAgentIds. */
+  subscriberAgentIds?: string[]
+  archivedAt?: string | null
+  contextResetAt?: string | null
   createdAt: string
 }
 
@@ -38,6 +44,6 @@ export interface CreateRepositoryInput {
 }
 
 export interface CreateChannelInput {
-  repositoryId: string
   name: string
+  systemKey?: string | null
 }

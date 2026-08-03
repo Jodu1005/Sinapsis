@@ -5,7 +5,9 @@ import { DomainError, type CreateTaskInput, type Task, type TaskDetails, type Ta
 import type { BootstrapWorkspace, WorkspaceRepositories, WorkspaceUnitOfWork } from '../ports/repositories'
 
 export interface CreateLabeledTaskInput {
-  repositoryId: string
+  workspaceId: string
+  repositoryId?: string
+  channelId: string
   directAgentId?: string | null
   title: string
   description: string
@@ -20,26 +22,41 @@ export class TaskService {
   constructor(private readonly repositories: WorkspaceRepositories) {}
 
   createTask(input: CreateLabeledTaskInput): Task {
-    const workspace = findWorkspaceForRepository(this.repositories.getBootstrap().workspaces, input.repositoryId)
-    const repository = workspace.repositories.find((candidate) => candidate.id === input.repositoryId)
+    const workspace = this.repositories.getBootstrap().workspaces.find((candidate) => candidate.id === input.workspaceId)
+    if (!workspace) {
+      throw new NotFoundError(`Workspace ${input.workspaceId} does not exist.`)
+    }
+
+    const channel = this.repositories.getChannel(input.channelId)
+    if (!channel) {
+      throw new NotFoundError(`Channel ${input.channelId} does not exist.`)
+    }
+    if (!this.repositories.getChannelWorkspaceIds(channel.id).includes(workspace.id)) {
+      throw new DomainError('Workspace is not bound to this channel.')
+    }
+    if (input.directAgentId && !this.repositories.getChannelAgentIds(channel.id).includes(input.directAgentId)) {
+      throw new DomainError('Agent is not a member of this channel.')
+    }
+
+    const repository = input.repositoryId
+      ? workspace.repositories.find((candidate) => candidate.id === input.repositoryId)
+      : workspace.repositories[0]
     if (!repository) {
-      throw new NotFoundError(`Repository ${input.repositoryId} does not exist.`)
+      if (input.repositoryId) {
+        throw new DomainError(`Repository ${input.repositoryId} does not belong to Workspace ${workspace.id}.`)
+      }
+      throw new DomainError(`Workspace ${workspace.id} does not have a managed execution Repository.`)
     }
-
-    const generalChannel = repository.channels.find((channel) => channel.name === 'general')
-    if (!generalChannel) {
-      throw new NotFoundError(`Repository ${input.repositoryId} does not have a general channel.`)
-    }
-
-    if (input.directAgentId && !workspace.agents.some((agent) => agent.id === input.directAgentId)) {
-      throw new NotFoundError(`Agent ${input.directAgentId} does not belong to this workspace.`)
+    if (channel.archivedAt) {
+      throw new DomainError(`Channel #${channel.name} is archived and read-only.`)
     }
 
     const inferredLabels = inferCapabilityTags(`${input.title}\n${input.description}\n${input.acceptanceCriteria}`)
     const labels = input.labels ?? inferredLabels
     const taskInput: CreateTaskInput = {
+      workspaceId: workspace.id,
       repositoryId: repository.id,
-      channelId: generalChannel.id,
+      channelId: channel.id,
       directAgentId: input.directAgentId,
       title: input.title,
       description: input.description,
@@ -50,7 +67,10 @@ export class TaskService {
       maxRetries: input.maxRetries,
     }
 
-    return this.repositories.inTransaction((unitOfWork) => createLabeledTask(unitOfWork, taskInput, inferredLabels, input.labels !== undefined))
+    return this.repositories.inTransaction((unitOfWork) => {
+      const root = unitOfWork.createMessage({ channelId: channel.id, senderType: 'system', authorName: 'Sinapsis', body: `任务「${input.title}」已创建。` })
+      return createLabeledTask(unitOfWork, { ...taskInput, threadRootMessageId: root.id }, inferredLabels, input.labels !== undefined)
+    })
   }
 
   listTasks(repositoryId: string): Task[] {

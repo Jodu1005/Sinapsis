@@ -14,12 +14,12 @@ export type SessionStatus = (typeof sessionStatuses)[number]
 
 export interface Agent {
   id: string
-  workspaceId: string
   identity: string
   mentionName: string
   runtime: 'opencode' | 'pi' | 'claude-code'
   status: AgentStatus
   capabilityTags: string[]
+  responsibilities?: string[]
   maxConcurrentTasks: 1
   command: string
   args: string[]
@@ -30,11 +30,11 @@ export interface Agent {
 }
 
 export interface CreateAgentInput {
-  workspaceId: string
   identity: string
   mentionName: string
   runtime: Agent['runtime']
   capabilityTags: string[]
+  responsibilities?: string[]
   maxConcurrentTasks: 1
   command: string
   args: string[]

@@ -36,11 +36,13 @@ describe('task API', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ directory: '/projects/sinapsis' }),
     })
     const repository = await repositoryResponse.json() as { id: string }
+    const channelId = await firstChannelId(server.baseUrl, workspace.id)
 
     const response = await fetch(`${server.baseUrl}/api/repositories/${repository.id}/tasks`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        channelId,
         title: '完善 React 界面的 Vitest 测试',
         description: '为任务面板补充 CSS 状态覆盖。',
         acceptanceCriteria: 'Vitest 测试通过。',
@@ -84,11 +86,13 @@ describe('task API', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ directory: '/projects/sinapsis' }),
     })
     const repository = await repositoryResponse.json() as { id: string }
+    const channelId = await firstChannelId(server.baseUrl, workspace.id)
 
     const response = await fetch(`${server.baseUrl}/api/repositories/${repository.id}/tasks`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
+        channelId,
         title: '审查 API',
         description: '检查接口。',
         acceptanceCriteria: '结论已记录。',
@@ -103,10 +107,10 @@ describe('task API', () => {
   })
 
   it('lists a repository task and rejects human input before an agent claims it', async () => {
-    const { server, repositoryId } = await createRepositoryServer()
+    const { server, repositoryId, channelId } = await createRepositoryServer()
     const createResponse = await fetch(`${server.baseUrl}/api/repositories/${repositoryId}/tasks`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
-        title: '检查 API schema', description: '确认数据库字段。', acceptanceCriteria: '结果已记录。',
+        channelId, title: '检查 API schema', description: '确认数据库字段。', acceptanceCriteria: '结果已记录。',
       }),
     })
     const task = await createResponse.json() as { id: string }
@@ -123,10 +127,10 @@ describe('task API', () => {
   })
 
   it('cancels a queued task through its explicit task action API', async () => {
-    const { server, repositoryId } = await createRepositoryServer()
+    const { server, repositoryId, channelId } = await createRepositoryServer()
     const createResponse = await fetch(`${server.baseUrl}/api/repositories/${repositoryId}/tasks`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
-        title: '审查 API', description: '检查接口。', acceptanceCriteria: '结论已记录。',
+        channelId, title: '审查 API', description: '检查接口。', acceptanceCriteria: '结论已记录。',
       }),
     })
     const task = await createResponse.json() as { id: string }
@@ -140,10 +144,10 @@ describe('task API', () => {
   })
 
   it('requeues a task that needs human handling so it can be claimed again', async () => {
-    const { server, repositoryId, repositories } = await createRepositoryServer()
+    const { server, repositoryId, channelId, repositories } = await createRepositoryServer()
     const createResponse = await fetch(`${server.baseUrl}/api/repositories/${repositoryId}/tasks`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
-        title: '恢复未提交的任务', description: '继续完成已有改动。', acceptanceCriteria: '提交任务分支。',
+        channelId, title: '恢复未提交的任务', description: '继续完成已有改动。', acceptanceCriteria: '提交任务分支。',
       }),
     })
     const task = await createResponse.json() as { id: string }
@@ -157,7 +161,12 @@ describe('task API', () => {
     await expect(response.json()).resolves.toMatchObject({ id: task.id, status: 'queued' })
   })
 
-  async function createRepositoryServer(): Promise<{ server: { baseUrl: string }; repositoryId: string; repositories: WorkspaceRepositories }> {
+  async function createRepositoryServer(): Promise<{
+    server: { baseUrl: string }
+    repositoryId: string
+    channelId: string
+    repositories: WorkspaceRepositories
+  }> {
     const app = createApp({
       gitClient: {
         inspectRepository: async () => ({
@@ -176,9 +185,28 @@ describe('task API', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ directory: '/projects/sinapsis' }),
     })
     const repository = await repositoryResponse.json() as { id: string }
-    return { server, repositoryId: repository.id, repositories: app.locals.repositories as WorkspaceRepositories }
+    return {
+      server,
+      repositoryId: repository.id,
+      channelId: await firstChannelId(server.baseUrl, workspace.id),
+      repositories: app.locals.repositories as WorkspaceRepositories,
+    }
   }
 })
+
+async function firstChannelId(baseUrl: string, workspaceId: string): Promise<string> {
+  const bootstrap = await fetch(`${baseUrl}/api/bootstrap`).then((response) => response.json()) as {
+    channels: Array<{ id: string }>
+  }
+  const channelId = bootstrap.channels[0]!.id
+  const response = await fetch(`${baseUrl}/api/channels/${channelId}/workspaces`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ workspaceId }),
+  })
+  expect(response.status).toBe(200)
+  return channelId
+}
 
 describe('TaskService human input queue', () => {
   it.each<TaskStatus>(['claimed', 'running', 'waiting_input'])('accepts input for a %s task', (status) => {
@@ -199,6 +227,87 @@ describe('TaskService human input queue', () => {
   })
 })
 
+describe('TaskService channel ownership', () => {
+  let closeDatabase: (() => void) | undefined
+
+  afterEach(() => {
+    closeDatabase?.()
+    closeDatabase = undefined
+  })
+
+  it('creates a task Thread in an explicitly selected bound Workspace and global channel', () => {
+    const app = createApp()
+    closeDatabase = app.locals.closeDatabase as () => void
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const general = repositories.createChannel({ name: 'general' })
+    const build = repositories.createChannel({ name: 'build' })
+    repositories.bindChannelWorkspace(build.id, workspace.id, new Date())
+    const service = new TaskService(repositories)
+
+    const task = service.createTask({
+      workspaceId: workspace.id,
+      channelId: build.id,
+      title: 'Build',
+      description: 'Build',
+      acceptanceCriteria: 'Pass',
+    })
+    const messages = repositories.getBootstrap().recentMessages
+
+    expect(task.workspaceId).toBe(workspace.id)
+    expect(task.repositoryId).toBe(repository.id)
+    expect(task.channelId).toBe(build.id)
+    expect(task.threadRootMessageId).toEqual(expect.any(String))
+    expect(messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: task.threadRootMessageId, channelId: build.id, threadRootMessageId: null, body: '任务「Build」已创建。' }),
+    ]))
+    expect(general.id).not.toBe(build.id)
+  })
+
+  it('rejects a task Workspace that is not bound to the Channel', () => {
+    const app = createApp()
+    closeDatabase = app.locals.closeDatabase as () => void
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const unbound = repositories.createWorkspace({ name: 'Docs' })
+    repositories.createRepository({ workspaceId: unbound.id, name: 'docs', path: '/projects/docs' })
+    const channel = repositories.createChannel({ name: 'build' })
+    repositories.bindChannelWorkspace(channel.id, workspace.id, new Date())
+    const service = new TaskService(repositories)
+
+    expect(() => service.createTask({
+      workspaceId: unbound.id,
+      channelId: channel.id,
+      title: 'Build',
+      description: 'Build',
+      acceptanceCriteria: 'Pass',
+    })).toThrow('Workspace is not bound to this channel')
+  })
+
+  it('rejects a directly assigned Agent outside the Channel membership', () => {
+    const app = createApp()
+    closeDatabase = app.locals.closeDatabase as () => void
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'build' })
+    repositories.bindChannelWorkspace(channel.id, workspace.id, new Date())
+    const outsider = createTestAgent(repositories, 'Outsider', 'outsider')
+    const service = new TaskService(repositories)
+
+    expect(() => service.createTask({
+      workspaceId: workspace.id,
+      channelId: channel.id,
+      directAgentId: outsider.id,
+      title: 'Build',
+      description: 'Build',
+      acceptanceCriteria: 'Pass',
+    })).toThrow('Agent is not a member of this channel')
+  })
+})
+
 class TaskInputRepositories {
   readonly createdInputs: Array<{ taskId: string; body: string }> = []
 
@@ -206,7 +315,7 @@ class TaskInputRepositories {
 
   getTaskDetails() {
     const task: Task = {
-      id: 'task-1', repositoryId: 'repository-1', channelId: 'channel-1', directAgentId: null,
+      id: 'task-1', workspaceId: 'workspace-1', repositoryId: 'repository-1', channelId: 'channel-1', directAgentId: null,
       title: 'Task', description: 'Description', acceptanceCriteria: 'Acceptance criteria', labels: [],
       status: this.status, queuedAt: '2026-07-25T00:00:00.000Z', attemptCount: 0, maxRetries: 2,
       timeoutMs: 900000, leaseTtlMs: null, branchName: null, worktreePath: null,
@@ -219,4 +328,18 @@ class TaskInputRepositories {
     this.createdInputs.push({ taskId, body })
     return { id: 'input-1', taskId, body, createdAt: '2026-07-25T00:00:00.000Z', consumedAt: null }
   }
+}
+
+function createTestAgent(repositories: WorkspaceRepositories, identity: string, mentionName: string) {
+  return repositories.createAgent({
+    identity,
+    mentionName,
+    runtime: 'pi',
+    capabilityTags: ['general'],
+    maxConcurrentTasks: 1,
+    command: 'pi',
+    args: [],
+    model: '',
+    env: {},
+  })
 }

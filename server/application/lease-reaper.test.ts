@@ -33,12 +33,12 @@ describe('LeaseReaper', () => {
     expect(terminator.terminations).toEqual([{ taskId: task.id, agentId: agent.id }])
     expect(sessionStore.timeouts).toEqual([{ taskId: task.id, agentId: agent.id }])
     expect(repositories.getTask(task.id)).toMatchObject({ status: 'queued', attemptCount: 1, queuedAt: at(31).toISOString() })
-    expect(repositories.getBootstrap().workspaces[0].agents.find((candidate) => candidate.id === agent.id)).toMatchObject({ status: 'idle' })
+    expect(repositories.getBootstrap().agents.find((candidate) => candidate.id === agent.id)).toMatchObject({ status: 'idle' })
     expect(repositories.getTaskDetails(task.id)?.leases).toEqual([])
     expect(repositories.getTaskDetails(task.id)?.events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'task.lease_expired', payload: expect.objectContaining({ outcome: 'requeued' }) }),
     ]))
-    expect(repositories.getBootstrap().workspaces[0].recentMessages).toEqual([
+    expect(repositories.getBootstrap().recentMessages).toEqual([
       expect.objectContaining({ taskId: task.id, body: expect.stringContaining('FIFO') }),
     ])
     expect(scheduler.claimNext(agent.id, at(32))?.task.id).toBe(task.id)
@@ -51,8 +51,8 @@ describe('LeaseReaper', () => {
     await expect(reaper.reap(at(31))).resolves.toBe(1)
 
     expect(repositories.getTask(task.id)).toMatchObject({ status: 'needs_human', attemptCount: 0 })
-    expect(repositories.getBootstrap().workspaces[0].agents.find((candidate) => candidate.id === agent.id)).toMatchObject({ status: 'idle' })
-    expect(repositories.getBootstrap().workspaces[0].recentMessages).toEqual([
+    expect(repositories.getBootstrap().agents.find((candidate) => candidate.id === agent.id)).toMatchObject({ status: 'idle' })
+    expect(repositories.getBootstrap().recentMessages).toEqual([
       expect.objectContaining({ body: expect.stringContaining('等待人工处理') }),
     ])
   })
@@ -101,7 +101,7 @@ describe('LeaseReaper', () => {
 
     expect(repositories.getTask(task.id)).toMatchObject({ status: 'cancelled', attemptCount: 0 })
     expect(repositories.getTaskDetails(task.id)?.leases).toEqual([])
-    expect(repositories.getBootstrap().workspaces[0].agents.find((candidate) => candidate.id === agent.id))
+    expect(repositories.getBootstrap().agents.find((candidate) => candidate.id === agent.id))
       .toMatchObject({ status: 'idle' })
   })
 
@@ -121,13 +121,13 @@ describe('LeaseReaper', () => {
     await expect(reaper.reap(at(31))).resolves.toBe(1)
 
     expect(repositories.getTask(task.id)).toMatchObject({ status: 'needs_human', attemptCount: 0 })
-    expect(repositories.getBootstrap().workspaces[0].agents.find((candidate) => candidate.id === agent.id))
+    expect(repositories.getBootstrap().agents.find((candidate) => candidate.id === agent.id))
       .toMatchObject({ status: 'idle' })
     expect(repositories.getTaskDetails(task.id)?.leases).toEqual([])
     expect(repositories.getTaskDetails(task.id)?.events).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'task.session_timeout_persistence_failed' }),
     ]))
-    expect(repositories.getBootstrap().workspaces[0].recentMessages).toEqual([
+    expect(repositories.getBootstrap().recentMessages).toEqual([
       expect.objectContaining({
         taskId: task.id,
         body: expect.stringContaining('会话超时状态保存失败'),
@@ -143,7 +143,7 @@ describe('LeaseReaper', () => {
 
     expect(repositories.getTask(task.id)).toMatchObject({ status: 'cancelled', attemptCount: 0 })
     expect(repositories.getTaskDetails(task.id)?.leases).toEqual([])
-    expect(repositories.getBootstrap().workspaces[0].agents.find((candidate) => candidate.id === agent.id))
+    expect(repositories.getBootstrap().agents.find((candidate) => candidate.id === agent.id))
       .toMatchObject({ status: 'idle' })
   })
 
@@ -154,7 +154,7 @@ describe('LeaseReaper', () => {
     await expect(reaper.reap(at(31))).resolves.toBe(0)
 
     expect(repositories.getTask(task.id)).toMatchObject({ status: 'cancelled', attemptCount: 0 })
-    expect(repositories.getBootstrap().workspaces[0].agents.find((candidate) => candidate.id === agent.id))
+    expect(repositories.getBootstrap().agents.find((candidate) => candidate.id === agent.id))
       .toMatchObject({ status: 'idle' })
     expect(repositories.getTaskDetails(task.id)?.events).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'task.session_timeout_persistence_failed' }),
@@ -198,12 +198,13 @@ describe('LeaseReaper', () => {
     const repositories = new SqliteRepositories(database, new RecordingPublisher())
     const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
     const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
-    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
+    const channel = repositories.createChannel({ name: 'general' })
     const agent = repositories.createAgent({
-      workspaceId: workspace.id, identity: 'Backend agent', mentionName: 'backend', runtime: 'opencode',
+      identity: 'Backend agent', mentionName: 'backend', runtime: 'opencode',
       capabilityTags: ['backend'], maxConcurrentTasks: 1, command: 'opencode', args: ['run'], model: '', env: {},
     })
     repositories.setAgentStatus(agent.id, 'idle', at(0))
+    repositories.addChannelAgent(channel.id, agent.id, at(0))
     const task = repositories.createTask({
       repositoryId: repository.id, channelId: channel.id, title: 'Repair API', description: 'Description',
       acceptanceCriteria: 'Acceptance criteria', labels: ['backend'], maxRetries: options.maxRetries,

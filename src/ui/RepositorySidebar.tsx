@@ -1,43 +1,76 @@
-import { FolderGit2, Hash, ListTodo, Menu, Plus, X } from 'lucide-react'
-import type { AgentView, WorkspaceView } from '../domain/workspace-view'
+import { Archive, ArchiveRestore, BrainCircuit, ChevronDown, ChevronRight, FolderKanban, Hash, ListTodo, Menu, Plus, X } from 'lucide-react'
+import { useState } from 'react'
+import type { AgentView, ChannelView, TaskView, WorkspaceView } from '../domain/workspace-view'
 import { AgentStatusList } from './AgentStatusList'
 
 interface RepositorySidebarProps {
-  workspace: WorkspaceView
+  workspaces: WorkspaceView[]
+  agents: AgentView[]
+  channels: ChannelView[]
+  tasks: TaskView[]
   selectedChannelId: string | null
+  selectedWorkspaceId: string | null
+  selectedTaskId: string | null
   onSelectChannel(channelId: string): void
-  onSelectTasks(repositoryId: string): void
-  onCreateTask(repositoryId: string): void
+  onSelectWorkspace(workspaceId: string): void
+  onSelectTask(repositoryId: string, taskId: string): void
+  onCreateTask(workspaceId: string): void
+  onCreateChannel(): void
+  onArchiveChannel(channelId: string): void
+  onRestoreChannel(channelId: string): void
+  channelReadOnly: boolean
+  onCreateWorkspace(): void
   onSelectAgent(agent: AgentView): void
   onCreateAgent(): void
+  pendingMemoryCandidateCount: number
+  dreamSelected: boolean
+  onSelectDream(): void
   mobileOpen: boolean
   mobileHidden: boolean
   onClose(): void
 }
 
-export function RepositorySidebar({ workspace, selectedChannelId, onSelectChannel, onSelectTasks, onCreateTask, onSelectAgent, onCreateAgent, mobileOpen, mobileHidden, onClose }: RepositorySidebarProps) {
-  return <nav className="repository-sidebar" aria-label="工作空间与代码仓" aria-hidden={mobileHidden || undefined} inert={mobileHidden} data-mobile-open={mobileOpen}>
+export function RepositorySidebar({ workspaces, agents, channels, tasks, selectedChannelId, selectedWorkspaceId, selectedTaskId, onSelectChannel, onSelectWorkspace, onSelectTask, onCreateTask, onCreateChannel, onArchiveChannel, onRestoreChannel, channelReadOnly, onCreateWorkspace, onSelectAgent, onCreateAgent, pendingMemoryCandidateCount, dreamSelected, onSelectDream, mobileOpen, mobileHidden, onClose }: RepositorySidebarProps) {
+  const [archivedOpen, setArchivedOpen] = useState(false)
+  const selectedChannel = channels.find((channel) => channel.id === selectedChannelId) ?? channels[0]
+  const boundWorkspaces = selectedChannel
+    ? workspaces.filter((workspace) => selectedChannel.boundWorkspaceIds.includes(workspace.id))
+    : []
+  const selectedWorkspace = boundWorkspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? boundWorkspaces[0]
+  const workspaceTasks = selectedWorkspace
+    ? tasks.flatMap((task) => {
+      if (task.workspaceId !== selectedWorkspace.id || task.channelId !== selectedChannel?.id) return []
+      const repository = selectedWorkspace.repositories.find((candidate) => candidate.id === task.repositoryId)
+      return repository ? [{ repository, task }] : []
+    })
+    : []
+  const activeChannels = channels.filter((channel) => !channel.archivedAt)
+  const archivedChannels = channels.filter((channel) => channel.archivedAt)
+  return <nav className="repository-sidebar" aria-label="工作空间" aria-hidden={mobileHidden || undefined} inert={mobileHidden} data-mobile-open={mobileOpen}>
+    <div className="sidebar-channel-heading"><span>频道</span><button type="button" className="icon-button channel-create" aria-label="添加频道" data-tooltip="添加频道" onClick={onCreateChannel}><Plus size={15} /></button></div>
+    <div className="channel-list">{activeChannels.map((channel) => <ChannelEntry key={channel.id} channel={channel} selected={selectedChannelId === channel.id} onSelect={onSelectChannel} onToggleArchive={onArchiveChannel} />)}</div>
+    {archivedChannels.length > 0 && <section className="archived-channel-folder" aria-label="已归档频道"><button type="button" className="archived-folder-toggle" aria-expanded={archivedOpen} aria-label={`已归档频道（${archivedChannels.length}）`} onClick={() => setArchivedOpen((open) => !open)}>{archivedOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}<span>已归档频道</span><small>{archivedChannels.length}</small></button>{archivedOpen && <div className="channel-list archived-channel-list">{archivedChannels.map((channel) => <ChannelEntry key={channel.id} channel={channel} selected={selectedChannelId === channel.id} onSelect={onSelectChannel} onToggleArchive={onRestoreChannel} />)}</div>}</section>}
+    <button type="button" className="dream-entry" aria-current={dreamSelected ? 'page' : undefined} aria-label={`Dream（${pendingMemoryCandidateCount} 个待确认）`} onClick={onSelectDream}><BrainCircuit size={16} /><span>Dream</span><small>{pendingMemoryCandidateCount}</small></button>
     <div className="sidebar-topline">
-      <div className="workspace-context"><span className="workspace-label">工作空间</span><div className="workspace-lockup"><span className="workspace-mark">S</span><strong>{workspace.name}</strong></div></div>
-      <button className="icon-button sidebar-close" type="button" aria-label="关闭导航" data-tooltip="关闭导航" onClick={onClose}><X size={17} /></button>
+      <span className="workspace-label">工作空间</span>
+      <div><button className="icon-button workspace-create" type="button" aria-label="添加工作空间" data-tooltip="添加工作空间" onClick={onCreateWorkspace}><Plus size={17} /></button><button className="icon-button sidebar-close" type="button" aria-label="关闭导航" data-tooltip="关闭导航" onClick={onClose}><X size={17} /></button></div>
     </div>
-    <div className="sidebar-section-label">代码仓</div>
-    <div className="repository-list">
-      {workspace.repositories.map((repository) => <section className="repository-group" key={repository.id}>
-        <div className="repository-name"><FolderGit2 size={16} /><span>{repository.name}</span><span className="branch-name">{repository.currentBranch}</span><button type="button" className="icon-button repository-task-create" aria-label={`新建 ${repository.name} 任务`} data-tooltip="新建任务" onClick={() => onCreateTask(repository.id)}><Plus size={15} /></button></div>
-        <div className="repository-children">
-          <button type="button" className="task-entry" aria-label={`打开 ${repository.name} 任务`} onClick={() => onSelectTasks(repository.id)}><ListTodo size={15} /> <span>任务</span><span className="task-count">{repository.tasks.length}</span></button>
-          <div className="repository-child-label">频道</div>
-          <div className="channel-list">
-          {repository.channels.map((channel) => <button key={channel.id} type="button" className="channel-button" aria-label={`# ${channel.name}`} aria-current={selectedChannelId === channel.id ? 'page' : undefined} onClick={() => onSelectChannel(channel.id)}>
-            <Hash size={15} /> <span>{channel.name}</span>
-          </button>)}
-          </div>
-        </div>
-      </section>)}
+    <div className="workspace-list" role="group" aria-label={`${selectedChannel?.name ?? '当前频道'} 的工作空间`}>
+      {boundWorkspaces.map((workspace) => <button type="button" className="workspace-context" key={workspace.id} aria-pressed={workspace.id === selectedWorkspace?.id} onClick={() => onSelectWorkspace(workspace.id)}><span className="workspace-mark">{workspace.name.slice(0, 1)}</span><span>{workspace.name}</span></button>)}
+      {boundWorkspaces.length === 0 && <p className="sidebar-empty">未绑定工作空间</p>}
     </div>
-    <AgentStatusList agents={workspace.agents} onSelect={onSelectAgent} onCreate={onCreateAgent} />
+    <div className="sidebar-section-label">任务</div>
+    {selectedWorkspace ? <div className="workspace-task-list" role="group" aria-label={`${selectedWorkspace.name} 的任务`}>
+      <div className="workspace-task-heading"><FolderKanban size={16} /><span>{selectedWorkspace.name}</span>{selectedWorkspace.repositories.length > 0 && !channelReadOnly && <button type="button" className="icon-button repository-task-create" aria-label={`新建 ${selectedWorkspace.name} 任务`} data-tooltip="新建任务" onClick={() => onCreateTask(selectedWorkspace.id)}><Plus size={15} /></button>}</div>
+      {workspaceTasks.length === 0 ? <p className="sidebar-empty">还没有任务</p> : workspaceTasks.map(({ repository, task }) => <button type="button" className="task-entry" key={task.id} aria-pressed={selectedTaskId === task.id} onClick={() => onSelectTask(repository.id, task.id)}><ListTodo size={15} /><span>{task.title}</span></button>)}
+    </div> : <p className="sidebar-empty">请先为频道绑定工作空间</p>}
+    <AgentStatusList agents={agents} onSelect={onSelectAgent} onCreate={onCreateAgent} />
   </nav>
+}
+
+function ChannelEntry({ channel, selected, onSelect, onToggleArchive }: { channel: { id: string; name: string; archivedAt?: string | null }; selected: boolean; onSelect(channelId: string): void; onToggleArchive(channelId: string): void }) {
+  const archived = Boolean(channel.archivedAt)
+  return <div className="channel-entry"><button type="button" className="channel-button" aria-label={`# ${channel.name}`} aria-current={selected ? 'page' : undefined} onClick={() => onSelect(channel.id)}><Hash size={15} /><span>{channel.name}</span></button><button type="button" className="channel-archive-button" aria-label={`${archived ? '恢复' : '归档'} # ${channel.name}`} data-tooltip={archived ? '恢复频道' : '归档频道'} onClick={() => onToggleArchive(channel.id)}>{archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}</button></div>
 }
 
 export function NavigationToggle({ onClick }: { onClick(): void }) {

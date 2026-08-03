@@ -1,4 +1,5 @@
 import type { RuntimeAvailability, RuntimeAvailabilityDetector, RuntimeKind, RuntimeProfile } from '../adapters/runtime/runtime-profile'
+import type { InvocationKind } from '../domain/conversation'
 
 export type RuntimeArtifactType = 'runtime-stdout' | 'runtime-jsonl' | 'runtime-stderr' | 'runtime-exit'
 
@@ -15,13 +16,24 @@ export type RuntimeEvent =
 
 export type RuntimeEventSink = (event: RuntimeEvent) => void
 
+export type RuntimeExecutionPolicy = 'default' | 'read-only-no-tools'
+
 export interface RuntimeTaskRequest {
   taskId: string
+  mode: 'task' | 'conversation'
   title: string
   description: string
   acceptanceCriteria: string
+  initialMessage?: string
   worktreePath: string
   profile: RuntimeProfile
+  executionPolicy?: RuntimeExecutionPolicy
+  conversation?: {
+    turnId: string
+    invocationId: string
+    kind: InvocationKind
+    expectedOutput: 'participation' | 'public_response' | 'duplicate'
+  }
 }
 
 export interface RuntimeSession {
@@ -29,6 +41,7 @@ export interface RuntimeSession {
   runtime: RuntimeKind
   worktreePath: string
   profile: RuntimeProfile
+  executionPolicy?: RuntimeExecutionPolicy
   sessionId: string | null
   sessionFile: string | null
   isStreaming: boolean

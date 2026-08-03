@@ -53,11 +53,13 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
   }
 
   private launch(session: RuntimeSession, sink: RuntimeEventSink): void {
-    const args = [
-      ...session.profile.args,
-      '--session-dir', path.join(this.dataDirectory, 'pi-sessions'),
-      '--name', `sinapsis:${session.taskId}`,
-    ]
+    const args = session.executionPolicy === 'read-only-no-tools'
+      ? restrictedPiArgs()
+      : [
+          ...session.profile.args,
+          '--session-dir', path.join(this.dataDirectory, 'pi-sessions'),
+          '--name', `sinapsis:${session.taskId}`,
+        ]
     const process = this.processRunner.spawn({
       command: session.profile.command,
       args,
@@ -170,6 +172,7 @@ function createSession(task: RuntimeTaskRequest): RuntimeSession {
     runtime: 'pi',
     worktreePath: task.worktreePath,
     profile: task.profile,
+    executionPolicy: task.executionPolicy ?? 'default',
     sessionId: null,
     sessionFile: null,
     isStreaming: false,
@@ -178,13 +181,41 @@ function createSession(task: RuntimeTaskRequest): RuntimeSession {
   }
 }
 
+function restrictedPiArgs(): string[] {
+  return [
+    '--mode', 'rpc',
+    '--no-tools',
+    '--no-extensions',
+    '--no-skills',
+    '--no-prompt-templates',
+    '--no-context-files',
+    '--no-session',
+    '--no-approve',
+  ]
+}
+
 function initialPrompt(task: RuntimeTaskRequest): string {
+  if (task.mode === 'conversation') return conversationPrompt(task)
+  return taskPrompt(task)
+}
+
+function taskPrompt(task: RuntimeTaskRequest): string {
   return [
     'Work only in the assigned worktree. Do not push, merge, or modify files outside it. If you make changes, stage and commit the completed work on the task branch before you finish.',
     `Task: ${task.title}`,
     task.description,
     `Acceptance criteria: ${task.acceptanceCriteria}`,
   ].join('\n\n')
+}
+
+function conversationPrompt(task: RuntimeTaskRequest): string {
+  return [
+    'You are participating in a read-only channel conversation.',
+    'Do not edit or create files. Do not commit. Do not push. Do not merge. Do not run commands that modify the working directory or repository state.',
+    `Recent channel context:\n${task.description}`,
+    task.initialMessage ? `Initial human message:\n${task.initialMessage}` : undefined,
+    'Reply clearly and concisely to the human message.',
+  ].filter((section): section is string => Boolean(section)).join('\n\n')
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

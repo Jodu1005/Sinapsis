@@ -1,10 +1,11 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 
 export interface SpawnProcessOptions {
   command: string
   args: string[]
   cwd: string
   env: Record<string, string>
+  stdinMode?: 'pipe' | 'ignore'
 }
 
 export interface ProcessExit {
@@ -57,25 +58,25 @@ export class NodeProcessRunner implements ProcessRunner {
       cwd: options.cwd,
       env: buildProcessEnvironment(process.env, options.env),
       shell: false,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: [options.stdinMode ?? 'pipe', 'pipe', 'pipe'],
     })
     return new NodeProcessHandle(child)
   }
 }
 
 class NodeProcessHandle implements ProcessHandle {
-  constructor(private readonly child: ChildProcessWithoutNullStreams) {}
+  constructor(private readonly child: ChildProcess) {}
 
   write(value: string): void {
-    this.child.stdin.write(value)
+    this.child.stdin?.write(value)
   }
 
   onStdout(listener: (chunk: string) => void): void {
-    this.child.stdout.on('data', (chunk: Buffer) => listener(chunk.toString()))
+    this.child.stdout?.on('data', (chunk: Buffer) => listener(chunk.toString()))
   }
 
   onStderr(listener: (chunk: string) => void): void {
-    this.child.stderr.on('data', (chunk: Buffer) => listener(chunk.toString()))
+    this.child.stderr?.on('data', (chunk: Buffer) => listener(chunk.toString()))
   }
 
   onError(listener: (error: Error) => void): void {

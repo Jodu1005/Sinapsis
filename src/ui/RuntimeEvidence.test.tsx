@@ -17,5 +17,6 @@ describe('RuntimeEvidence', () => {
     expect(screen.getByLabelText('Agent 实时输出')).not.toHaveTextContent('E000|')
     expect(screen.getAllByRole('button', { name: 'runtime-jsonl' })).toHaveLength(12)
     expect(screen.getByText('显示最近 12 项，共 16 项。')).toBeInTheDocument()
+    expect(screen.getByText('运行日志').closest('details')).not.toHaveAttribute('open')
   })
 })

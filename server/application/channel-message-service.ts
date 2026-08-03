@@ -4,11 +4,17 @@ import type { WorkspaceRepositories } from '../ports/repositories'
 export class ChannelMessageService {
   constructor(private readonly repositories: WorkspaceRepositories) {}
 
-  postHuman(channelId: string, body: string, taskId?: string | null): Message {
-    return this.repositories.createMessage({ channelId, taskId, senderType: 'human', authorName: 'You', body })
+  postHuman(channelId: string, body: string, taskId?: string | null, threadRootMessageId?: string | null): Message {
+    return this.repositories.createMessage({ channelId, taskId, threadRootMessageId, senderType: 'human', authorName: 'You', body })
   }
 
-  postMilestone(channelId: string, taskId: string, body: string): Message {
-    return this.repositories.createMessage({ channelId, taskId, senderType: 'system', authorName: 'Sinapsis', body })
+  postAgent(channelId: string, taskId: string | null | undefined, agentId: string, authorName: string, body: string, threadRootMessageId?: string | null): Message {
+    return this.repositories.createMessage({
+      channelId, taskId, threadRootMessageId, senderType: 'agent', senderId: agentId, authorName, body,
+    })
+  }
+
+  postMilestone(channelId: string, taskId: string, body: string, threadRootMessageId?: string | null): Message {
+    return this.repositories.createMessage({ channelId, taskId, threadRootMessageId, senderType: 'system', authorName: 'Sinapsis', body })
   }
 }

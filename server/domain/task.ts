@@ -21,8 +21,10 @@ export class DomainError extends Error {
 
 export interface Task {
   id: string
+  workspaceId: string
   repositoryId: string
   channelId: string
+  threadRootMessageId?: string | null
   directAgentId: string | null
   title: string
   description: string
@@ -41,8 +43,10 @@ export interface Task {
 }
 
 export interface CreateTaskInput {
+  workspaceId?: string
   repositoryId: string
   channelId: string
+  threadRootMessageId?: string | null
   directAgentId?: string | null
   title: string
   description: string

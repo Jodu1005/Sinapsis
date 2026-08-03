@@ -1,16 +1,81 @@
 export type AgentStatus = 'offline' | 'idle' | 'busy' | 'error'
 export type TaskStatus = 'queued' | 'claimed' | 'running' | 'waiting_input' | 'in_review' | 'accepted' | 'returned' | 'needs_human' | 'merged' | 'cancelled'
 
-export interface WorkspaceSnapshot { workspaces: WorkspaceView[] }
+export interface WorkspaceSnapshot {
+  agents: AgentView[]
+  channels: ChannelView[]
+  workspaces: WorkspaceView[]
+  tasks: TaskView[]
+  recentMessages: ChannelMessage[]
+  maxWorkspaceBindingsPerChannel: number
+  pendingMemoryCandidateCount: number
+  typingAgentIdsByChannel?: Record<string, string[]>
+  activeTurnsByChannel?: Record<string, TurnActivityView[]>
+}
+
+export type MemoryCandidateStatus = 'pending' | 'accepted' | 'ignored' | 'superseded'
+export type MemoryScope = 'global' | 'channel'
+export type DreamRunErrorCategory = 'runtime_failure' | 'service_restarted' | 'cancelled'
+
+export interface DreamRunView {
+  id: string
+  scope: 'channel'
+  scopeId: string
+  trigger: 'scheduled' | 'manual'
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+  candidateCount: number
+  errorCategory: DreamRunErrorCategory | null
+  createdAt: string
+  startedAt: string | null
+  completedAt: string | null
+}
+
+export interface MemoryCandidateSourceView {
+  channelId: string
+  channelName: string
+  messageId: string
+  threadRootMessageId: string | null
+}
+
+export interface MemoryCandidateView {
+  id: string
+  dreamRunId: string
+  proposedScope: MemoryScope
+  channelId: string | null
+  kind: 'preference' | 'decision' | 'constraint' | 'fact' | 'workflow'
+  proposedContent: string
+  rationale: string
+  confidence: number
+  importance: number
+  status: MemoryCandidateStatus
+  reviewedContent: string | null
+  reviewedScope: MemoryScope | null
+  reviewedChannelId: string | null
+  reviewedAt: string | null
+  createdAt: string
+  sources: MemoryCandidateSourceView[]
+  sourceMessageCount: number
+}
+
+export interface MemoryView {
+  id: string
+  scope: MemoryScope
+  channelId: string | null
+  kind: MemoryCandidateView['kind']
+  content: string
+  status: 'active' | 'archived'
+  sourceCandidateId: string
+  archivedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
 
 export interface WorkspaceView {
   id: string
   name: string
   leaseTtlMs: number
   createdAt: string
-  agents: AgentView[]
   repositories: RepositoryView[]
-  recentMessages: ChannelMessage[]
 }
 
 export interface RepositoryView {
@@ -22,20 +87,27 @@ export interface RepositoryView {
   defaultBranch: string
   isClean: boolean
   createdAt: string
-  channels: ChannelView[]
-  tasks: TaskView[]
 }
 
-export interface ChannelView { id: string; repositoryId: string; name: string; createdAt: string }
+export interface ChannelView {
+  id: string
+  name: string
+  systemKey: string | null
+  memberAgentIds: string[]
+  boundWorkspaceIds: string[]
+  archivedAt?: string | null
+  contextResetAt?: string | null
+  createdAt: string
+}
 
 export interface AgentView {
   id: string
-  workspaceId: string
   identity: string
   mentionName: string
   runtime: 'opencode' | 'pi' | 'claude-code'
   status: AgentStatus
   capabilityTags: string[]
+  responsibilities?: string[]
   maxConcurrentTasks: 1
   command: string
   args: string[]
@@ -47,8 +119,10 @@ export interface AgentView {
 
 export interface TaskView {
   id: string
+  workspaceId: string
   repositoryId: string
   channelId: string
+  threadRootMessageId?: string | null
   directAgentId: string | null
   title: string
   description: string
@@ -69,6 +143,7 @@ export interface TaskView {
 export interface ChannelMessage {
   id: string
   channelId: string
+  threadRootMessageId?: string | null
   taskId: string | null
   senderType: 'human' | 'agent' | 'system'
   senderId: string | null
@@ -96,8 +171,100 @@ export interface ReviewDecisionView { id: string; taskId: string; decision: stri
 export interface TaskArtifactView { id: string; taskId: string; kind: string; createdAt: string }
 export interface TaskEventView { id: string; taskId: string; type: string; payload: Record<string, unknown>; createdAt: string }
 
-export function channelMessages(workspace: WorkspaceView, channelId: string): ChannelMessage[] {
-  return workspace.recentMessages.filter((message) => message.channelId === channelId)
+export interface TurnActivityView {
+  turnId: string
+  agentId: string | null
+  phase: 'screening' | 'judging' | 'queued' | 'preparing' | 'handoff'
+  queuePosition: number | null
+}
+
+export interface ConversationTurnDetailView {
+  turn: ConversationTurnView
+  participants: TurnParticipantView[]
+  invocations: AgentInvocationView[]
+  handoffs: ConversationHandoffView[]
+}
+
+export interface ConversationTurnView {
+  id: string
+  channelId: string
+  triggerMessageId: string
+  threadRootMessageId: string | null
+  mode: 'ordinary' | 'direct' | 'multi_direct' | 'all'
+  status: 'screening' | 'judging' | 'responding' | 'handoff' | 'completed' | 'partial' | 'cancelled' | 'failed' | 'interrupted'
+  currentRound: number
+  maxRounds: number
+  createdAt: string
+  updatedAt: string
+  completedAt: string | null
+}
+
+export interface TurnParticipantView {
+  id: string
+  turnId: string
+  agentId: string
+  source: 'responsibility' | 'direct' | 'all' | 'handoff'
+  rank: number
+  matcherScore: number | null
+  decision: 'pending' | 'speak' | 'silent' | 'skipped'
+  confidence: number | null
+  proposedAngle: string | null
+  dependsOnAgentId: string | null
+  speakingOrder: number | null
+  status: 'candidate' | 'selected' | 'spoken' | 'failed' | 'skipped' | 'cancelled'
+  reason: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentInvocationView {
+  id: string
+  turnId: string
+  agentId: string
+  kind: 'participation' | 'response' | 'duplicate_check' | 'handoff_response'
+  priority: 'human_direct' | 'human_ordinary' | 'participation' | 'duplicate_check' | 'automatic_handoff'
+  round: number
+  status: 'queued' | 'running' | 'settled' | 'failed' | 'cancelled'
+  sourceInvocationId: string | null
+  queuedAt: string
+  startedAt: string | null
+  completedAt: string | null
+  errorCategory: 'timeout' | 'cancelled' | 'runtime_failure' | null
+}
+
+export interface ConversationHandoffView {
+  id: string
+  turnId: string
+  sourceInvocationId: string
+  fromAgentId: string
+  requestedTargetAgentId: string
+  toAgentId: string | null
+  question: string
+  round: number
+  status: 'queued' | 'accepted' | 'rejected' | 'completed' | 'failed'
+  reason: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export function snapshotChannelMessages(snapshot: WorkspaceSnapshot, channelId: string): ChannelMessage[] {
+  return snapshot.recentMessages.filter((message) => message.channelId === channelId)
+}
+
+export function snapshotAgents(snapshot: WorkspaceSnapshot): AgentView[] {
+  return snapshot.agents
+}
+
+export function distinctAgentsByIdentity(agents: AgentView[]): AgentView[] {
+  const names = new Set<string>()
+  return [...agents]
+    .sort((left, right) => (right.updatedAt ?? '').localeCompare(left.updatedAt ?? '') || left.id.localeCompare(right.id))
+    .filter((agent) => {
+      const key = agent.identity.toLocaleLowerCase()
+      if (names.has(key)) return false
+      names.add(key)
+      return true
+    })
 }
 
 export function taskStatusLabel(status: TaskStatus): string {

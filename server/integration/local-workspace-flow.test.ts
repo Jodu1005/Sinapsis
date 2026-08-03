@@ -51,9 +51,8 @@ describe('local workspace flow', () => {
       defaultBranch: 'main',
       isClean: true,
     })
-    const channel = repositories.createChannel({ repositoryId: repository.id, name: 'general' })
+    const channel = repositories.createChannel({ name: 'general' })
     const firstAgent = repositories.createAgent({
-      workspaceId: workspace.id,
       identity: 'First builder',
       mentionName: 'first-builder',
       runtime: 'opencode',
@@ -65,7 +64,6 @@ describe('local workspace flow', () => {
       env: {},
     })
     const secondAgent = repositories.createAgent({
-      workspaceId: workspace.id,
       identity: 'Second builder',
       mentionName: 'second-builder',
       runtime: 'opencode',
@@ -78,6 +76,9 @@ describe('local workspace flow', () => {
     })
     repositories.setAgentStatus(firstAgent.id, 'idle', new Date('2026-07-25T00:00:00.000Z'))
     repositories.setAgentStatus(secondAgent.id, 'idle', new Date('2026-07-25T00:00:01.000Z'))
+    repositories.bindChannelWorkspace(channel.id, workspace.id, new Date('2026-07-25T00:00:00.000Z'))
+    repositories.addChannelAgent(channel.id, firstAgent.id, new Date('2026-07-25T00:00:00.000Z'))
+    repositories.addChannelAgent(channel.id, secondAgent.id, new Date('2026-07-25T00:00:01.000Z'))
 
     const firstTask = repositories.createTask({
       repositoryId: repository.id,
@@ -114,12 +115,14 @@ describe('local workspace flow', () => {
 
     const firstDetails = repositories.getTaskDetails(firstTask.id)!
     const secondDetails = repositories.getTaskDetails(secondTask.id)!
+    expect(firstDetails.task).toMatchObject({ workspaceId: workspace.id, repositoryId: repository.id })
+    expect(secondDetails.task).toMatchObject({ workspaceId: workspace.id, repositoryId: repository.id })
     expect(firstDetails.task).toMatchObject({ status: 'running', branchName: expect.stringMatching(/^sinapsis\/task-/) })
     expect(secondDetails.task).toMatchObject({ status: 'running', branchName: expect.stringMatching(/^sinapsis\/task-/) })
     expect(firstDetails.task.worktreePath).not.toBe(secondDetails.task.worktreePath)
     expect(firstDetails.task.branchName).not.toBe(secondDetails.task.branchName)
 
-    coordinator.queueInputForActiveAgent(firstAgent.id, 'Please add the regression check before settling.')
+    coordinator.queueInputForActiveAgent(firstAgent.id, channel.id, 'Please add the regression check before settling.')
     await coordinator.flush(firstTask.id)
     expect(runtime.inputs).toEqual(expect.arrayContaining([
       expect.objectContaining({ input: 'Please add the regression check before settling.' }),

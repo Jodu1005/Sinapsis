@@ -30,6 +30,7 @@ interface ManagedExecution {
   agentId: string
   adapter: RuntimeAdapter
   session: RuntimeSession
+  agentName: string
   targetBranch: string
   controlledStderr: string[]
   timeout: NodeJS.Timeout | undefined
@@ -59,8 +60,10 @@ export class TaskExecutionCoordinator {
   }
 
   async startClaim(claim: TaskClaim): Promise<void> {
-    const { task, agent, repository } = this.requireClaimContext(claim)
+    const task = claim.task
+    const agentId = claim.lease.agentId
     try {
+      const { agent, repository } = this.requireClaimContext(claim)
       const allocation = task.worktreePath && task.branchName
         ? { worktreePath: task.worktreePath, branchName: task.branchName }
         : await this.worktrees.create({ id: task.id, repositoryId: repository.id, repositoryRoot: repository.path, targetBranch: repository.defaultBranch })
@@ -68,13 +71,13 @@ export class TaskExecutionCoordinator {
         unitOfWork.allocateTaskWorktree(task.id, allocation.branchName, allocation.worktreePath)
         unitOfWork.createTaskSession(task.id, agent.id)
         unitOfWork.transitionTask(task.id, 'running', 'Runtime 已在任务工作树中启动')
-        unitOfWork.createMessage({ channelId: task.channelId, taskId: task.id, senderType: 'system', authorName: 'Sinapsis', body: `@${agent.mentionName} 开始执行任务。` })
+        unitOfWork.createMessage({ channelId: task.channelId, threadRootMessageId: task.threadRootMessageId, taskId: task.id, senderType: 'agent', senderId: agent.id, authorName: agent.identity, body: `开始处理「${task.title}」。` })
       })
 
       const adapter = this.runtimes[agent.runtime]
       if (!adapter) throw new DomainError(`Runtime ${agent.runtime} is not available on this service.`)
       const session = await adapter.start({
-        taskId: task.id, title: task.title, description: task.description, acceptanceCriteria: task.acceptanceCriteria,
+        taskId: task.id, mode: 'task', title: task.title, description: task.description, acceptanceCriteria: task.acceptanceCriteria,
         worktreePath: allocation.worktreePath,
         profile: { runtime: agent.runtime, command: agent.command, args: agent.args, model: agent.model, env: agent.env, policy: 'task-worktree' },
       }, (event) => this.enqueue(event.taskId, () => this.handleRuntimeEvent(event)))
@@ -83,6 +86,7 @@ export class TaskExecutionCoordinator {
         agentId: agent.id,
         adapter,
         session,
+        agentName: agent.identity,
         targetBranch: repository.defaultBranch,
         controlledStderr: [],
         timeout: undefined,
@@ -96,13 +100,14 @@ export class TaskExecutionCoordinator {
       this.repositories.updateTaskSession(task.id, agent.id, { runtimeSessionId: session.sessionId, status: 'running' })
       this.deliverUnconsumedInputs(task.id)
     } catch (error) {
-      this.fail(task.id, agent.id, error instanceof Error ? error.message : 'Runtime 启动失败')
+      this.fail(task.id, agentId, error instanceof Error ? error.message : 'Runtime 启动失败')
     }
   }
 
-  queueInputForActiveAgent(agentId: string, body: string): void {
+  queueInputForActiveAgent(agentId: string, channelId: string, body: string): void {
     const task = this.repositories.getActiveTaskForAgent(agentId)
     if (!task) throw new DomainError('Agent does not have an active task.')
+    if (task.channelId !== channelId) throw new DomainError('Agent active task belongs to another channel.')
     const input = this.repositories.createTaskInput(task.id, body)
     this.deliverQueuedInput(task.id, input.id)
   }
@@ -221,7 +226,8 @@ export class TaskExecutionCoordinator {
         return
       case 'needs_input':
         this.repositories.transitionTask(event.taskId, 'waiting_input', 'Runtime 请求人工决定')
-        this.messages.postMilestone(this.task(event.taskId).channelId, event.taskId, `需要决定：${event.prompt}`)
+        const task = this.task(event.taskId)
+        this.messages.postAgent(task.channelId, event.taskId, execution.agentId, execution.agentName, `我需要你的决定：${event.prompt}`, task.threadRootMessageId)
         return
       case 'error':
         if (!await this.flushRuntimeOutput(execution)) return
@@ -255,7 +261,7 @@ export class TaskExecutionCoordinator {
       return
     }
     this.repositories.finishTaskExecution(task.id, execution.agentId, 'in_review', 'Runtime 完成并检测到任务分支提交')
-    this.messages.postMilestone(task.channelId, task.id, '任务已完成，等待人工验收。')
+    this.messages.postAgent(task.channelId, task.id, execution.agentId, execution.agentName, `已完成「${task.title}」，已提交改动，等待你验收。`, task.threadRootMessageId)
     execution.active = false
     this.disarmTimeout(execution)
   }
@@ -272,10 +278,12 @@ export class TaskExecutionCoordinator {
       this.repositories.finishTaskExecution(taskId, agentId, 'needs_human', reason)
       unitOfWork.createMessage({
         channelId: task.channelId,
+        threadRootMessageId: task.threadRootMessageId,
         taskId,
-        senderType: 'system',
-        authorName: 'Sinapsis',
-        body: `任务需要人工处理：${reason}`,
+        senderType: 'agent',
+        senderId: agentId,
+        authorName: this.agentName(agentId),
+        body: `执行需要人工处理：${reason}`,
       })
     })
     this.clearExecution(taskId)
@@ -400,14 +408,18 @@ export class TaskExecutionCoordinator {
     return task
   }
 
+  private agentName(agentId: string): string {
+    return this.repositories.getAgent(agentId)?.identity ?? 'Agent'
+  }
+
   private requireClaimContext(claim: TaskClaim): { task: Task; agent: Agent; repository: { id: string; path: string; defaultBranch: string } } {
-    for (const workspace of this.repositories.getBootstrap().workspaces) {
-      const repository = workspace.repositories.find((candidate) => candidate.id === claim.task.repositoryId)
-      if (!repository) continue
-      const agent = workspace.agents.find((candidate) => candidate.id === claim.lease.agentId)
-      if (agent) return { task: claim.task, agent, repository }
+    const agent = this.repositories.getAgent(claim.lease.agentId)
+    const repository = this.repositories.getRepository(claim.task.repositoryId)
+    if (!agent || !repository) throw new Error('Claim agent or repository does not exist.')
+    if (repository.workspaceId !== claim.task.workspaceId) {
+      throw new DomainError(`Task repository ${repository.id} does not belong to Workspace ${claim.task.workspaceId}.`)
     }
-    throw new Error('Claim agent or repository does not exist.')
+    return { task: claim.task, agent, repository }
   }
 }
 

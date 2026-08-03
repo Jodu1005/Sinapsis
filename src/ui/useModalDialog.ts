@@ -11,8 +11,14 @@ export function useModalDialog<T extends HTMLElement>(onClose: () => void, initi
     if (!dialog) return undefined
     triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const layer = dialog.parentElement
-    const workspace = layer?.parentElement?.closest('.workspace-shell') ?? layer?.parentElement
-    const background = workspace ? Array.from(workspace.children).filter((child) => child !== layer) : []
+    const workspace = layer?.closest('.workspace-shell') ?? layer?.parentElement
+    const background: Element[] = []
+    let branch: Element | null = layer
+    while (branch?.parentElement && branch !== workspace) {
+      const parent = branch.parentElement
+      background.push(...Array.from(parent.children).filter((child) => child !== branch))
+      branch = parent
+    }
     const inertState = background.map((element) => ({ element, wasInert: element.hasAttribute('inert') }))
     background.forEach((element) => element.setAttribute('inert', ''))
 

@@ -1,6 +1,39 @@
 import type { Agent, AgentStatus, CreateAgentInput } from '../domain/agent'
+import type {
+  AgentInvocation,
+  ConversationHandoff,
+  ConversationHandoffPatch,
+  ConversationSession,
+  ConversationTurn,
+  ConversationTurnPatch,
+  CreateAgentInvocationInput,
+  CreateConversationHandoffInput,
+  CreateConversationTurnInput,
+  CreateTurnParticipantInput,
+  InvocationPatch,
+  ParticipantPatch,
+  TurnParticipant,
+  UpsertConversationSessionInput,
+} from '../domain/conversation'
 import type { DomainEvent } from '../domain/events'
 import type { CreateMessageInput, Message } from '../domain/message'
+import type {
+  CreateDreamRunInput,
+  CreateMemoryCandidateInput,
+  CreateMemoryFromCandidateInput,
+  DreamRun,
+  DreamRunFilter,
+  DreamRunPatch,
+  DreamWatermark,
+  MemoryCandidate,
+  MemoryCandidateFilter,
+  MemoryCandidateSourceMetadata,
+  MemoryRecord,
+  MemoryScope,
+  ReviewMemoryCandidateInput,
+  ThreadSummary,
+  UpsertThreadSummaryInput,
+} from '../domain/memory'
 import type { CreateTaskInput, Task, TaskArtifact, TaskDetails, TaskInput, TaskLease, TaskSession, TaskStatus } from '../domain/task'
 import type { TaskSessionStore } from './task-session-store'
 import type {
@@ -13,19 +46,65 @@ import type {
 } from '../domain/workspace'
 
 export interface BootstrapWorkspace extends Workspace {
-  agents: Agent[]
-  repositories: Array<
-    Repository & {
-      channels: Channel[]
-      tasks: Task[]
-    }
-  >
-  recentMessages: Message[]
+  repositories: Repository[]
 }
 
 export interface BootstrapSnapshot {
+  agents: Agent[]
+  channels: Channel[]
   workspaces: BootstrapWorkspace[]
+  tasks: Task[]
+  recentMessages: Message[]
+  maxWorkspaceBindingsPerChannel: number
+  pendingMemoryCandidateCount: number
 }
+
+export interface ConversationTurnDetails {
+  turn: ConversationTurn
+  participants: TurnParticipant[]
+  invocations: AgentInvocation[]
+  handoffs: ConversationHandoff[]
+}
+
+export interface ActiveConversationTurnProjection {
+  turn: ConversationTurn
+  invocations: AgentInvocation[]
+}
+
+export interface SettleConversationInvocationInput {
+  invocationId: string
+  recoveryOwnerId: string | null
+  resultJson: string
+  participantPatch?: ParticipantPatch
+  publicReply?: { authorName: string; body: string }
+  occurredAt: Date
+}
+
+export interface SettleConversationInvocationResult {
+  applied: boolean
+  invocation: AgentInvocation
+  participant?: TurnParticipant
+  message?: Message
+}
+
+export interface CancelConversationTurnInput {
+  turnId: string
+  expectedRecoveryOwnerId?: string
+  occurredAt: Date
+  reason: string
+}
+
+export interface CancelConversationTurnResult {
+  applied: boolean
+  turn: ConversationTurn
+  invocationIds: string[]
+  participantIds: string[]
+  handoffIds: string[]
+}
+
+export type ConversationTurnClaimResult<T> =
+  | { applied: true; value: T }
+  | { applied: false }
 
 export interface TaskClaim {
   task: Task
@@ -47,10 +126,18 @@ export interface WorkspaceUnitOfWork {
   createWorkspace(input: CreateWorkspaceInput): Workspace
   createRepository(input: CreateRepositoryInput): Repository
   createChannel(input: CreateChannelInput): Channel
+  ensureSystemChannel(input: CreateChannelInput & { systemKey: string }): Channel
+  archiveChannel(channelId: string, occurredAt: Date): Channel
+  restoreChannel(channelId: string, occurredAt: Date): Channel
+  resetChannelContext(channelId: string, occurredAt: Date): Channel
   createAgent(input: CreateAgentInput): Agent
+  updateAgentResponsibilities(agentId: string, responsibilities: string[]): Agent
   createTask(input: CreateTaskInput): Task
   createTaskInput(taskId: string, body: string): TaskInput
   createMessage(input: CreateMessageInput): Message
+  createConversationTurn(input: CreateConversationTurnInput): ConversationTurn
+  createTurnParticipant(input: CreateTurnParticipantInput): TurnParticipant
+  createAgentInvocation(input: CreateAgentInvocationInput): AgentInvocation
   updateMessageBody(messageId: string, body: string): Message
   deleteMessage(messageId: string): void
   transitionTask(taskId: string, next: TaskStatus, reason: string): Task
@@ -69,7 +156,11 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   createWorkspace(input: CreateWorkspaceInput): Workspace
   createRepository(input: CreateRepositoryInput): Repository
   createChannel(input: CreateChannelInput): Channel
+  archiveChannel(channelId: string, occurredAt: Date): Channel
+  restoreChannel(channelId: string, occurredAt: Date): Channel
+  resetChannelContext(channelId: string, occurredAt: Date): Channel
   createAgent(input: CreateAgentInput): Agent
+  updateAgentResponsibilities(agentId: string, responsibilities: string[]): Agent
   createTask(input: CreateTaskInput): Task
   createTaskInput(taskId: string, body: string): TaskInput
   createMessage(input: CreateMessageInput): Message
@@ -87,12 +178,83 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   reclaimReturnedTask(taskId: string, agentId: string, occurredAt: Date): TaskClaim | undefined
   getTask(taskId: string): Task | undefined
   getAgent(agentId: string): Agent | undefined
+  getRepository(repositoryId: string): Repository | undefined
   getTasksForRepository(repositoryId: string): Task[]
+  getTasksForChannel(channelId: string): Task[]
   getTaskDetails(taskId: string): TaskDetails | undefined
   getTaskArtifact(taskId: string, artifactId: string): TaskArtifact | undefined
   getMessage(messageId: string): Message | undefined
-  hasAgentMention(workspaceId: string, mentionName: string): boolean
+  createDreamRun(input: CreateDreamRunInput): DreamRun
+  createIncrementalDreamRun(input: { channelId: string; trigger: DreamRun['trigger'] }): DreamRun
+  updateDreamRun(runId: string, patch: DreamRunPatch): DreamRun
+  getDreamRun(runId: string): DreamRun | undefined
+  listDreamRuns(filter?: DreamRunFilter): DreamRun[]
+  getDreamWatermark(channelId: string): DreamWatermark | undefined
+  recoverDreamMemory(occurredAt: Date): { failedRunIds: string[]; invalidCandidateIds: string[] }
+  createMemoryCandidate(input: CreateMemoryCandidateInput): MemoryCandidate
+  createMemoryCandidates(inputs: CreateMemoryCandidateInput[]): MemoryCandidate[]
+  getMemoryCandidate(candidateId: string): MemoryCandidate | undefined
+  getMemoryByCandidateId(candidateId: string): MemoryRecord | undefined
+  getMemory(memoryId: string): MemoryRecord | undefined
+  listMemoryCandidates(filter?: MemoryCandidateFilter): MemoryCandidate[]
+  listMemoryCandidateSourceMetadata(candidateId: string): MemoryCandidateSourceMetadata[]
+  reviewMemoryCandidate(input: ReviewMemoryCandidateInput): MemoryCandidate
+  createMemoryFromCandidate(input: CreateMemoryFromCandidateInput): MemoryRecord
+  listAcceptedMemories(scope: MemoryScope, channelId?: string): MemoryRecord[]
+  updateMemory(memoryId: string, content: string): MemoryRecord
+  archiveMemory(memoryId: string, occurredAt: Date): MemoryRecord
+  listDreamSourceMessages(runId: string): Message[]
+  listDreamSourceTurnDetails(runId: string): ConversationTurnDetails[]
+  getThreadSummary(channelId: string, threadRootMessageId: string): ThreadSummary | undefined
+  upsertThreadSummary(input: UpsertThreadSummaryInput): ThreadSummary
+  createConversationTurn(input: CreateConversationTurnInput): ConversationTurn
+  createClaimedConversationTurn(
+    input: CreateConversationTurnInput,
+    ownerId: string,
+    occurredAt: Date,
+  ): ConversationTurn
+  getConversationTurn(turnId: string): ConversationTurn | undefined
+  getConversationTurnDetails(turnId: string): ConversationTurnDetails | undefined
+  listActiveConversationActivity(channelId?: string): ActiveConversationTurnProjection[]
+  listActiveConversationTurns(channelId?: string): ConversationTurn[]
+  claimRecoverableConversationTurns(ownerId: string, occurredAt: Date, staleBefore: Date): ActiveConversationTurnProjection[]
+  withConversationTurnClaim<T>(
+    turnId: string,
+    ownerId: string,
+    work: () => T,
+  ): ConversationTurnClaimResult<T>
+  renewConversationTurnClaim(turnId: string, ownerId: string, occurredAt: Date): boolean
+  releaseConversationTurnClaim(turnId: string, ownerId: string): boolean
+  cancelConversationTurn(input: CancelConversationTurnInput): CancelConversationTurnResult
+  updateConversationTurn(turnId: string, patch: ConversationTurnPatch): ConversationTurn
+  createTurnParticipant(input: CreateTurnParticipantInput): TurnParticipant
+  updateTurnParticipant(turnId: string, agentId: string, patch: ParticipantPatch): TurnParticipant
+  listTurnParticipants(turnId: string): TurnParticipant[]
+  createAgentInvocation(input: CreateAgentInvocationInput): AgentInvocation
+  updateAgentInvocation(invocationId: string, patch: InvocationPatch): AgentInvocation
+  settleConversationInvocation(input: SettleConversationInvocationInput): SettleConversationInvocationResult
+  listAgentInvocations(turnId: string): AgentInvocation[]
+  createConversationHandoff(input: CreateConversationHandoffInput): ConversationHandoff
+  updateConversationHandoff(handoffId: string, patch: ConversationHandoffPatch): ConversationHandoff
+  listConversationHandoffs(turnId: string): ConversationHandoff[]
+  getConversationSession(key: string): ConversationSession | undefined
+  upsertConversationSession(input: UpsertConversationSessionInput): ConversationSession
+  listMessagesForConversation(channelId: string, threadRootMessageId: string | null): Message[]
+  listMessagesAfterThreadWatermark(channelId: string, threadRootMessageId: string, throughMessageId: string): Message[]
+  listPublicMessagesForTurn(turnId: string): Message[]
+  getLastAgentSpokenAt(channelId: string, agentId: string): string | null
+  getChannel(channelId: string): Channel | undefined
+  listAgents(): Agent[]
+  getChannelAgentIds(channelId: string): string[]
+  addChannelAgent(channelId: string, agentId: string, occurredAt: Date): void
+  removeChannelAgent(channelId: string, agentId: string): void
+  getChannelWorkspaceIds(channelId: string): string[]
+  bindChannelWorkspace(channelId: string, workspaceId: string, occurredAt: Date): void
+  unbindChannelWorkspace(channelId: string, workspaceId: string): void
+  hasUnfinishedTask(channelId: string, workspaceId: string, agentId?: string): boolean
+  hasAgentMention(mentionName: string): boolean
   getIdleAgentIds(): string[]
+  recoverOrphanedAgents(occurredAt: Date): number
   setAgentStatus(agentId: string, status: AgentStatus, occurredAt: Date): Agent
   claimNextTask(agentId: string, occurredAt: Date): TaskClaim | undefined
   renewTaskLease(taskId: string, agentId: string, occurredAt: Date): TaskLease | undefined

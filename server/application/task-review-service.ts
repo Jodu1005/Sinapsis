@@ -21,7 +21,7 @@ export class TaskReviewService {
       const accepted = this.repositories.inTransaction((unitOfWork) => {
         unitOfWork.createReviewDecision(taskId, 'accept', message)
         const next = unitOfWork.transitionTask(taskId, 'accepted', '人工验收通过')
-        unitOfWork.createMessage({ channelId: task.channelId, taskId, senderType: 'system', authorName: 'Sinapsis', body: '人工已验收任务；合并仍需独立人工流程。' })
+        unitOfWork.createMessage({ channelId: task.channelId, threadRootMessageId: task.threadRootMessageId, taskId, senderType: 'system', authorName: 'Sinapsis', body: '人工已验收任务；合并仍需独立人工流程。' })
         return next
       })
       return accepted
@@ -31,7 +31,7 @@ export class TaskReviewService {
       unitOfWork.createReviewDecision(taskId, 'return', message)
       const next = unitOfWork.transitionTask(taskId, 'returned', '人工退回修改')
       unitOfWork.createTaskInput(taskId, message)
-      unitOfWork.createMessage({ channelId: task.channelId, taskId, senderType: 'system', authorName: 'Sinapsis', body: '人工已退回任务，正在恢复原会话。' })
+      unitOfWork.createMessage({ channelId: task.channelId, threadRootMessageId: task.threadRootMessageId, taskId, senderType: 'system', authorName: 'Sinapsis', body: '人工已退回任务，正在恢复原会话。' })
       return next
     })
     try {
@@ -42,7 +42,7 @@ export class TaskReviewService {
         if (current?.status !== 'returned') return
         unitOfWork.transitionTask(taskId, 'needs_human', '无法恢复原 Runtime 会话')
         unitOfWork.createMessage({
-          channelId: task.channelId, taskId, senderType: 'system', authorName: 'Sinapsis',
+          channelId: task.channelId, threadRootMessageId: task.threadRootMessageId, taskId, senderType: 'system', authorName: 'Sinapsis',
           body: '无法恢复原 Runtime 会话，任务等待人工处理。',
         })
       })

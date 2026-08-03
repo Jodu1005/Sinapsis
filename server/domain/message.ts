@@ -3,6 +3,7 @@ export type MessageSenderType = 'human' | 'agent' | 'system'
 export interface Message {
   id: string
   channelId: string
+  threadRootMessageId?: string | null
   taskId: string | null
   senderType: MessageSenderType
   senderId: string | null
@@ -15,6 +16,7 @@ export interface Message {
 
 export interface CreateMessageInput {
   channelId: string
+  threadRootMessageId?: string | null
   taskId?: string | null
   senderType: MessageSenderType
   senderId?: string | null

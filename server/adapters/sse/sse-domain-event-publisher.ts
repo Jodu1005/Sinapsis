@@ -17,7 +17,7 @@ export class SseDomainEventPublisher implements DomainEventPublisher {
   }
 
   publish(event: DomainEvent): void {
-    const payload = JSON.stringify(event)
+    const payload = JSON.stringify(publicDomainEvent(event))
     for (const client of this.clients) {
       client.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${payload}\n\n`)
     }
@@ -28,5 +28,15 @@ export class SseDomainEventPublisher implements DomainEventPublisher {
       client.end()
     }
     this.clients.clear()
+  }
+}
+
+function publicDomainEvent(event: DomainEvent): DomainEvent {
+  return {
+    id: event.id,
+    type: event.type,
+    occurredAt: event.occurredAt,
+    entityType: event.entityType,
+    entityId: event.entityId,
   }
 }

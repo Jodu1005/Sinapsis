@@ -1,0 +1,112 @@
+# SDD ledger — plan: docs/superpowers/plans/2026-07-31-dream-memory.md
+
+Baseline: 6ff7df03ea3733e71dcaa224f7a33044ee0127f9
+Baseline verification: 51 test files, 444 tests passed; build passed
+Task 1: in progress
+Task 1 base: 6ff7df03ea3733e71dcaa224f7a33044ee0127f9
+Task 1 implementer: Arendt (019fc27b-dbf8-7d22-ae60-4d3d50192fb6)
+Task 1 implementation: 269eec6 feat: persist dream memory candidates
+Task 1 reviewer: Tesla (019fc285-5cc5-7dd2-8325-c6550b17bb66)
+Task 1: fix round 1/5 in progress (3 P1, 1 P3: scope reassignment, cross-channel Global provenance, NULL watermark uniqueness, concurrency/rollback coverage)
+Task 1: fix round 1/5 implemented (new-database behavior addressed; commit ac16fff; 453/453 tests)
+Task 1: fix round 2/5 in progress (migration 19 immutability/19→20 upgrade; explicit lock-race coverage)
+Task 1: fix round 2/5 implemented (commit 3312a34; 454/454 tests)
+Task 1: fix round 3/5 in progress (original-19 scope-safe provenance inference; ac16fff-shaped 19 candidate preservation)
+Task 1: fix round 3/5 implemented (commit a2b6d9a; 456/456 tests)
+Task 1: complete (commits 6ff7df0..a2b6d9a, review clean)
+Task 2: in progress
+Task 2 base: a2b6d9a5c4ba99c8953f241adcedd6c5ab7b3849
+Task 2 implementer: Feynman (019fc2a2-acd0-7250-8483-c69663a64366)
+Task 2 takeover: Feynman stalled without code changes after restart
+Task 2 implementer: Noether (019fc2a9-0ea6-7ae3-b00e-74b4cc3bb924)
+Task 2 takeover: Noether hit model capacity after leaving uncommitted implementation at 102/103 focused tests
+Task 2 implementer: Bohr (019fc2af-a5f6-7980-8103-3c321a291c2d)
+Task 2 implementation: 1db45dd feat: assemble confirmed memory context
+Task 2 reviewer: Galileo (019fc2c6-9c55-7ae0-a9d7-7d1870a1fb3d)
+Task 2: fix round 1/5 in progress (6 P1, 2 minor: summary CAS/order, warm invocation envelope, nonblocking refresh, prompt boundary, production wiring, tiny budget, watermark pair constraint)
+Task 2: fix round 1/5 implemented (summary CAS/rowid watermark API, warm/resume envelopes, safe JSON boundaries, nonblocking refresh, production rolling generator, exact tiny budgets, migration 22 pair constraints; 487/487 tests; build passed)
+Task 2: fix round 2/5 implemented (migration 22 repairs existing half-watermarks; thread Summary single-flight, timeout, AbortSignal and cancellation; commit 56d4627; 489/489 tests; build passed)
+Task 2: complete (commits a2b6d9a..56d4627, final scoped review clean)
+Task 3: in progress
+Task 3 base: 56d4627
+Task 3 implementer: Gauss (019fc2ef-5600-7941-bedc-64ac851f77b6)
+Task 3 takeover: Gauss stalled without code changes after scope reduction
+Task 3 implementer: Beauvoir (019fc2f3-cacf-7171-ab20-9bc9fdcc4686)
+Task 3 protocol slice: complete (strict JSON/source/safety/max validation; normalized SHA-256 exports; 20/20 tests)
+Task 3 Runtime slice: complete (independent run directory/session, safe public prompt, settled parsing, atomic failure, artifact isolation, duplicate/conflict handling; 18/18 tests)
+Task 3 Runtime boundary hardening: complete (read-only one-shot conversation mode, start timeout with late-session cancellation, message/Turn channel provenance, safe runId, constructor bounds, ConversationSessionResult parsed.reply, relevant accepted Memory filtering, subject/key conflicts)
+Task 3 config slice: complete (Dream runtime/model/timeout/candidate-limit defaults and validation; 13/13 tests)
+Task 3: fix round 1/5 implemented (task mode replaced by read-only one-shot conversation mode; cross-channel Turn and unsafe runId rejected pre-start; constructor validates timeout and candidate bounds; 18/18 Runtime tests)
+Task 3 verification: focused 51/51; full suite 54 files and 532/532 tests; build and diff check passed
+Task 3: implementation complete; report written; ready for commit
+Task 3 commits: 3d574aa feat: consolidate memory candidates safely; 06708e8 fix: isolate dream runtime maintenance
+Task 3 reviewer: Maxwell (019fc30a-7273-7913-86d4-c242f95d0b70)
+Task 3: fix round 2/5 implemented (commits f6b2417, f16a873; adapter-enforced no-tools, one-shot close, nested turn validation, safer filtering, proposal dedupe, atomic candidate batches)
+Task 3 reviewer: Nash (019fc31d-bfee-7cb1-8aa8-e76a4816f460)
+Task 3: fix round 3/5 implemented (commit b1b9941; delayed-session cancellation diagnostics, isolated OpenCode config discovery, lowercase AWS credentials and arbitrary-home credential paths)
+Task 3 verification: focused 61/61; full suite 54 files and 548/548 tests; build and diff check passed
+Task 3/4 final reviewer: Aquinas (019fc52f-3e0a-7ce3-852c-2c26c185d1b9)
+Task 4: in review
+Task 4 base: b1b9941
+Task 4 incremental run queue: 0119e06 feat: queue incremental dream runs
+Task 4 daily scheduler/composition: 43fa610 feat: schedule daily dream maintenance
+Task 4 verification: focused 6 files and 114/114 tests; final full suite 56 files and 563/563 tests; build and diff check passed
+Task 3/4 review round 1: 4 P1, 3 P2 (lowercase AWS filtering, same-millisecond late source, restart recovery, late cancellation evidence, repeated DST time, stop/start generation race, shutdown drain)
+Task 3/4 review adjudication: restart recovery is explicitly Task 7 Step 3 and remains scheduled there; all other findings fixed in current round
+Task 3/4 fix round 1: source-completion fallback closes late-message gap; late cancel diagnostics persist; DST is once/day; scheduler generations isolate stale callbacks; shutdown drains maintenance
+Task 3/4 fix verification: focused 6 files and 118/118 tests; full suite 56 files and 568/568 tests; build and diff check passed
+Task 3/4 fix commit: 3681048 fix: harden dream maintenance scheduling
+Task 3/4 scoped re-review: Aquinas, clean; restart recovery accepted as Task 7 Step 3
+Task 3: complete (commits 56d4627..3681048, review clean)
+Task 4: complete (commits b1b9941..3681048, review clean)
+Task 5: in progress
+Task 5 base: 3681048
+Task 5 implementer: Hegel (019fc53b-e3a4-7ef1-93fd-9f3e2a65c0b7)
+Task 5 actual dispatch base: 41086de
+Task 5 implementation: e9c3f54 feat: add human memory review api (57 files, 575 tests; build passed)
+Task 5 reviewer: Jason (019fc543-806e-7692-82a8-bd959e1c0304)
+Task 5 fix round 1/5 in progress (3 P1, 2 P2: raw length boundary, missing-resource 404, migration 23 backfill, SSE whitelist, DELETE body filtering)
+Task 5 fix round 1/5 implemented: 8ede4ca fix: harden memory review boundaries (57 files, 578 tests; build passed)
+Task 5 scoped re-review: Jason, clean; 4 focused files and 100/100 tests
+Task 5: complete (commits 41086de..8ede4ca, review clean)
+Task 6: in progress
+Task 6 base: 8ede4ca
+Task 6 implementer: Arendt (019fc54e-6f64-7b22-8bbb-291a12a5cfd7)
+Task 6 actual dispatch base: f88fb0b
+Task 6 implementation: 8339b30 feat: add dream memory review center (59 files, 586 tests; build passed)
+Task 6 reviewer: Meitner (019fc559-d16f-78a0-bd4f-9b9f7ce16cd3)
+Task 6 browser QA: desktop clean; mobile layout non-overlapping; found stale run state and missing mobile navigation
+Task 6 fix round 1/5 in progress (4 P1, 2 P2: async run/SSE refresh, mobile navigation, reviewed values, complete source jump, tab request race, ARIA tabs)
+Task 6 fix round 1/5 implemented: 8032cb4 fix: complete dream review workflows (59 files, 595 tests; build passed)
+Task 6 scoped re-review: 1 P1 remains (failure notice retains stale running message; public failure lacks safe category)
+Task 6 fix round 2/5 in progress
+Task 6 fix round 2/5 implemented: e0a8cd4 fix: clarify dream failure status (59 files, 599 tests; build passed)
+Task 6 final scoped review: Meitner, clean; browser QA confirmed mobile navigation and completed no-op state
+Task 6: complete (commits f88fb0b..e0a8cd4, review clean)
+Task 7: in progress
+Task 7 base: e0a8cd4
+Task 7 implementer: Epicurus (019fc575-8477-7cd3-ac85-4962ce9cae64)
+Task 7 actual dispatch base: dc859dd
+Task 7 implementation: 5815c5c test: verify dream memory lifecycle (60 files, 601 tests; build passed)
+Task 7 reviewer: Linnaeus (019fc581-25f1-7990-b67a-d756d34e2890)
+Task 7 fix round 1/5 in progress (1 P1, 2 P2, 1 P3: idempotent restart replay with retained Candidate, real v23->v24 upgrade coverage, real HTTP lifecycle coverage, no-op documentation accuracy)
+Task 7 fix round 1/5 implemented: 2ca2018 fix: make dream recovery replay idempotent (60 files, 603 tests; build passed)
+Task 7 scoped re-review: 1 P1, 1 P3 remain (superseded Candidate may swallow a valid replay; no-op documentation condition too narrow)
+Task 7 fix round 2/5 in progress
+Task 7 fix round 2/5 implemented: 56ea835 fix: restore recoverable dream candidates (60 files, 605 tests; build passed)
+Task 7 scoped re-review round 2: 1 P2 remains (a second recovery-isolation cycle retains the first audit timestamp and blocks a later valid reactivation)
+Task 7 fix round 3/5 in progress
+Task 7 fix round 3/5 implemented: 6d481a2 fix: refresh dream recovery audit timing (60 files, 606 tests; build passed)
+Task 7 final scoped review: Linnaeus, clean; 3 focused files and 63/63 tests
+Task 7: complete (commits dc859dd..6d481a2, review clean)
+Final branch review: in progress (baseline 6ff7df0)
+Final branch review round 1: not clean (1 P0 human-review API lacks an unforgeable local capability; 1 P2 production Dream runs omit public Turn results)
+Final fix round 1/5: in progress
+Final fix round 1/5 implemented: c9e1cb2 includes public Turn results in production Dream runs; d7bbcab protects Dream/Memory controls with a server-issued human capability (61 files, 610 tests; build passed before final re-review)
+Final scoped re-review round 1: P0 closed; 1 P2 remains (reply-only incremental Dream source filters its associated public Turn); 1 P3 test gap (wrong-token write routes lack complete unchanged-state coverage)
+Final fix round 2/5: in progress
+Final fix round 2/5 implemented: 3c0660b resolves reply-only incremental Dream Turn provenance; d33cd3e covers wrong-capability state invariants for every protected write (61 files, 612 tests; build passed)
+Final scoped re-review round 2: Nietzsche, clean; focused 141 tests and build passed
+Final branch review: complete (6ff7df0..d33cd3e)
+Final verification: 61 test files and 612/612 tests; production build and diff checks passed
+Dream Memory plan: complete (100%)
