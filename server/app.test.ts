@@ -72,6 +72,64 @@ describe('local service API', () => {
     ])
   })
 
+  it('keeps every human-controlled write unchanged when the capability is wrong', async () => {
+    const app = createApp({ humanCapability: 'correct-human-capability' })
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Wrong capability' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/wrong-capability' })
+    const channel = repositories.createChannel({ name: 'wrong-capability' })
+    const source = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'You', body: 'Protect every human mutation.',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'manual', from: null,
+      to: { createdAt: source.createdAt, id: source.id },
+    })
+    const pending = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Pending candidate remains pending.', rationale: 'Authorization test.', confidence: 0.9, importance: 0.9,
+      sourceMessageIds: [source.id],
+    })
+    const acceptedCandidate = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'global', channelId: null, kind: 'workflow',
+      proposedContent: 'Active memory remains active.', rationale: 'Authorization test.', confidence: 0.9, importance: 0.9,
+      sourceMessageIds: [source.id],
+    })
+    const memory = repositories.createMemoryFromCandidate({
+      candidateId: acceptedCandidate.id,
+      reviewedContent: acceptedCandidate.proposedContent,
+      reviewedScope: 'global',
+      occurredAt: new Date('2026-08-03T00:00:00.000Z'),
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+    const wrongHeaders = { 'content-type': 'application/json', 'x-sinapsis-human-capability': 'wrong-capability' }
+    const runCount = repositories.listDreamRuns().length
+
+    expect((await fetch(`${server.baseUrl}/api/dream/runs`, {
+      method: 'POST', headers: wrongHeaders, body: JSON.stringify({ channelId: channel.id }),
+    })).status).toBe(403)
+    expect(repositories.listDreamRuns()).toHaveLength(runCount)
+
+    expect((await fetch(`${server.baseUrl}/api/memory-candidates/${pending.id}/accept`, {
+      method: 'POST', headers: wrongHeaders, body: JSON.stringify({ scope: 'global', content: pending.proposedContent }),
+    })).status).toBe(403)
+    expect((await fetch(`${server.baseUrl}/api/memory-candidates/${pending.id}/ignore`, {
+      method: 'POST', headers: wrongHeaders, body: JSON.stringify({}),
+    })).status).toBe(403)
+    expect(repositories.getMemoryCandidate(pending.id)?.status).toBe('pending')
+
+    expect((await fetch(`${server.baseUrl}/api/memories/${memory.id}`, {
+      method: 'PATCH', headers: wrongHeaders, body: JSON.stringify({ content: 'Forged update.' }),
+    })).status).toBe(403)
+    expect((await fetch(`${server.baseUrl}/api/memories/${memory.id}`, {
+      method: 'DELETE', headers: wrongHeaders, body: JSON.stringify({}),
+    })).status).toBe(403)
+    expect(repositories.getMemory(memory.id)).toMatchObject({
+      content: 'Active memory remains active.', status: 'active', archivedAt: null,
+    })
+  })
+
   it('composes Dream maintenance without starting its daily scheduler in the test app', () => {
     const app = createApp()
     try {
