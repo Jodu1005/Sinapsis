@@ -21,7 +21,7 @@ describe('DreamScheduler', () => {
       .toBe('2026-11-01T08:00:00.000Z')
   })
 
-  it('uses the first valid instant for a skipped time and both instances of a repeated time', () => {
+  it('uses the first valid instant for a skipped time and only the first instance of a repeated time', () => {
     const skipped = schedulerAt('2026-03-08T06:00:00.000Z', '02:30', 'America/New_York')
     const repeated = schedulerAt('2026-11-01T05:15:00.000Z', '01:30', 'America/New_York')
 
@@ -30,7 +30,7 @@ describe('DreamScheduler', () => {
     expect(repeated.nextRunAt(new Date('2026-11-01T05:15:00.000Z')).toISOString())
       .toBe('2026-11-01T05:30:00.000Z')
     expect(repeated.nextRunAt(new Date('2026-11-01T05:45:00.000Z')).toISOString())
-      .toBe('2026-11-01T06:30:00.000Z')
+      .toBe('2026-11-02T06:30:00.000Z')
   })
 
   it('starts idempotently, schedules after each trigger, and stops its timer', async () => {
@@ -58,6 +58,24 @@ describe('DreamScheduler', () => {
 
     scheduler.start()
     await clock.fireNext()
+
+    await vi.waitFor(() => expect(clock.activeTimers()).toHaveLength(1))
+  })
+
+  it('does not let an old in-flight trigger schedule a second timer after stop and restart', async () => {
+    const clock = new FakeClock(new Date('2026-08-03T18:00:00.000Z'))
+    const inFlight = deferred<void>()
+    const scheduler = new DreamScheduler({
+      clock, time: '03:00', timeZone: 'Asia/Shanghai', trigger: () => inFlight.promise,
+    })
+
+    scheduler.start()
+    await clock.fireNext()
+    scheduler.stop()
+    scheduler.start()
+    expect(clock.activeTimers()).toHaveLength(1)
+
+    inFlight.resolve()
 
     await vi.waitFor(() => expect(clock.activeTimers()).toHaveLength(1))
   })
@@ -110,4 +128,10 @@ class FakeTimer implements ClockTimer {
     this.fired = true
     this.callback()
   }
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((next) => { resolve = next })
+  return { promise, resolve }
 }

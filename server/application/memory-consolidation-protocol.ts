@@ -19,7 +19,7 @@ const unsafeTextPatterns: Array<{ reason: string; patterns: RegExp[] }> = [
     reason: 'secret material',
     patterns: [
       /\b(?:sk-(?:proj-)?|gh[pousr]_|github_pat_|xox[baprs]-)[a-z0-9_-]{12,}\b/i,
-      /\bAKIA[A-Z0-9]{12,}\b/,
+      /\bAKIA[A-Z0-9]{12,}\b/i,
       /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/,
       /\b[A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL)[A-Z0-9_]*\s*=\s*\S{8,}/i,
       /\b(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|auth[_ -]?token|secret|password|passwd|cookie|session_?id|database_url)\b\s*[:=]\s*\S{8,}/i,

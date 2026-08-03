@@ -10,6 +10,8 @@
 - text 事件只在 settled 后整体严格解析；解析失败、Runtime error 和 timeout 均不会创建部分候选。timeout 覆盖 `runtime.start()`，operation 到点立即拒绝，晚到 session 会被单独取消。
 - Runtime artifact 仅写入 run 目录的本机证据文件，不进入 Candidate 或频道消息。跨频道 message/Turn 和包含路径字符的不安全 runId 在创建目录和启动 Runtime 前直接拒绝；constructor 同时验证 timeout 为正整数、候选上限为 1..50。
 - 重复候选按相关 accepted Memory 的 scope 与规范化 hash 消除。冲突仅在相同 scope/kind 且共享规范化 subject/key 时标注，并追加明确的人工审核 rationale；归档或其他频道 Memory 不参与比较。
+- Dream 请求通过显式 `read-only-no-tools` execution policy 在 Claude Code、Pi 和 OpenCode adapter 层禁用工具。OpenCode 同时隔离全局/home/项目配置发现路径并显式 deny 标准权限，避免用户配置中的具体 allow 深度合并回来。
+- settled 成功与解析失败都会关闭 one-shot session；session 延迟返回时操作会等待关闭结果，取消失败作为错误返回。候选先按 scope/channel/hash 去重，再由 SQLite 单事务批量写入，任一失败会回滚候选和 Run 计数。
 - 配置新增 `dreamRuntime`、`dreamModel`、`dreamTimeoutMs`、`maxDreamCandidatesPerRun`，对应 `SINAPSIS_DREAM_*` 环境变量，默认分别为 `pi`、空字符串、120000 和 20；候选硬上限为 50。
 
 ## RED / GREEN
@@ -24,7 +26,8 @@
 - Config RED：13 tests 中原有 8 条通过，新增 5 条默认值/覆盖/非法值测试失败。
 - Config GREEN：13/13 通过。
 - 最终专项：`npm test -- --run server/application/memory-consolidation-protocol.test.ts server/application/memory-consolidator.test.ts server/config.test.ts`，3 个文件、51/51 通过。
-- 最终全量：`npm test -- --run`，54 个文件、532/532 通过。
+- 最终全量：`npm test -- --run`，54 个文件、548/548 通过。
+- 联合审查修复补充：AWS Access Key 检测改为大小写不敏感；延迟启动在主操作超时后若取消失败，会把诊断追加到该 Dream Run 的本地 `runtime-stderr.log`。
 - Build：`npm run build` 通过，包括 `tsc --noEmit` 与 Vite production build。
 - Diff check：`git diff --check` 通过。
 

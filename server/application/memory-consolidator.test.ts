@@ -229,6 +229,25 @@ describe('MemoryConsolidator', () => {
     expect(fixture.repositories.created).toEqual([])
   })
 
+  it('persists a late cancellation failure after a pending Runtime start times out', async () => {
+    vi.useFakeTimers()
+    const runtime = new DeferredFailingCancelRuntime()
+    const fixture = await createFixture({ timeoutMs: 25, runtime })
+    const operation = fixture.consolidator.consolidate(fixture.input)
+    const observed = operation.catch((error: unknown) => error)
+    await vi.waitFor(() => expect(runtime.starts).toHaveLength(1))
+
+    await vi.advanceTimersByTimeAsync(25)
+    await observed
+    runtime.releaseStart()
+    await vi.advanceTimersByTimeAsync(0)
+
+    const stderrPath = path.join(fixture.dataDir, 'dream', fixture.input.runId, 'runtime-stderr.log')
+    await vi.waitFor(async () => {
+      await expect(readFile(stderrPath, 'utf8')).resolves.toMatch(/late cancellation failed: cancel unavailable/)
+    })
+  })
+
   it('rejects cross-channel messages before starting Runtime', async () => {
     const fixture = await createFixture()
     fixture.input.messages.push(message({ id: 'message-2', channelId: 'channel-2' }))

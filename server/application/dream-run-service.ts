@@ -34,6 +34,8 @@ export class DreamRunService {
   private readonly waiters = new Map<string, Array<(run: DreamRun) => void>>()
   private active = 0
   private drainScheduled = false
+  private shuttingDown = false
+  private readonly idleWaiters: Array<() => void> = []
 
   constructor(options: DreamRunServiceOptions) {
     if (!Number.isInteger(options.concurrency) || options.concurrency < 1) {
@@ -46,6 +48,7 @@ export class DreamRunService {
   }
 
   enqueue(input: { channelId: string; trigger: DreamRun['trigger'] }): DreamRun {
+    if (this.shuttingDown) throw new Error('Dream maintenance service is shutting down.')
     const channel = this.repositories.getChannel(input.channelId)
     if (!channel) throw new Error(`Channel ${input.channelId} does not exist.`)
     if (channel.archivedAt) throw new Error(`Channel #${channel.name} is archived.`)
@@ -77,6 +80,12 @@ export class DreamRunService {
     })
   }
 
+  shutdown(): Promise<void> {
+    this.shuttingDown = true
+    if (this.isIdle()) return Promise.resolve()
+    return new Promise<void>((resolve) => { this.idleWaiters.push(resolve) })
+  }
+
   private schedule(runId: string): void {
     if (this.scheduledRunIds.has(runId)) return
     this.scheduledRunIds.add(runId)
@@ -92,7 +101,7 @@ export class DreamRunService {
   private drain(): void {
     while (this.active < this.concurrency) {
       const runId = this.pendingRunIds.shift()
-      if (!runId) return
+      if (!runId) break
       this.active += 1
       void this.execute(runId).finally(() => {
         this.active -= 1
@@ -100,6 +109,7 @@ export class DreamRunService {
         this.drain()
       })
     }
+    this.resolveIdleWaiters()
   }
 
   private async execute(runId: string): Promise<void> {
@@ -140,6 +150,15 @@ export class DreamRunService {
     const waiters = this.waiters.get(run.id) ?? []
     this.waiters.delete(run.id)
     for (const resolve of waiters) resolve(run)
+  }
+
+  private isIdle(): boolean {
+    return this.active === 0 && this.pendingRunIds.length === 0 && !this.drainScheduled
+  }
+
+  private resolveIdleWaiters(): void {
+    if (!this.isIdle()) return
+    for (const resolve of this.idleWaiters.splice(0)) resolve()
   }
 }
 

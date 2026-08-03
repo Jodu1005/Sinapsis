@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { RuntimeProfile } from '../adapters/runtime/runtime-profile'
 import type { MemoryCandidate, MemoryRecord, CreateMemoryCandidateInput } from '../domain/memory'
@@ -81,6 +81,8 @@ export class MemoryConsolidator {
     const request = runtimeRequest(input, publicMessages, acceptedMemories, runDirectory, this.profile)
     const text: string[] = []
     const artifacts = new Map<RuntimeArtifactType, string[]>()
+    let resolveInitialArtifactsPersisted!: () => void
+    const initialArtifactsPersisted = new Promise<void>((resolve) => { resolveInitialArtifactsPersisted = resolve })
     let session: RuntimeSession | undefined
     let cancelWhenStarted = false
     let pendingSettledOutcome: Extract<RuntimeOutcome, { kind: 'settled' }> | undefined
@@ -159,9 +161,15 @@ export class MemoryConsolidator {
       try {
         this.runtime.cancel(startedSession)
       } catch (error) {
+        const diagnostic = `Dream Runtime late cancellation failed: ${errorMessage(error)}.\n`
         const chunks = artifacts.get('runtime-stderr') ?? []
-        chunks.push(`Dream Runtime late cancellation failed: ${errorMessage(error)}.\n`)
+        chunks.push(diagnostic)
         artifacts.set('runtime-stderr', chunks)
+        if (outcomeResolved) {
+          void initialArtifactsPersisted
+            .then(() => appendFile(path.join(runDirectory, 'runtime-stderr.log'), diagnostic, 'utf8'))
+            .catch(() => undefined)
+        }
       }
     }
     const rejectStart = (error: unknown): void => {
@@ -190,7 +198,11 @@ export class MemoryConsolidator {
       outcome = await outcomePromise
     } finally {
       clearTimeout(timeout)
-      await persistArtifacts(runDirectory, artifacts)
+      try {
+        await persistArtifacts(runDirectory, artifacts)
+      } finally {
+        resolveInitialArtifactsPersisted()
+      }
     }
     if (outcome.kind === 'error') throw outcome.error
 

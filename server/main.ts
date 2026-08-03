@@ -50,6 +50,7 @@ async function closeGracefully(signal: NodeJS.Signals, service: Server): Promise
   console.log(`${signal} received, stopping Sinapsis local service.`)
   schedulerLoop.stop()
   dreamScheduler?.stop()
+  await dreamRunService.shutdown()
   await leaseReaperLoop.stop()
   await coordinator.shutdown()
   const closeSse = app.locals.closeSse as (() => void) | undefined

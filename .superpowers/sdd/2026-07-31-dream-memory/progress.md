@@ -39,3 +39,19 @@ Task 3 config slice: complete (Dream runtime/model/timeout/candidate-limit defau
 Task 3: fix round 1/5 implemented (task mode replaced by read-only one-shot conversation mode; cross-channel Turn and unsafe runId rejected pre-start; constructor validates timeout and candidate bounds; 18/18 Runtime tests)
 Task 3 verification: focused 51/51; full suite 54 files and 532/532 tests; build and diff check passed
 Task 3: implementation complete; report written; ready for commit
+Task 3 commits: 3d574aa feat: consolidate memory candidates safely; 06708e8 fix: isolate dream runtime maintenance
+Task 3 reviewer: Maxwell (019fc30a-7273-7913-86d4-c242f95d0b70)
+Task 3: fix round 2/5 implemented (commits f6b2417, f16a873; adapter-enforced no-tools, one-shot close, nested turn validation, safer filtering, proposal dedupe, atomic candidate batches)
+Task 3 reviewer: Nash (019fc31d-bfee-7cb1-8aa8-e76a4816f460)
+Task 3: fix round 3/5 implemented (commit b1b9941; delayed-session cancellation diagnostics, isolated OpenCode config discovery, lowercase AWS credentials and arbitrary-home credential paths)
+Task 3 verification: focused 61/61; full suite 54 files and 548/548 tests; build and diff check passed
+Task 3/4 final reviewer: Aquinas (019fc52f-3e0a-7ce3-852c-2c26c185d1b9)
+Task 4: in review
+Task 4 base: b1b9941
+Task 4 incremental run queue: 0119e06 feat: queue incremental dream runs
+Task 4 daily scheduler/composition: 43fa610 feat: schedule daily dream maintenance
+Task 4 verification: focused 6 files and 114/114 tests; final full suite 56 files and 563/563 tests; build and diff check passed
+Task 3/4 review round 1: 4 P1, 3 P2 (lowercase AWS filtering, same-millisecond late source, restart recovery, late cancellation evidence, repeated DST time, stop/start generation race, shutdown drain)
+Task 3/4 review adjudication: restart recovery is explicitly Task 7 Step 3 and remains scheduled there; all other findings fixed in current round
+Task 3/4 fix round 1: source-completion fallback closes late-message gap; late cancel diagnostics persist; DST is once/day; scheduler generations isolate stale callbacks; shutdown drains maintenance
+Task 3/4 fix verification: focused 6 files and 118/118 tests; full suite 56 files and 568/568 tests; build and diff check passed

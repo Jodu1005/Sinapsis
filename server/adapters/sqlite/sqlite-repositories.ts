@@ -1133,19 +1133,16 @@ export class SqliteRepositories implements WorkspaceRepositories {
         WHERE messages.channel_id = ?
           AND messages.deleted_at IS NULL
           AND (channels.context_reset_at IS NULL OR messages.created_at > channels.context_reset_at)
-          AND (
-            ? IS NULL
-            OR messages.created_at > ?
-            OR (messages.created_at = ? AND messages.id > ?)
+          AND NOT EXISTS (
+            SELECT 1
+            FROM dream_run_sources completed_sources
+            JOIN dream_runs completed_runs ON completed_runs.id = completed_sources.dream_run_id
+            WHERE completed_sources.message_id = messages.id
+              AND completed_runs.scope_id = messages.channel_id
+              AND completed_runs.status = 'completed'
           )
         ORDER BY messages.created_at, messages.id
-      `).all(
-        input.channelId,
-        watermark?.toMessageCreatedAt ?? null,
-        watermark?.toMessageCreatedAt ?? null,
-        watermark?.toMessageCreatedAt ?? null,
-        watermark?.toMessageId ?? null,
-      ) as Array<{ id: string; created_at: string }>
+      `).all(input.channelId) as Array<{ id: string; created_at: string }>
       const last = rows.at(-1)
       const to = last ? { createdAt: last.created_at, id: last.id } : watermark
         ? { createdAt: watermark.toMessageCreatedAt, id: watermark.toMessageId }

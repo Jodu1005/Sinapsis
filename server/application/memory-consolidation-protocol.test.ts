@@ -111,6 +111,7 @@ describe('memory consolidation protocol', () => {
     'Set access_token=abcdefghijklmnopqrstuvwxyz1234567890.',
     'AWS_SECRET_ACCESS_KEY=abcdefghijklmnopqrstuvwxyz1234567890',
     'aws_secret_access_key = abcdefghijklmnopqrstuvwxyz1234567890',
+    'The leaked access key is akia1234567890abcdef.',
     'The bearer credential is eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c.',
     'Cookie: session_id=abcdefghijklmnopqrstuvwxyz1234567890',
     '.env contains DATABASE_URL=postgres://user:password@db.internal/app.',

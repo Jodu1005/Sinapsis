@@ -72,6 +72,23 @@ describe('DreamRunService', () => {
       turns: [],
     })
   })
+
+  it('drains queued maintenance before shutdown resolves and rejects later enqueues', async () => {
+    const first = deferred<MemoryCandidate[]>()
+    const fixture = createFixture({ results: [first.promise] })
+    fixture.repositories.sources.set('channel-1', [message('message-1', 'channel-1')])
+    const run = fixture.service.enqueue({ channelId: 'channel-1', trigger: 'scheduled' })
+    await vi.waitFor(() => expect(fixture.consolidator.inputs).toHaveLength(1))
+
+    const shutdown = fixture.service.shutdown()
+    const beforeCompletion = await Promise.race([shutdown.then(() => 'done' as const), Promise.resolve('pending' as const)])
+    expect(beforeCompletion).toBe('pending')
+
+    first.resolve([])
+    await shutdown
+    await expect(fixture.service.waitFor(run.id)).resolves.toMatchObject({ status: 'completed' })
+    expect(() => fixture.service.enqueue({ channelId: 'channel-2', trigger: 'manual' })).toThrow(/shutting down/)
+  })
 })
 
 function createFixture(options: { results?: Array<Promise<MemoryCandidate[]>> } = {}) {

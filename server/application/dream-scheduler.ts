@@ -15,6 +15,7 @@ export class DreamScheduler {
   private readonly trigger: () => void | Promise<void>
   private timer: ClockTimer | undefined
   private started = false
+  private generation = 0
 
   constructor(options: DreamSchedulerOptions) {
     const time = parseTime(options.time)
@@ -29,11 +30,13 @@ export class DreamScheduler {
   start(): void {
     if (this.started) return
     this.started = true
-    this.scheduleNext()
+    this.generation += 1
+    this.scheduleNext(this.generation)
   }
 
   stop(): void {
     this.started = false
+    this.generation += 1
     this.timer?.cancel()
     this.timer = undefined
   }
@@ -43,7 +46,7 @@ export class DreamScheduler {
     for (let dayOffset = 0; dayOffset < 3; dayOffset += 1) {
       const date = addCalendarDays(local.year, local.month, local.day, dayOffset)
       const exact = zonedInstants(date.year, date.month, date.day, this.hour, this.minute, this.timeZone)
-      const candidates = exact.length > 0 ? exact : [firstValidInstantAfter(
+      const candidates = exact.length > 0 ? [exact[0]!] : [firstValidInstantAfter(
         date.year, date.month, date.day, this.hour, this.minute, this.timeZone,
       )]
       const next = candidates.find((candidate) => candidate.getTime() > from.getTime())
@@ -52,8 +55,8 @@ export class DreamScheduler {
     throw new Error(`Unable to calculate the next Dream time in ${this.timeZone}.`)
   }
 
-  private scheduleNext(): void {
-    if (!this.started) return
+  private scheduleNext(generation: number): void {
+    if (!this.started || generation !== this.generation) return
     const now = this.clock.now()
     const next = this.nextRunAt(now)
     this.timer = this.clock.setTimeout(() => {
@@ -61,7 +64,7 @@ export class DreamScheduler {
       void Promise.resolve()
         .then(() => this.trigger())
         .catch(() => undefined)
-        .finally(() => this.scheduleNext())
+        .finally(() => this.scheduleNext(generation))
     }, Math.max(0, next.getTime() - now.getTime()))
   }
 }

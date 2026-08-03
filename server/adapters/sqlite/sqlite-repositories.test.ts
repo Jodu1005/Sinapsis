@@ -202,6 +202,31 @@ describe('SQLite workspace repositories', () => {
     expect(duplicate.id).toBe(incremental.id)
   })
 
+  it('includes an unprocessed message that arrives at the completed watermark millisecond', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const first = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'First fact.',
+    })
+    database!.database.prepare('UPDATE messages SET id = ?, created_at = ? WHERE id = ?')
+      .run('z-watermark', '2026-08-03T00:01:00.000Z', first.id)
+    const initial = repositories.createIncrementalDreamRun({ channelId: channel.id, trigger: 'manual' })
+    repositories.updateDreamRun(initial.id, {
+      status: 'completed', completedAt: '2026-08-03T01:00:00.000Z', candidateCount: 0,
+    })
+
+    const late = repositories.createMessage({
+      channelId: channel.id, senderType: 'agent', authorName: 'Ada', body: 'Late fact.',
+    })
+    database!.database.prepare('UPDATE messages SET id = ?, created_at = ? WHERE id = ?')
+      .run('a-late', '2026-08-03T00:01:00.000Z', late.id)
+
+    const incremental = repositories.createIncrementalDreamRun({ channelId: channel.id, trigger: 'scheduled' })
+
+    expect(incremental.id).not.toBe(initial.id)
+    expect(repositories.listDreamSourceMessages(incremental.id).map((message) => message.id)).toEqual(['a-late'])
+  })
+
   it('persists a Thread Summary with an ordered message watermark', async () => {
     const { repositories } = await createRepositories()
     const channel = createChannel(repositories)
