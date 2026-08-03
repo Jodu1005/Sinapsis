@@ -1158,6 +1158,26 @@ describe('local service API', () => {
     expect(repositories.getAgent(agent.id)?.responsibilities).toEqual(['前端界面与交互', '组件测试'])
   })
 
+  it('renames an existing Agent without changing its stable mention or exposing runtime secrets', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    repositories.createWorkspace({ name: 'Sinapsis' })
+    const agent = repositories.createAgent({
+      identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: ['typescript'],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: { API_TOKEN: 'secret' },
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/agents/${agent.id}/identity`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identity: '架构师' }),
+    })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ id: agent.id, identity: '架构师', mentionName: 'newton', env: ['API_TOKEN'] })
+    expect(repositories.getAgent(agent.id)).toMatchObject({ identity: '架构师', mentionName: 'newton' })
+  })
+
   it('archives a channel as read-only and restores it unless its name has been reused', async () => {
     const app = createApp()
     const repositories = app.locals.repositories as WorkspaceRepositories
