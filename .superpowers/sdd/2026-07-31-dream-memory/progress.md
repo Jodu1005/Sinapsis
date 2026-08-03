@@ -71,3 +71,17 @@ Task 5 scoped re-review: Jason, clean; 4 focused files and 100/100 tests
 Task 5: complete (commits 41086de..8ede4ca, review clean)
 Task 6: in progress
 Task 6 base: 8ede4ca
+Task 6 implementer: Arendt (019fc54e-6f64-7b22-8bbb-291a12a5cfd7)
+Task 6 actual dispatch base: f88fb0b
+Task 6 implementation: 8339b30 feat: add dream memory review center (59 files, 586 tests; build passed)
+Task 6 reviewer: Meitner (019fc559-d16f-78a0-bd4f-9b9f7ce16cd3)
+Task 6 browser QA: desktop clean; mobile layout non-overlapping; found stale run state and missing mobile navigation
+Task 6 fix round 1/5 in progress (4 P1, 2 P2: async run/SSE refresh, mobile navigation, reviewed values, complete source jump, tab request race, ARIA tabs)
+Task 6 fix round 1/5 implemented: 8032cb4 fix: complete dream review workflows (59 files, 595 tests; build passed)
+Task 6 scoped re-review: 1 P1 remains (failure notice retains stale running message; public failure lacks safe category)
+Task 6 fix round 2/5 in progress
+Task 6 fix round 2/5 implemented: e0a8cd4 fix: clarify dream failure status (59 files, 599 tests; build passed)
+Task 6 final scoped review: Meitner, clean; browser QA confirmed mobile navigation and completed no-op state
+Task 6: complete (commits f88fb0b..e0a8cd4, review clean)
+Task 7: in progress
+Task 7 base: e0a8cd4
