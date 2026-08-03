@@ -7,7 +7,7 @@ interface MentionMatch {
   end: number
 }
 
-const mentionLeftBoundary = '(^|[^A-Za-z0-9_])'
+const mentionLeftBoundary = '(^|[^@])'
 const mentionRightBoundary = '(?=$|[^A-Za-z0-9_/-])'
 const emailAddress = /[\p{L}\p{N}][\p{L}\p{N}._%+-]*@[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?(?:\.[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?)+/gu
 

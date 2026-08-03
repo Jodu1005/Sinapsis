@@ -341,16 +341,31 @@ export class ChannelTurnCoordinator {
       }
       const agents = memberAgents.filter((agent) => agent.status !== 'offline' && agent.status !== 'error')
       const initialParticipants = persistedParticipants.filter((participant) => participant.source !== 'handoff')
-      const candidates = initialParticipants.length > 0
+      let fallbackAgentId: string | null = null
+      let candidates = initialParticipants.length > 0
         ? initialParticipants.flatMap((participant) => {
             const agent = agents.find((candidate) => candidate.id === participant.agentId)
             return agent ? [{ agent, score: participant.matcherScore ?? 0 }] : []
           })
         : matchResponsibilities(message.body, agents, maxParticipationCandidates)
+      if (candidates.length === 0) {
+        const fallback = this.selectFallbackAgent(turn.channelId, agents)
+        if (fallback) {
+          fallbackAgentId = fallback.id
+          candidates = [{ agent: fallback, score: 0 }]
+        }
+      }
       const participants = candidates.map((candidate, index) => {
         const existing = existingParticipants.get(candidate.agent.id)
+        const fallback = !existing && candidate.agent.id === fallbackAgentId
         const participant = existing ?? this.writeTurnState(turn.id, () => this.repositories.createTurnParticipant({
           turnId: turn.id, agentId: candidate.agent.id, source: 'responsibility', rank: index + 1, matcherScore: candidate.score,
+          ...(fallback ? {
+            decision: 'speak' as const,
+            confidence: 1,
+            proposedAngle: 'Ensure the channel receives a reply.',
+            reason: 'channel_fallback',
+          } : {}),
         }))
         if (!existing) this.publish('conversation.participant_updated', 'turn_participant', participant.id)
         return { candidate, participant }
@@ -817,6 +832,20 @@ export class ChannelTurnCoordinator {
       remaining.delete(next.agent.id)
     }
     return ordered
+  }
+
+  private selectFallbackAgent(channelId: string, agents: Agent[]): Agent | undefined {
+    const recentMessages = this.repositories.getBootstrap().recentMessages
+    return agents.map((agent) => ({
+      agent,
+      queueAvailable: queueIsAvailable(this.queue.snapshot(agent.id)) && agent.status === 'idle',
+      lastSpokenAt: this.repositories.getLastAgentSpokenAt(channelId, agent.id)
+        ?? lastSpokenAtByAuthor(recentMessages, channelId, agent.identity),
+    })).sort((left, right) => (
+      Number(right.queueAvailable) - Number(left.queueAvailable)
+      || compareLastSpokenAt(left.lastSpokenAt, right.lastSpokenAt)
+      || left.agent.id.localeCompare(right.agent.id)
+    ))[0]?.agent
   }
 
   private async duplicateCheck(

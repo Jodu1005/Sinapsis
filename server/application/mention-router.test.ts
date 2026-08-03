@@ -93,6 +93,22 @@ describe('routeMentions', () => {
     })
   })
 
+  it('routes a known Agent when a Latin message touches the mention on the left', () => {
+    expect(routeMentions('hello@newton', [newton, clawd])).toEqual({
+      mode: 'direct',
+      targetAgentIds: [newton.id],
+      unknownMentions: [],
+    })
+  })
+
+  it('routes @all when a Latin message touches the mention on the left', () => {
+    expect(routeMentions('hello@all', [newton, clawd])).toEqual({
+      mode: 'all',
+      targetAgentIds: [],
+      unknownMentions: [],
+    })
+  })
+
   it('reports unknown mentions at the start of text or after punctuation', () => {
     expect(routeMentions('@Missing 请回答；然后看（@Other）。', [newton])).toEqual({
       mode: 'ordinary',

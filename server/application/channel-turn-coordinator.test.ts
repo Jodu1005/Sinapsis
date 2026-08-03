@@ -70,6 +70,32 @@ describe('ChannelTurnCoordinator', () => {
     ])
   })
 
+  it('guarantees one fallback reply when no responsibility matches', async () => {
+    const fixture = await createFixture()
+    const recentlySpoken = fixture.createAgent('Recently Spoken', ['backend'])
+    const fallback = fixture.createAgent('Fallback', ['frontend'])
+    fixture.setLastSpokenAt(recentlySpoken.id, '2026-08-03T00:00:00.000Z')
+    fixture.sessions.handle = async () => publicReply('fallback answer')
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('hello'))
+
+    expect(turn).toMatchObject({ mode: 'ordinary', status: 'completed', currentRound: 1 })
+    expect(fixture.sessions.calls).toHaveLength(1)
+    expect(fixture.sessions.calls[0]).toMatchObject({
+      agent: { id: fallback.id },
+      conversation: { kind: 'response' },
+    })
+    expect(fixture.repositories.listTurnParticipants(turn.id)).toEqual([
+      expect.objectContaining({
+        agentId: fallback.id,
+        source: 'responsibility',
+        decision: 'speak',
+        status: 'spoken',
+        reason: 'channel_fallback',
+      }),
+    ])
+  })
+
   it('runs multiple explicit mentions in parallel and persists replies in mention order', async () => {
     const fixture = await createFixture()
     const alpha = fixture.createAgent('Alpha', ['shared topic'])
