@@ -202,11 +202,57 @@ describe('Dream Memory lifecycle', () => {
     const app = createApp({ databasePath, dreamRuntime })
     const repositories = app.locals.repositories as WorkspaceRepositories
     const { alphaId } = seedChannels(repositories, dataDirectory)
-    repositories.createMessage({
+    const publicAgent = repositories.createAgent({
+      identity: 'Dream Public Agent',
+      mentionName: 'dream-public-agent',
+      runtime: 'opencode',
+      capabilityTags: [],
+      responsibilities: [],
+      maxConcurrentTasks: 1,
+      command: 'fake-conversation-runtime',
+      args: [],
+      model: '',
+      env: {},
+    })
+    const source = repositories.createMessage({
       channelId: alphaId,
       senderType: 'human',
       authorName: 'You',
       body: 'The team confirmed durable release practices.',
+    })
+    const turn = repositories.createConversationTurn({
+      channelId: alphaId,
+      triggerMessageId: source.id,
+      threadRootMessageId: null,
+      mode: 'direct',
+      maxRounds: 3,
+    })
+    const invocation = repositories.createAgentInvocation({
+      turnId: turn.id,
+      agentId: publicAgent.id,
+      kind: 'response',
+      priority: 'human_direct',
+      round: 1,
+      idempotencyKey: `${turn.id}:response`,
+      sourceInvocationId: null,
+      status: 'running',
+    })
+    const publicReply = 'The published Turn confirms Chinese release notes.'
+    repositories.settleConversationInvocation({
+      invocationId: invocation.id,
+      recoveryOwnerId: null,
+      resultJson: JSON.stringify({
+        text: 'PRIVATE_RAW_RUNTIME_TEXT',
+        parsed: { reply: publicReply, handoffTo: [], hiddenDeliberation: 'PRIVATE_DELIBERATION' },
+        runtimeStderr: 'PRIVATE_STDERR',
+        artifacts: ['PRIVATE_ARTIFACT'],
+      }),
+      publicReply: { authorName: publicAgent.identity, body: publicReply },
+      occurredAt: new Date('2026-08-03T00:00:01.000Z'),
+    })
+    repositories.updateConversationTurn(turn.id, {
+      status: 'completed',
+      completedAt: '2026-08-03T00:00:01.000Z',
     })
     const server = await startHttpTestServer(app)
 
@@ -223,6 +269,15 @@ describe('Dream Memory lifecycle', () => {
         status: 'completed', candidateCount: 3,
       })
       expect(dreamRuntime.requests).toHaveLength(1)
+      const consolidationPrompt = JSON.parse(dreamRuntime.requests[0]!.description) as {
+        turnPublicResults: Array<{ turnId: string; invocationId: string; reply: string }>
+      }
+      expect(consolidationPrompt.turnPublicResults).toEqual([
+        { turnId: turn.id, invocationId: invocation.id, reply: publicReply },
+      ])
+      for (const privateValue of [
+        'PRIVATE_RAW_RUNTIME_TEXT', 'PRIVATE_DELIBERATION', 'PRIVATE_STDERR', 'PRIVATE_ARTIFACT',
+      ]) expect(dreamRuntime.requests[0]!.description).not.toContain(privateValue)
 
       const pendingResponse = await fetch(`${server.baseUrl}/api/memory-candidates?status=pending`)
       expect(pendingResponse.status).toBe(200)

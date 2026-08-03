@@ -336,6 +336,53 @@ describe('SQLite workspace repositories', () => {
     expect(duplicate.id).toBe(incremental.id)
   })
 
+  it('lists only Turn details whose channel and Thread provenance match the fixed Dream sources', async () => {
+    const { repositories } = await createRepositories()
+    const alpha = createChannel(repositories)
+    const beta = repositories.createChannel({ name: 'dream-beta' })
+    const alphaRoot = repositories.createMessage({
+      channelId: alpha.id, senderType: 'human', authorName: 'Jodu', body: 'Alpha root.',
+    })
+    const alphaTrigger = repositories.createMessage({
+      channelId: alpha.id, threadRootMessageId: alphaRoot.id,
+      senderType: 'human', authorName: 'Jodu', body: 'Alpha question.',
+    })
+    const alphaTurn = repositories.createConversationTurn({
+      channelId: alpha.id,
+      triggerMessageId: alphaTrigger.id,
+      threadRootMessageId: alphaRoot.id,
+      mode: 'direct',
+      maxRounds: 3,
+    })
+    const betaTrigger = repositories.createMessage({
+      channelId: beta.id, senderType: 'human', authorName: 'Jodu', body: 'Beta question.',
+    })
+    const betaTurn = repositories.createConversationTurn({
+      channelId: beta.id,
+      triggerMessageId: betaTrigger.id,
+      threadRootMessageId: null,
+      mode: 'direct',
+      maxRounds: 3,
+    })
+    const run = repositories.createIncrementalDreamRun({ channelId: alpha.id, trigger: 'manual' })
+
+    expect(repositories.listDreamSourceTurnDetails(run.id).map((details) => details.turn.id)).toEqual([alphaTurn.id])
+
+    database!.database.prepare(`
+      UPDATE conversation_turns SET thread_root_message_id = NULL WHERE id = ?
+    `).run(alphaTurn.id)
+    expect(repositories.listDreamSourceTurnDetails(run.id)).toEqual([])
+
+    database!.database.prepare(`
+      UPDATE conversation_turns SET thread_root_message_id = ? WHERE id = ?
+    `).run(alphaRoot.id, alphaTurn.id)
+    database!.database.prepare(`
+      UPDATE dream_run_sources SET turn_id = ? WHERE dream_run_id = ? AND message_id = ?
+    `).run(betaTurn.id, run.id, alphaTrigger.id)
+
+    expect(repositories.listDreamSourceTurnDetails(run.id)).toEqual([])
+  })
+
   it('includes an unprocessed message that arrives at the completed watermark millisecond', async () => {
     const { repositories } = await createRepositories()
     const channel = createChannel(repositories)

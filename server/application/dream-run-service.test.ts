@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { AgentInvocation, ConversationTurn } from '../domain/conversation'
 import type { MemoryCandidate, MemoryRecord, DreamRun, DreamRunPatch } from '../domain/memory'
 import type { Message } from '../domain/message'
 import type { Channel } from '../domain/workspace'
+import type { ConversationTurnDetails } from '../ports/repositories'
 import type { MemoryConsolidationInput } from './memory-consolidator'
 import { DreamRunService } from './dream-run-service'
 
@@ -73,6 +75,19 @@ describe('DreamRunService', () => {
     })
   })
 
+  it('passes the Conversation Turn details fixed to the Dream source snapshot', async () => {
+    const fixture = createFixture()
+    const source = message('message-1', 'channel-1')
+    const sourceTurn = turnDetails('turn-1', source)
+    fixture.repositories.sources.set('channel-1', [source])
+    fixture.repositories.sourceTurns.set('channel-1', [sourceTurn])
+
+    const run = fixture.service.enqueue({ channelId: 'channel-1', trigger: 'manual' })
+    await fixture.service.waitFor(run.id)
+
+    expect(fixture.consolidator.inputs[0]?.turns).toEqual([sourceTurn])
+  })
+
   it('drains queued maintenance before shutdown resolves and rejects later enqueues', async () => {
     const first = deferred<MemoryCandidate[]>()
     const fixture = createFixture({ results: [first.promise] })
@@ -116,6 +131,7 @@ class FakeDreamRepositories {
   readonly channels = [channel('channel-1', 'alpha'), channel('channel-2', 'beta')]
   readonly runs = new Map<string, DreamRun>()
   readonly sources = new Map<string, Message[]>()
+  readonly sourceTurns = new Map<string, ConversationTurnDetails[]>()
   memories: MemoryRecord[] = []
   private nextRun = 1
 
@@ -158,6 +174,11 @@ class FakeDreamRepositories {
     return run ? this.sources.get(run.scopeId) ?? [] : []
   }
 
+  listDreamSourceTurnDetails(runId: string): ConversationTurnDetails[] {
+    const run = this.runs.get(runId)
+    return run ? this.sourceTurns.get(run.scopeId) ?? [] : []
+  }
+
   listAcceptedMemories(scope: 'global' | 'channel', channelId?: string): MemoryRecord[] {
     return this.memories.filter((item) => item.scope === scope && (scope === 'global' || item.channelId === channelId))
   }
@@ -176,6 +197,39 @@ function message(id: string, channelId: string): Message {
     authorName: 'Jodu', body: `Message ${id}`, createdAt: `2026-08-03T00:00:0${id.endsWith('1') ? '1' : '2'}.000Z`,
     updatedAt: '2026-08-03T00:00:03.000Z', deletedAt: null,
   }
+}
+
+function turnDetails(id: string, source: Message): ConversationTurnDetails {
+  const turn: ConversationTurn = {
+    id,
+    channelId: source.channelId,
+    triggerMessageId: source.id,
+    threadRootMessageId: source.threadRootMessageId ?? null,
+    mode: 'direct',
+    status: 'completed',
+    currentRound: 1,
+    maxRounds: 3,
+    createdAt: source.createdAt,
+    updatedAt: source.updatedAt,
+    completedAt: source.updatedAt,
+  }
+  const invocation: AgentInvocation = {
+    id: 'invocation-1',
+    turnId: id,
+    agentId: 'agent-1',
+    kind: 'response',
+    priority: 'human_direct',
+    round: 1,
+    status: 'settled',
+    idempotencyKey: `${id}:response`,
+    sourceInvocationId: null,
+    queuedAt: source.createdAt,
+    startedAt: source.createdAt,
+    completedAt: source.updatedAt,
+    errorCode: null,
+    resultJson: JSON.stringify({ parsed: { reply: 'Public reply.', handoffTo: [] } }),
+  }
+  return { turn, participants: [], invocations: [invocation], handoffs: [] }
 }
 
 function memory(scope: 'global' | 'channel', channelId: string | null): MemoryRecord {

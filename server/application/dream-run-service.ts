@@ -1,6 +1,7 @@
 import type { DreamRun, DreamRunPatch, MemoryCandidate, MemoryRecord } from '../domain/memory'
 import type { Message } from '../domain/message'
 import type { Channel } from '../domain/workspace'
+import type { ConversationTurnDetails } from '../ports/repositories'
 import type { MemoryConsolidationInput } from './memory-consolidator'
 
 export interface DreamRunRepositories {
@@ -10,6 +11,7 @@ export interface DreamRunRepositories {
   getChannel(channelId: string): Channel | undefined
   getBootstrap(): { channels: Channel[] }
   listDreamSourceMessages(runId: string): Message[]
+  listDreamSourceTurnDetails(runId: string): ConversationTurnDetails[]
   listAcceptedMemories(scope: 'global' | 'channel', channelId?: string): MemoryRecord[]
 }
 
@@ -122,13 +124,14 @@ export class DreamRunService {
       const channel = this.repositories.getChannel(queued.scopeId)
       if (!channel || channel.archivedAt) throw new Error(`Dream channel ${queued.scopeId} is unavailable.`)
       const messages = this.repositories.listDreamSourceMessages(runId)
+      const turns = this.repositories.listDreamSourceTurnDetails(runId)
       const candidates = messages.length === 0
         ? []
         : await this.consolidator.consolidate({
             runId,
             channel,
             messages,
-            turns: [],
+            turns,
             acceptedMemories: [
               ...this.repositories.listAcceptedMemories('global'),
               ...this.repositories.listAcceptedMemories('channel', channel.id),

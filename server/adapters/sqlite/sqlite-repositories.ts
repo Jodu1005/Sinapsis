@@ -65,6 +65,7 @@ import type {
   ActiveConversationTurnProjection,
   CancelConversationTurnInput,
   CancelConversationTurnResult,
+  ConversationTurnDetails,
   ConversationTurnClaimResult,
   ExpiredLease,
   LeaseRecovery,
@@ -1574,6 +1575,25 @@ export class SqliteRepositories implements WorkspaceRepositories {
       ORDER BY messages.created_at, messages.id
     `).all(runId) as unknown as MessageRow[]
     return rows.map(mapMessage)
+  }
+
+  listDreamSourceTurnDetails(runId: string): ConversationTurnDetails[] {
+    const rows = this.sqlite.database.prepare(`
+      SELECT turns.id
+      FROM dream_run_sources AS sources
+      JOIN dream_runs AS runs ON runs.id = sources.dream_run_id
+      JOIN messages ON messages.id = sources.message_id
+      JOIN conversation_turns AS turns
+        ON turns.id = sources.turn_id
+        AND turns.trigger_message_id = sources.message_id
+        AND turns.channel_id = runs.scope_id
+        AND messages.channel_id = runs.scope_id
+        AND turns.thread_root_message_id IS messages.thread_root_id
+      WHERE sources.dream_run_id = ?
+      GROUP BY turns.id
+      ORDER BY MIN(messages.created_at), MIN(messages.id), turns.id
+    `).all(runId) as Array<{ id: string }>
+    return rows.map((row) => this.getConversationTurnDetails(row.id)!)
   }
 
   getThreadSummary(channelId: string, threadRootMessageId: string): ThreadSummary | undefined {

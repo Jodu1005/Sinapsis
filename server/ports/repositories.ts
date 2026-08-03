@@ -204,6 +204,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   updateMemory(memoryId: string, content: string): MemoryRecord
   archiveMemory(memoryId: string, occurredAt: Date): MemoryRecord
   listDreamSourceMessages(runId: string): Message[]
+  listDreamSourceTurnDetails(runId: string): ConversationTurnDetails[]
   getThreadSummary(channelId: string, threadRootMessageId: string): ThreadSummary | undefined
   upsertThreadSummary(input: UpsertThreadSummaryInput): ThreadSummary
   createConversationTurn(input: CreateConversationTurnInput): ConversationTurn
