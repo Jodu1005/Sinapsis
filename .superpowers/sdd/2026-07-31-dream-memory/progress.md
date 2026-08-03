@@ -85,3 +85,18 @@ Task 6 final scoped review: Meitner, clean; browser QA confirmed mobile navigati
 Task 6: complete (commits f88fb0b..e0a8cd4, review clean)
 Task 7: in progress
 Task 7 base: e0a8cd4
+Task 7 implementer: Epicurus (019fc575-8477-7cd3-ac85-4962ce9cae64)
+Task 7 actual dispatch base: dc859dd
+Task 7 implementation: 5815c5c test: verify dream memory lifecycle (60 files, 601 tests; build passed)
+Task 7 reviewer: Linnaeus (019fc581-25f1-7990-b67a-d756d34e2890)
+Task 7 fix round 1/5 in progress (1 P1, 2 P2, 1 P3: idempotent restart replay with retained Candidate, real v23->v24 upgrade coverage, real HTTP lifecycle coverage, no-op documentation accuracy)
+Task 7 fix round 1/5 implemented: 2ca2018 fix: make dream recovery replay idempotent (60 files, 603 tests; build passed)
+Task 7 scoped re-review: 1 P1, 1 P3 remain (superseded Candidate may swallow a valid replay; no-op documentation condition too narrow)
+Task 7 fix round 2/5 in progress
+Task 7 fix round 2/5 implemented: 56ea835 fix: restore recoverable dream candidates (60 files, 605 tests; build passed)
+Task 7 scoped re-review round 2: 1 P2 remains (a second recovery-isolation cycle retains the first audit timestamp and blocks a later valid reactivation)
+Task 7 fix round 3/5 in progress
+Task 7 fix round 3/5 implemented: 6d481a2 fix: refresh dream recovery audit timing (60 files, 606 tests; build passed)
+Task 7 final scoped review: Linnaeus, clean; 3 focused files and 63/63 tests
+Task 7: complete (commits dc859dd..6d481a2, review clean)
+Final branch review: in progress (baseline 6ff7df0)
