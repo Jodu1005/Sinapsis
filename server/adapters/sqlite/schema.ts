@@ -787,6 +787,22 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(23, new Date().toISOString())
     }
 
+    const twentyFourthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 24').get()
+    if (!twentyFourthMigration) {
+      database.exec(`
+        CREATE TABLE dream_recovery_audit (
+          id TEXT PRIMARY KEY,
+          entity_type TEXT NOT NULL CHECK(entity_type = 'memory_candidate'),
+          entity_id TEXT NOT NULL,
+          error TEXT NOT NULL CHECK(error = 'invalid_candidate_sources'),
+          created_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX dream_recovery_audit_entity_error_unique_idx
+          ON dream_recovery_audit(entity_type, entity_id, error);
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(24, new Date().toISOString())
+    }
+
     database.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS conversation_sessions_grain_unique_idx
         ON conversation_sessions(channel_id, COALESCE(thread_root_message_id, ''), agent_id);

@@ -1225,6 +1225,61 @@ export class SqliteRepositories implements WorkspaceRepositories {
     }
   }
 
+  recoverDreamMemory(occurredAt: Date): { failedRunIds: string[]; invalidCandidateIds: string[] } {
+    return this.inTransaction(() => {
+      const database = this.sqlite.database
+      const recoveredAt = occurredAt.toISOString()
+      const failedRunIds = (database.prepare(`
+        SELECT id FROM dream_runs WHERE status = 'running' ORDER BY created_at, id
+      `).all() as Array<{ id: string }>).map((row) => row.id)
+      database.prepare(`
+        UPDATE dream_runs
+        SET status = 'failed', error = 'service_restarted', completed_at = ?
+        WHERE status = 'running'
+      `).run(recoveredAt)
+
+      const invalidCandidateIds = (database.prepare(`
+        SELECT candidates.id
+        FROM memory_candidates AS candidates
+        JOIN dream_runs AS runs ON runs.id = candidates.dream_run_id
+        WHERE candidates.status = 'pending'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM memory_candidate_sources AS sources
+            JOIN messages ON messages.id = sources.message_id
+            WHERE sources.candidate_id = candidates.id
+              AND messages.deleted_at IS NULL
+              AND messages.channel_id = runs.scope_id
+          )
+        ORDER BY candidates.created_at, candidates.id
+      `).all() as Array<{ id: string }>).map((row) => row.id)
+      const quarantineCandidate = database.prepare(`
+        UPDATE memory_candidates
+        SET status = 'superseded', reviewed_at = ?
+        WHERE id = ? AND status = 'pending'
+      `)
+      const recordAudit = database.prepare(`
+        INSERT OR IGNORE INTO dream_recovery_audit (
+          id, entity_type, entity_id, error, created_at
+        ) VALUES (?, 'memory_candidate', ?, 'invalid_candidate_sources', ?)
+      `)
+      for (const candidateId of invalidCandidateIds) {
+        quarantineCandidate.run(recoveredAt, candidateId)
+        recordAudit.run(randomUUID(), candidateId, recoveredAt)
+      }
+
+      for (const runId of failedRunIds) {
+        this.sqlite.afterCommit(() => this.publisher.publish(event('dream.run_updated', 'dream_run', runId, recoveredAt)))
+      }
+      for (const candidateId of invalidCandidateIds) {
+        this.sqlite.afterCommit(() => this.publisher.publish(event(
+          'memory.candidate_reviewed', 'memory_candidate', candidateId, recoveredAt,
+        )))
+      }
+      return { failedRunIds, invalidCandidateIds }
+    })
+  }
+
   createMemoryCandidate(input: CreateMemoryCandidateInput): MemoryCandidate {
     return this.createMemoryCandidates([input])[0]!
   }

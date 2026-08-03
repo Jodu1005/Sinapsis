@@ -16,6 +16,7 @@ await ensureDataDirectory(config.dataDir)
 const app = createApp({ databasePath: path.join(config.dataDir, 'sinapsis.sqlite') })
 const repositories = app.locals.repositories as WorkspaceRepositories
 repositories.recoverOrphanedAgents(new Date())
+repositories.recoverDreamMemory(new Date())
 const conversationCoordinator = app.locals.conversationCoordinator as { recover?: () => Promise<void> }
 await conversationCoordinator.recover?.()
 const scheduler = app.locals.scheduler as TaskScheduler

@@ -392,7 +392,15 @@ Raft 的“待办、进行中、审查中、完成、关闭”是灵感来源；
 
 Handoff 的结构化路由只保存在 Turn Handoff 记录中，指定下一个 Agent 和问题；频道里只展示该 Agent 的普通公开回复，不暴露内部 JSON、私有提示词或 Runtime Artifact。Turn 的内部阶段为筛选、判断、回复和交接；用户界面将其投影为筛选、判断、排队、准备、交接和最终回复，终态为完成、部分完成、取消或失败。
 
-Dream Memory 不属于这一回合实现，仍由 `2026-07-31-dream-memory.md` 的后续计划负责；其数据库变更从 migration 19 开始。
+## Dream Memory 与分层上下文
+
+Dream 是独立于频道 Agent 对话队列的后台维护流程。定时调度由 `SINAPSIS_DREAM_ENABLED` 开关控制，默认每天 `03:00` 按 `SINAPSIS_DREAM_TIME_ZONE=Asia/Shanghai` 执行；`SINAPSIS_DREAM_TIME` 可修改本地时间。提取 Runtime、模型、超时、单次候选上限和维护并发分别由 `SINAPSIS_DREAM_RUNTIME`、`SINAPSIS_DREAM_MODEL`、`SINAPSIS_DREAM_TIMEOUT_MS`、`SINAPSIS_MAX_DREAM_CANDIDATES_PER_RUN` 与 `SINAPSIS_DREAM_MAINTENANCE_CONCURRENCY` 配置。自动运行和 Dream Center 的手动单频道/全部活跃频道运行都进入同一条独立维护队列，不占用频道 Agent 的会话或并发槽；默认并发为 1，以频道为隔离边界，单频道失败不阻断其他频道。
+
+每个 Dream Run 在创建时固定来源消息集合以及 `from/to` 边界。成功水位只读取 `status=completed` 的 `to` 边界；`queued`、`running`、`failed` 和 `cancelled` 都不会推进水位。相同频道和 `to` 水位由唯一索引去重，因此重复手动触发不会再次调用 Runtime 或生成 Candidate。没有新消息时会快速完成且候选数为 0。Runtime 只能读取公开、未删除、未被 Context Reset 排除的频道消息、公开 Turn 结果和已接受 Memory；原始 Runtime Artifact、私有 Prompt、凭据、临时状态、一次性错误与未确认猜测不能进入 Candidate。
+
+提取结果先写入 `MemoryCandidate`，状态为 `pending`，绝不直接进入 Agent Prompt。Dream Center 展示待审核 badge、Run 状态、候选来源和审核动作；人可以在接受前修改内容，并选择 Global 或 Channel scope，也可以忽略 Candidate。Global Memory 对所有频道生效，Channel Memory 仅对目标频道生效；Thread 层不创建独立 Memory scope，而由持久化 Thread Summary 表达。Agent 冷启动 Prompt 按“系统与 Agent 职责 -> 已确认 Global Memory -> 已确认 Channel Memory -> Thread Summary -> Summary 水位之后的近期公开消息 -> 当前调用指令”组装，各历史层都标记为不可信参考。Candidate 未接受前不注入；Memory 编辑后下一次冷启动立即读取新内容；`DELETE /api/memories/:memoryId` 仅将 Memory 软归档，保留 Candidate、来源与审核链，归档内容从后续 Prompt 排除。
+
+SQLite 持久化 Dream Run、水位来源、Candidate、Memory、来源映射与 Thread Summary。服务启动监听前在一个 `BEGIN IMMEDIATE` 事务中执行 Dream 恢复：所有遗留 `running` Run 原子改为 `failed`，`error=service_restarted` 且写入 `completedAt`，但保留边界和 `dream_run_sources`，因此成功水位不前移，下一次 enqueue 会复用同一个 Run 并重跑同一输入。恢复同时只隔离仍为 `pending` 且不存在任何未删除、同频道有效来源的 Candidate，将其标记为 `superseded`；其他有效 Candidate、Memory 和来源记录不物理删除。每个被隔离的 Candidate 在 `dream_recovery_audit` 中写入稳定错误码 `invalid_candidate_sources` 和实体 ID，不记录消息或 Candidate 内容。
 
 ## 上线前的人工演练
 

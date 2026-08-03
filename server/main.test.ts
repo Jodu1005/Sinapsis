@@ -139,6 +139,122 @@ describe('local service shutdown', () => {
       reader.close()
     }
   })
+
+  it('atomically fails interrupted Dream runs and quarantines only candidates without a valid source', async () => {
+    const port = await reservePort()
+    temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-dream-recovery-'))
+    const databasePath = path.join(temporaryDirectory, 'sinapsis.sqlite')
+    const seeded = createSqliteDatabase(databasePath)
+    const repositories = new SqliteRepositories(seeded, new NoopPublisher())
+    const workspace = repositories.createWorkspace({ name: 'Dream recovery' })
+    repositories.createRepository({
+      workspaceId: workspace.id,
+      name: 'dream-recovery',
+      path: temporaryDirectory,
+      currentBranch: 'main',
+      defaultBranch: 'main',
+      isClean: true,
+    })
+    const channel = repositories.createChannel({ name: 'dream-recovery' })
+    const completedSource = repositories.createMessage({
+      channelId: channel.id,
+      senderType: 'human',
+      authorName: 'You',
+      body: 'Completed watermark source',
+    })
+    const completedRun = repositories.createIncrementalDreamRun({ channelId: channel.id, trigger: 'manual' })
+    repositories.updateDreamRun(completedRun.id, {
+      status: 'completed',
+      startedAt: '2026-08-03T00:00:00.000Z',
+      completedAt: '2026-08-03T00:00:01.000Z',
+    })
+    const interruptedSource = repositories.createMessage({
+      channelId: channel.id,
+      senderType: 'human',
+      authorName: 'You',
+      body: 'Interrupted source with private content that must not enter audit logs',
+    })
+    const interruptedRun = repositories.createIncrementalDreamRun({ channelId: channel.id, trigger: 'manual' })
+    repositories.updateDreamRun(interruptedRun.id, {
+      status: 'running',
+      startedAt: '2026-08-03T00:00:02.000Z',
+    })
+    const validCandidate = repositories.createMemoryCandidate({
+      dreamRunId: interruptedRun.id,
+      proposedScope: 'channel',
+      channelId: channel.id,
+      kind: 'fact',
+      proposedContent: 'Valid pending memory',
+      rationale: 'Backed by a retained source.',
+      confidence: 0.9,
+      importance: 0.8,
+      sourceMessageIds: [interruptedSource.id],
+    })
+    const invalidCandidate = repositories.createMemoryCandidate({
+      dreamRunId: interruptedRun.id,
+      proposedScope: 'channel',
+      channelId: channel.id,
+      kind: 'fact',
+      proposedContent: 'Private candidate content must not enter audit logs',
+      rationale: 'This row has no source.',
+      confidence: 0.9,
+      importance: 0.8,
+      sourceMessageIds: [],
+    })
+    seeded.close()
+
+    child = spawn(path.join(process.cwd(), 'node_modules/.bin/tsx'), ['server/main.ts'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        SINAPSIS_PORT: String(port),
+        SINAPSIS_DATA_DIR: temporaryDirectory,
+        SINAPSIS_DREAM_ENABLED: 'false',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    await waitForOutput(child.stdout!, 'Sinapsis local service listening')
+
+    const reader = new DatabaseSync(databasePath)
+    try {
+      const recovered = reader.prepare(`
+        SELECT status, error, completed_at FROM dream_runs WHERE id = ?
+      `).get(interruptedRun.id) as { status: string; error: string | null; completed_at: string | null }
+      expect(recovered).toEqual({
+        status: 'failed',
+        error: 'service_restarted',
+        completed_at: expect.any(String),
+      })
+      expect(reader.prepare(`
+        SELECT scope_id, to_message_created_at, to_message_id
+        FROM dream_runs
+        WHERE scope_id = ? AND status = 'completed' AND to_message_id IS NOT NULL
+        ORDER BY to_message_created_at DESC, to_message_id DESC
+        LIMIT 1
+      `).get(channel.id)).toEqual({
+        scope_id: channel.id,
+        to_message_created_at: completedSource.createdAt,
+        to_message_id: completedSource.id,
+      })
+      expect(reader.prepare(`
+        SELECT status, reviewed_at FROM memory_candidates WHERE id = ?
+      `).get(validCandidate.id)).toEqual({ status: 'pending', reviewed_at: null })
+      expect(reader.prepare(`
+        SELECT status, reviewed_at FROM memory_candidates WHERE id = ?
+      `).get(invalidCandidate.id)).toEqual({ status: 'superseded', reviewed_at: expect.any(String) })
+
+      const auditRows = reader.prepare(`
+        SELECT entity_type, entity_id, error FROM dream_recovery_audit ORDER BY entity_type, entity_id
+      `).all() as Array<{ entity_type: string; entity_id: string; error: string }>
+      expect(auditRows).toEqual([
+        { entity_type: 'memory_candidate', entity_id: invalidCandidate.id, error: 'invalid_candidate_sources' },
+      ])
+      expect(JSON.stringify(auditRows)).not.toContain('Private candidate content')
+      expect(JSON.stringify(auditRows)).not.toContain('Interrupted source')
+    } finally {
+      reader.close()
+    }
+  })
 })
 
 class NoopPublisher implements DomainEventPublisher {

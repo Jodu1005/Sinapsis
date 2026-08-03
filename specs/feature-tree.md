@@ -67,12 +67,21 @@
 |   |-- F6.4 接受、退回与人工处理
 |   `-- F6.5 将合并与推送保留为独立确认动作
 |
-`-- F7 后续能力
-    |-- F7.1 多 Agent 频道发布订阅
-    |-- F7.2 Agent 私聊、搜索、附件与未读通知
-    |-- F7.3 任务优先级、插队和多并发席位
-    |-- F7.4 多机 Worker、账号与云端协调
-    `-- F7.5 Runtime / Adapter SDK
+|-- F7 Dream Memory 与上下文
+|   |-- F7.1 可配置定时 Dream 与手动单频道/全部频道运行
+|   |-- F7.2 独立维护队列、按频道隔离和 completed-only 水位
+|   |-- F7.3 Candidate 来源追溯、人工编辑 scope/content、接受与忽略
+|   |-- F7.4 Global Memory、Channel Memory 与 Thread Summary 分层注入
+|   |-- F7.5 Memory 编辑即时生效、软归档及来源审计保留
+|   |-- F7.6 Dream Center 的待审核 badge、Run 与来源详情
+|   `-- F7.7 重启失败恢复、同水位重跑、非法 Candidate 隔离审计
+|
+`-- F8 后续能力
+    |-- F8.1 多 Agent 频道发布订阅
+    |-- F8.2 Agent 私聊、搜索、附件与未读通知
+    |-- F8.3 任务优先级、插队和多并发席位
+    |-- F8.4 多机 Worker、账号与云端协调
+    `-- F8.5 Runtime / Adapter SDK
 ```
 
 ## 第一版交付切片
@@ -92,6 +101,7 @@
 | 多任务不污染同一仓库 | F5.1 | 任务分支与独立 worktree 路径 |
 | 对正在运行的 Agent 中途纠偏 | F1.4、F5.4 | 消息进入正确任务会话且被记录 |
 | 可审查且不自动合并 | F6 | diff、测试输出、提交、人工决定与独立合并动作 |
+| 从公开对话沉淀可控长期上下文 | F7 | Dream Run、水位、Candidate 来源审核、分层冷启动 Prompt 与软归档 |
 
 ## 不变量
 
@@ -103,11 +113,16 @@
 - Runtime 失败不得静默吞掉任务；重试、人工处理和状态变化必须留下事件。
 - 接受不等于合并；`git push`、合并和仓外副作用必须有独立人工确认。
 - Conversation Turn 的 Runtime 原始 Artifact、私有 Prompt 和结构化路由不得进入频道或公开 Turn 详情。
+- Dream Candidate 在人工接受前不得进入任何 Agent Prompt；Runtime Artifact、敏感内容和无有效来源 Candidate 不得成为可接受 Memory。
+- Dream 成功水位只由 `completed` Run 推进；失败与重启恢复必须保留固定来源集合，使同一输入可重跑。
+- Agent 冷启动上下文按 Global Memory、Channel Memory、Thread Summary、近期公开消息的层级注入；Global 跨频道，Channel 只作用于目标频道，Thread Summary 只作用于对应 Thread。
+- Memory 删除是软归档，不物理删除 Candidate、来源或审核历史。
 
 ## 第一版验证状态
 
 - F0-F6 已实现并由服务端、前端或完整集成测试覆盖。
 - 本机流程测试验证：FIFO 领取、同仓不同 worktree、忙碌 Agent 输入、任务分支提交、人工验收与不自动合并。
-- F1.5 验证普通筛选与去重、第二轮 Handoff、持久化会话恢复、resume 失败后的 timeline/Thread 冷启动、单提及与多提及并行失败隔离、Turn 级原子领取、取消发布栅栏和 Artifact 隔离；migration 18 归属 Conversation Turn，Dream Memory 仍在下一份计划并从 migration 19 开始。
+- F1.5 验证普通筛选与去重、第二轮 Handoff、持久化会话恢复、resume 失败后的 timeline/Thread 冷启动、单提及与多提及并行失败隔离、Turn 级原子领取、取消发布栅栏和 Artifact 隔离；migration 18 归属 Conversation Turn。
+- F7 已验证手动频道隔离、独立维护队列与同水位幂等、Candidate 审核门、Global/Channel/Thread 分层 Prompt、Memory 编辑与软归档、SQLite 重建持久化、敏感内容和 Artifact 隔离，以及 `service_restarted` 重启恢复；Dream 数据从 migration 19 开始，migration 24 增加无有效来源 Candidate 的恢复审计。
 - 浏览器检查验证：创建工作空间与仓库、添加 Agent、频道消息、任务输入、证据读取、接受任务，以及 700px 窄屏下抽屉关闭时消息输入可用。
-- F7 保持后续能力，不属于当前交付。
+- F8 保持后续能力，不属于当前交付。

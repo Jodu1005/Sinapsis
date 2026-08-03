@@ -190,6 +190,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   getDreamRun(runId: string): DreamRun | undefined
   listDreamRuns(filter?: DreamRunFilter): DreamRun[]
   getDreamWatermark(channelId: string): DreamWatermark | undefined
+  recoverDreamMemory(occurredAt: Date): { failedRunIds: string[]; invalidCandidateIds: string[] }
   createMemoryCandidate(input: CreateMemoryCandidateInput): MemoryCandidate
   createMemoryCandidates(inputs: CreateMemoryCandidateInput[]): MemoryCandidate[]
   getMemoryCandidate(candidateId: string): MemoryCandidate | undefined
