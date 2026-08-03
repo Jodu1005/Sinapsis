@@ -209,6 +209,64 @@ describe('SQLite workspace repositories', () => {
     `).get(restored.id)).toEqual({ error: 'invalid_candidate_sources' })
   })
 
+  it('restores the same candidate after two recovery isolation cycles', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const originalSource = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Original source.',
+    })
+    const firstReplaySource = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'First replay source.',
+    })
+    const secondReplaySource = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Second replay source.',
+    })
+    const run = repositories.createIncrementalDreamRun({ channelId: channel.id, trigger: 'scheduled' })
+    repositories.updateDreamRun(run.id, {
+      status: 'running', startedAt: '2026-08-03T00:00:00.000Z',
+    })
+    const candidate = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Deployments require review.', rationale: 'Original extraction.',
+      confidence: 0.8, importance: 0.7, sourceMessageIds: [originalSource.id],
+    })
+
+    repositories.deleteMessage(originalSource.id)
+    repositories.recoverDreamMemory(new Date('2026-08-03T00:01:00.000Z'))
+    const firstRestoration = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Deployments require review.', rationale: 'First replay extraction.',
+      confidence: 0.9, importance: 0.8, sourceMessageIds: [firstReplaySource.id],
+    })
+    expect(firstRestoration).toMatchObject({ id: candidate.id, status: 'pending', reviewedAt: null })
+
+    repositories.deleteMessage(firstReplaySource.id)
+    repositories.updateDreamRun(run.id, {
+      status: 'running', startedAt: '2026-08-03T00:02:00.000Z', completedAt: null, error: null,
+    })
+    repositories.recoverDreamMemory(new Date('2026-08-03T00:03:00.000Z'))
+    expect(repositories.getMemoryCandidate(candidate.id)).toMatchObject({
+      status: 'superseded', reviewedAt: '2026-08-03T00:03:00.000Z',
+    })
+
+    const secondRestoration = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Deployments require review.', rationale: 'Second replay extraction.',
+      confidence: 0.95, importance: 0.9, sourceMessageIds: [secondReplaySource.id],
+    })
+
+    expect(secondRestoration).toMatchObject({ id: candidate.id, status: 'pending', reviewedAt: null })
+    expect(repositories.listMemoryCandidateSourceMetadata(candidate.id)).toEqual([
+      expect.objectContaining({ channelId: channel.id, messageId: secondReplaySource.id }),
+    ])
+    expect(repositories.listMemoryCandidates({ dreamRunId: run.id })).toHaveLength(1)
+    expect(database!.database.prepare(`
+      SELECT error, created_at FROM dream_recovery_audit WHERE entity_id = ?
+    `).all(candidate.id)).toEqual([{
+      error: 'invalid_candidate_sources', created_at: '2026-08-03T00:03:00.000Z',
+    }])
+  })
+
   it('does not reactivate a superseded candidate without a matching recovery audit', async () => {
     const { repositories } = await createRepositories()
     const channel = createChannel(repositories)

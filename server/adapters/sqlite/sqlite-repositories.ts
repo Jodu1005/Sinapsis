@@ -1259,9 +1259,11 @@ export class SqliteRepositories implements WorkspaceRepositories {
         WHERE id = ? AND status = 'pending'
       `)
       const recordAudit = database.prepare(`
-        INSERT OR IGNORE INTO dream_recovery_audit (
+        INSERT INTO dream_recovery_audit (
           id, entity_type, entity_id, error, created_at
         ) VALUES (?, 'memory_candidate', ?, 'invalid_candidate_sources', ?)
+        ON CONFLICT(entity_type, entity_id, error)
+        DO UPDATE SET created_at = excluded.created_at
       `)
       for (const candidateId of invalidCandidateIds) {
         quarantineCandidate.run(recoveredAt, candidateId)
