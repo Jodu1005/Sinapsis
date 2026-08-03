@@ -100,3 +100,13 @@ Task 7 fix round 3/5 implemented: 6d481a2 fix: refresh dream recovery audit timi
 Task 7 final scoped review: Linnaeus, clean; 3 focused files and 63/63 tests
 Task 7: complete (commits dc859dd..6d481a2, review clean)
 Final branch review: in progress (baseline 6ff7df0)
+Final branch review round 1: not clean (1 P0 human-review API lacks an unforgeable local capability; 1 P2 production Dream runs omit public Turn results)
+Final fix round 1/5: in progress
+Final fix round 1/5 implemented: c9e1cb2 includes public Turn results in production Dream runs; d7bbcab protects Dream/Memory controls with a server-issued human capability (61 files, 610 tests; build passed before final re-review)
+Final scoped re-review round 1: P0 closed; 1 P2 remains (reply-only incremental Dream source filters its associated public Turn); 1 P3 test gap (wrong-token write routes lack complete unchanged-state coverage)
+Final fix round 2/5: in progress
+Final fix round 2/5 implemented: 3c0660b resolves reply-only incremental Dream Turn provenance; d33cd3e covers wrong-capability state invariants for every protected write (61 files, 612 tests; build passed)
+Final scoped re-review round 2: Nietzsche, clean; focused 141 tests and build passed
+Final branch review: complete (6ff7df0..d33cd3e)
+Final verification: 61 test files and 612/612 tests; production build and diff checks passed
+Dream Memory plan: complete (100%)

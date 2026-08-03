@@ -1,6 +1,6 @@
 # Dream Memory 与人工审核中心 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **执行状态：已完成（2026-08-03）。** 7 个任务和 51 个步骤全部交付；最终验证为 61 个测试文件、612 个测试通过，生产构建通过，整分支独立审查通过。详细轮次见 `.superpowers/sdd/2026-07-31-dream-memory/progress.md`。
 
 **Goal:** 在多 Agent 回合数据之上增加可追溯、需人工确认的 Global Memory、Channel Memory、Thread Summary，以及每日自动和手动触发的 Dream 提取流程。
 
@@ -110,7 +110,7 @@ archiveMemory(memoryId: string, occurredAt: Date): MemoryRecord
 listDreamSourceMessages(runId: string): Message[]
 ```
 
-- [ ] **Step 1: 写 migration 19 的失败测试**
+- [x] **Step 1: 写 migration 19 的失败测试**
 
 从已完成 migration 15 的 fixture 升级，覆盖：
 
@@ -137,7 +137,7 @@ expect(repositories.listDreamSourceMessages(run.id).map((item) => item.id))
 
 同时断言不能创建 `scope = channel` 但 `channelId = null` 的记录，也不能把其他频道消息登记为来源。
 
-- [ ] **Step 2: 运行仓储测试并确认失败**
+- [x] **Step 2: 运行仓储测试并确认失败**
 
 Run:
 
@@ -147,7 +147,7 @@ npm test -- server/adapters/sqlite/sqlite-repositories.test.ts
 
 Expected: FAIL。
 
-- [ ] **Step 3: 添加 migration 19**
+- [x] **Step 3: 添加 migration 19**
 
 迁移编号 16-18 已分别用于 Handoff、Turn 终态扩展和 Turn 恢复租约/幂等结果；Dream 从 19 开始。
 
@@ -171,7 +171,7 @@ thread_summaries
 - `memory_sources` 和 `memory_candidate_sources` 保留来源消息与 Turn。
 - `thread_summaries` 主键为 `(channel_id, thread_root_message_id)`。
 
-- [ ] **Step 4: 实现事务化审核与来源继承**
+- [x] **Step 4: 实现事务化审核与来源继承**
 
 接受候选必须在一个事务中：
 
@@ -182,7 +182,7 @@ thread_summaries
 5. 将相同 scope 的重复候选更新为 `superseded`。
 6. 发布 `memory.candidate_reviewed` 与 `memory.changed`。
 
-- [ ] **Step 5: 运行仓储测试和 Build**
+- [x] **Step 5: 运行仓储测试和 Build**
 
 Run:
 
@@ -193,7 +193,7 @@ npm run build
 
 Expected: PASS。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add server/domain/memory.ts server/ports/repositories.ts server/adapters/sqlite/schema.ts server/adapters/sqlite/sqlite-repositories.ts server/adapters/sqlite/sqlite-repositories.test.ts
@@ -235,7 +235,7 @@ export class ThreadSummaryService {
 }
 ```
 
-- [ ] **Step 1: 写上下文分层和预算的失败测试**
+- [x] **Step 1: 写上下文分层和预算的失败测试**
 
 断言 Prompt 顺序固定：
 
@@ -256,7 +256,7 @@ export class ThreadSummaryService {
 - Timeline 调用不注入 Thread Summary。
 - 超出预算时先缩减最近消息，再缩减 Summary；已确认 Memory 按更新时间和来源质量保留。
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [x] **Step 2: 运行测试并确认失败**
 
 Run:
 
@@ -266,19 +266,19 @@ npm test -- server/application/context-assembler.test.ts server/application/thre
 
 Expected: FAIL。
 
-- [ ] **Step 3: 扩展 ContextAssembler**
+- [x] **Step 3: 扩展 ContextAssembler**
 
 禁止简单拼接任意数据库 JSON。每一层使用明确标题、转义边界和字符预算。Memory 内容视为历史参考，不得覆盖系统安全指令。
 
-- [ ] **Step 4: 实现增量 Thread Summary**
+- [x] **Step 4: 实现增量 Thread Summary**
 
 Thread Summary 只基于该 Thread 的公开消息，并保存 `throughMessageCreatedAt + throughMessageId` 水位。更新失败时保留旧 Summary，当前对话退化为旧 Summary 加新消息，不能阻断 Agent 回答。
 
-- [ ] **Step 5: 将完整 ContextAssembler 接入所有对话调用**
+- [x] **Step 5: 将完整 ContextAssembler 接入所有对话调用**
 
 Participation、正式回复、重复检查和 Handoff Response 使用同一基础上下文，但添加各自调用指令。已有可恢复 Runtime Session 仍发送当前增量消息；只有冷启动或 Session 恢复失败时渲染完整上下文。
 
-- [ ] **Step 6: 运行聚焦与 Coordinator 回归**
+- [x] **Step 6: 运行聚焦与 Coordinator 回归**
 
 Run:
 
@@ -289,7 +289,7 @@ npm run build
 
 Expected: PASS。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add server/application/context-assembler.ts server/application/context-assembler.test.ts server/application/thread-summary-service.ts server/application/thread-summary-service.test.ts server/application/channel-turn-coordinator.ts server/application/channel-turn-coordinator.test.ts
@@ -342,7 +342,7 @@ dreamTimeoutMs: number        // 默认 120_000
 maxDreamCandidatesPerRun: number // 默认 20，硬上限 50
 ```
 
-- [ ] **Step 1: 写协议和过滤失败测试**
+- [x] **Step 1: 写协议和过滤失败测试**
 
 覆盖：
 
@@ -354,7 +354,7 @@ maxDreamCandidatesPerRun: number // 默认 20，硬上限 50
 - 与已接受 Memory 完全重复时不创建 Candidate。
 - 内容冲突时创建新 Candidate，并在 rationale 标注潜在冲突，等待人工决定。
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [x] **Step 2: 运行测试并确认失败**
 
 Run:
 
@@ -364,7 +364,7 @@ npm test -- server/application/memory-consolidation-protocol.test.ts server/appl
 
 Expected: FAIL。
 
-- [ ] **Step 3: 实现严格结构化解析**
+- [x] **Step 3: 实现严格结构化解析**
 
 只接受：
 
@@ -386,11 +386,11 @@ Expected: FAIL。
 
 去除 Markdown fence 后解析，拒绝额外顶层字段、未知 scope/kind、超出 `0..1` 的 confidence/importance、空内容和伪造来源。对内容做规范化后计算 SHA-256 hash。
 
-- [ ] **Step 4: 实现 Consolidator**
+- [x] **Step 4: 实现 Consolidator**
 
 Dream 使用独立 Runtime 请求和独立工作目录 `${dataDir}/dream/<runId>`，不得复用任何 Agent 的 Channel Session。Runtime Artifact 只作为本机受控证据保存，不写消息或 Candidate。
 
-- [ ] **Step 5: 运行测试和 Build**
+- [x] **Step 5: 运行测试和 Build**
 
 Run:
 
@@ -401,7 +401,7 @@ npm run build
 
 Expected: PASS。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add server/application/memory-consolidation-protocol.ts server/application/memory-consolidation-protocol.test.ts server/application/memory-consolidator.ts server/application/memory-consolidator.test.ts server/config.ts server/config.test.ts
@@ -451,7 +451,7 @@ dreamTimeZone: string       // 默认 "Asia/Shanghai"，IANA 名称
 dreamMaintenanceConcurrency: number // 默认 1
 ```
 
-- [ ] **Step 1: 写时间、水位和幂等失败测试**
+- [x] **Step 1: 写时间、水位和幂等失败测试**
 
 使用 Fake Clock 覆盖：
 
@@ -463,7 +463,7 @@ dreamMaintenanceConcurrency: number // 默认 1
 - 一个频道失败不阻止后续频道。
 - 归档频道不进入 `enqueueAllActive`。
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [x] **Step 2: 运行测试并确认失败**
 
 Run:
 
@@ -473,15 +473,15 @@ npm test -- server/application/dream-scheduler.test.ts server/application/dream-
 
 Expected: FAIL。
 
-- [ ] **Step 3: 实现水位选择**
+- [x] **Step 3: 实现水位选择**
 
 使用 `(created_at, id)` 复合水位，避免相同时间戳遗漏。输入快照在 Run 创建事务中固定；Dream 运行期间的新消息留给下一次 Run。
 
-- [ ] **Step 4: 实现可停止 Scheduler 和维护队列**
+- [x] **Step 4: 实现可停止 Scheduler 和维护队列**
 
 下一次触发后才安排再下一次 Timer，避免 `setInterval` 的时区漂移。`main.ts` 在服务启动后 `start()`，关闭信号中 `stop()`；测试 App 默认不启动真实 Scheduler。
 
-- [ ] **Step 5: 运行调度测试与 Build**
+- [x] **Step 5: 运行调度测试与 Build**
 
 Run:
 
@@ -492,7 +492,7 @@ npm run build
 
 Expected: PASS。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add server/ports/clock.ts server/application/dream-scheduler.ts server/application/dream-scheduler.test.ts server/application/dream-run-service.ts server/application/dream-run-service.test.ts server/config.ts server/config.test.ts server/main.ts server/main.test.ts
@@ -534,7 +534,7 @@ interface AcceptMemoryCandidateRequest {
 }
 ```
 
-- [ ] **Step 1: 写服务、鉴权边界和 API 失败测试**
+- [x] **Step 1: 写服务、鉴权边界和 API 失败测试**
 
 覆盖：
 
@@ -547,7 +547,7 @@ interface AcceptMemoryCandidateRequest {
 - API 不返回 Dream Runtime 原始日志和 Prompt。
 - Candidate 查询与所有审核、Memory 写操作必须验证服务进程随机生成的人类 capability；Agent Runtime 不得接收该凭证。
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [x] **Step 2: 运行测试并确认失败**
 
 Run:
 
@@ -557,7 +557,7 @@ npm test -- server/application/memory-review-service.test.ts server/app.test.ts 
 
 Expected: FAIL。
 
-- [ ] **Step 3: 实现审核服务和 API**
+- [x] **Step 3: 实现审核服务和 API**
 
 `POST /api/dream/runs` 请求只接受：
 
@@ -567,7 +567,7 @@ Expected: FAIL。
 
 有 `channelId` 时调用 `enqueue`，否则调用 `enqueueAllActive`。接口以 `202 Accepted` 立即返回已持久化的 Run 列表；执行通过维护队列继续，状态由 SSE 更新。
 
-- [ ] **Step 4: 发布 Dream 与 Memory 事件**
+- [x] **Step 4: 发布 Dream 与 Memory 事件**
 
 ```text
 dream.run_created
@@ -579,7 +579,7 @@ memory.changed
 
 事件 payload 只含 ID、状态、scope、计数和时间，不含完整 Memory 内容。
 
-- [ ] **Step 5: 运行 API、SSE 与 Build**
+- [x] **Step 5: 运行 API、SSE 与 Build**
 
 Run:
 
@@ -590,7 +590,7 @@ npm run build
 
 Expected: PASS。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add server/application/memory-review-service.ts server/application/memory-review-service.test.ts server/domain/events.ts server/adapters/sse/sse-domain-event-publisher.ts server/adapters/sse/sse-domain-event-publisher.test.ts server/app.ts server/app.test.ts
@@ -614,7 +614,7 @@ git commit -m "feat: add human memory review api"
 - Modify: `src/ui/WorkspaceShell.test.tsx`
 - Modify: `src/styles.css`
 
-- [ ] **Step 1: 写 Dream Center 交互失败测试**
+- [x] **Step 1: 写 Dream Center 交互失败测试**
 
 覆盖：
 
@@ -627,7 +627,7 @@ git commit -m "feat: add human memory review api"
 - 空状态、运行中、失败、无候选成功状态均有明确反馈。
 - 移动端列表和详情不重叠。
 
-- [ ] **Step 2: 运行前端测试并确认失败**
+- [x] **Step 2: 运行前端测试并确认失败**
 
 Run:
 
@@ -637,7 +637,7 @@ npm test -- src/ui/RepositorySidebar.test.tsx src/ui/DreamCenter.test.tsx src/ui
 
 Expected: FAIL。
 
-- [ ] **Step 3: 扩展前端 API 和 SSE**
+- [x] **Step 3: 扩展前端 API 和 SSE**
 
 ```ts
 WorkspaceApi.listDreamRuns(): Promise<DreamRunView[]>
@@ -650,11 +650,11 @@ WorkspaceApi.updateMemory(id: string, content: string): Promise<MemoryView>
 WorkspaceApi.archiveMemory(id: string): Promise<MemoryView>
 ```
 
-- [ ] **Step 4: 实现导航和审核工作流**
+- [x] **Step 4: 实现导航和审核工作流**
 
 Dream Center 是主内容区视图，不塞入右侧 Context 卡片。待确认数量在 Bootstrap 中提供，SSE 后刷新。接受按钮提交期间禁用；成功后当前候选从待确认列表移除并进入已接受 Tab。
 
-- [ ] **Step 5: 运行前端测试与 Build**
+- [x] **Step 5: 运行前端测试与 Build**
 
 Run:
 
@@ -665,7 +665,7 @@ npm run build
 
 Expected: PASS。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/domain/workspace-view.ts src/api/client.ts src/api/use-workspace-events.ts src/api/use-workspace-events.test.tsx src/ui/RepositorySidebar.tsx src/ui/RepositorySidebar.test.tsx src/ui/DreamCenter.tsx src/ui/DreamCenter.test.tsx src/ui/MemoryCandidateDetail.tsx src/ui/MemoryCandidateDetail.test.tsx src/ui/WorkspaceShell.tsx src/ui/WorkspaceShell.test.tsx src/styles.css
@@ -680,7 +680,7 @@ git commit -m "feat: add dream memory review center"
 - Modify: `docs/raft-control-room-design.md`
 - Modify: `specs/feature-tree.md`
 
-- [ ] **Step 1: 写完整 Dream 流程集成测试**
+- [x] **Step 1: 写完整 Dream 流程集成测试**
 
 测试：
 
@@ -693,7 +693,7 @@ git commit -m "feat: add dream memory review center"
 7. 相同水位重复运行不重复调用 Runtime 或创建 Candidate。
 8. 敏感内容和 Runtime Artifact 不进入 Candidate。
 
-- [ ] **Step 2: 运行集成测试并确认失败**
+- [x] **Step 2: 运行集成测试并确认失败**
 
 Run:
 
@@ -703,7 +703,7 @@ npm test -- server/integration/dream-memory-flow.test.ts server/main.test.ts
 
 Expected: FAIL，直到全部依赖装配和恢复逻辑完成。
 
-- [ ] **Step 3: 完成启动恢复与失败清理**
+- [x] **Step 3: 完成启动恢复与失败清理**
 
 应用启动时：
 
@@ -711,11 +711,11 @@ Expected: FAIL，直到全部依赖装配和恢复逻辑完成。
 - 保留其水位但不推进成功水位；下次运行可重新处理同一输入。
 - 清理不存在来源消息的非法 Candidate，记录审计错误，不物理删除其他有效记录。
 
-- [ ] **Step 4: 更新架构文档和 Feature Tree**
+- [x] **Step 4: 更新架构文档和 Feature Tree**
 
 记录 Dream 定时配置、维护队列、水位、Candidate 审核、Memory scope、Prompt 注入顺序和软归档语义。
 
-- [ ] **Step 5: 运行完整自动化验证**
+- [x] **Step 5: 运行完整自动化验证**
 
 Run:
 
@@ -726,7 +726,7 @@ npm run build
 
 Expected: 全部 PASS。
 
-- [ ] **Step 6: 启动服务并做浏览器验收**
+- [x] **Step 6: 启动服务并做浏览器验收**
 
 Run:
 
@@ -744,7 +744,7 @@ npm run dev
 - 刷新和服务重启后状态保持。
 - 桌面与窄屏无重叠，控制台无错误。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add server/integration/dream-memory-flow.test.ts server/main.test.ts docs/raft-control-room-design.md specs/feature-tree.md
@@ -753,10 +753,10 @@ git commit -m "test: verify dream memory lifecycle"
 
 ## Completion Gate
 
-- [ ] 多 Agent 对话回合计划已经完整通过。
-- [ ] 所有七个任务各自有通过的聚焦测试和独立 Commit。
-- [ ] `npm test -- --run` 与 `npm run build` 通过。
-- [ ] Candidate 未确认前绝不进入 Prompt。
-- [ ] 来源可追溯，Memory 删除为软归档。
-- [ ] 自动 Dream、手动 Dream、no-op、失败隔离、重启恢复和幂等均通过。
-- [ ] 浏览器完成 Dream Center 桌面与窄屏验收。
+- [x] 多 Agent 对话回合计划已经完整通过。
+- [x] 所有七个任务各自有通过的聚焦测试和独立 Commit。
+- [x] `npm test -- --run` 与 `npm run build` 通过。
+- [x] Candidate 未确认前绝不进入 Prompt。
+- [x] 来源可追溯，Memory 删除为软归档。
+- [x] 自动 Dream、手动 Dream、no-op、失败隔离、重启恢复和幂等均通过。
+- [x] 浏览器完成 Dream Center 桌面与窄屏验收。
