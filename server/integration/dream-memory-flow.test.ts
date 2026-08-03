@@ -227,6 +227,11 @@ describe('Dream Memory lifecycle', () => {
       mode: 'direct',
       maxRounds: 3,
     })
+    const previousRun = repositories.createIncrementalDreamRun({ channelId: alphaId, trigger: 'manual' })
+    repositories.updateDreamRun(previousRun.id, {
+      status: 'completed', completedAt: '2026-08-03T00:00:00.000Z', candidateCount: 0,
+    })
+    expect(repositories.listDreamSourceMessages(previousRun.id).map((message) => message.id)).toEqual([source.id])
     const invocation = repositories.createAgentInvocation({
       turnId: turn.id,
       agentId: publicAgent.id,
@@ -238,7 +243,7 @@ describe('Dream Memory lifecycle', () => {
       status: 'running',
     })
     const publicReply = 'The published Turn confirms Chinese release notes.'
-    repositories.settleConversationInvocation({
+    const settled = repositories.settleConversationInvocation({
       invocationId: invocation.id,
       recoveryOwnerId: null,
       resultJson: JSON.stringify({
@@ -265,6 +270,9 @@ describe('Dream Memory lifecycle', () => {
       expect(manual.status).toBe(202)
       const queued = await manual.json() as Array<{ id: string; scopeId: string }>
       expect(queued).toEqual([expect.objectContaining({ scopeId: alphaId })])
+      expect(queued[0]!.id).not.toBe(previousRun.id)
+      expect(repositories.listDreamSourceMessages(queued[0]!.id).map((message) => message.id))
+        .toEqual([settled.message?.id])
       await expect(waitForDreamRun(server.baseUrl, queued[0]!.id, humanHeaders(app))).resolves.toMatchObject({
         status: 'completed', candidateCount: 3,
       })

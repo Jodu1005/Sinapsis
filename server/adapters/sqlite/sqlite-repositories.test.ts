@@ -383,6 +383,55 @@ describe('SQLite workspace repositories', () => {
     expect(repositories.listDreamSourceTurnDetails(run.id)).toEqual([])
   })
 
+  it('lists a Turn when the fixed incremental Dream source is only its public Invocation reply', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const agent = repositories.createAgent({
+      identity: 'Dream Reply Agent', mentionName: 'dream-reply-agent', runtime: 'pi', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: {},
+    })
+    const trigger = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Remember the public answer.',
+    })
+    const turn = repositories.createConversationTurn({
+      channelId: channel.id,
+      triggerMessageId: trigger.id,
+      threadRootMessageId: null,
+      mode: 'direct',
+      maxRounds: 3,
+    })
+    const previousRun = repositories.createIncrementalDreamRun({ channelId: channel.id, trigger: 'manual' })
+    repositories.updateDreamRun(previousRun.id, {
+      status: 'completed', completedAt: '2026-08-03T00:00:01.000Z', candidateCount: 0,
+    })
+    const invocation = repositories.createAgentInvocation({
+      turnId: turn.id,
+      agentId: agent.id,
+      kind: 'response',
+      priority: 'human_direct',
+      round: 1,
+      idempotencyKey: `${turn.id}:response`,
+      sourceInvocationId: null,
+      status: 'running',
+    })
+    const settled = repositories.settleConversationInvocation({
+      invocationId: invocation.id,
+      recoveryOwnerId: null,
+      resultJson: JSON.stringify({ parsed: { reply: 'Public reply only.', handoffTo: [] } }),
+      publicReply: { authorName: agent.identity, body: 'Public reply only.' },
+      occurredAt: new Date('2026-08-03T00:00:02.000Z'),
+    })
+    const incremental = repositories.createIncrementalDreamRun({ channelId: channel.id, trigger: 'scheduled' })
+
+    expect(repositories.listDreamSourceMessages(previousRun.id).map((message) => message.id)).toEqual([trigger.id])
+    expect(repositories.listDreamSourceMessages(incremental.id).map((message) => message.id)).toEqual([settled.message?.id])
+    expect(repositories.listDreamSourceTurnDetails(incremental.id).map((details) => details.turn.id)).toEqual([turn.id])
+
+    repositories.deleteMessage(settled.message!.id)
+
+    expect(repositories.listDreamSourceTurnDetails(incremental.id)).toEqual([])
+  })
+
   it('includes an unprocessed message that arrives at the completed watermark millisecond', async () => {
     const { repositories } = await createRepositories()
     const channel = createChannel(repositories)

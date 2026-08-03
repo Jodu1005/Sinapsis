@@ -1585,11 +1585,21 @@ export class SqliteRepositories implements WorkspaceRepositories {
       JOIN messages ON messages.id = sources.message_id
       JOIN conversation_turns AS turns
         ON turns.id = sources.turn_id
-        AND turns.trigger_message_id = sources.message_id
         AND turns.channel_id = runs.scope_id
         AND messages.channel_id = runs.scope_id
         AND turns.thread_root_message_id IS messages.thread_root_id
       WHERE sources.dream_run_id = ?
+        AND messages.deleted_at IS NULL
+        AND (
+          turns.trigger_message_id = sources.message_id
+          OR EXISTS (
+            SELECT 1
+            FROM conversation_invocation_messages AS invocation_messages
+            JOIN agent_invocations AS invocations ON invocations.id = invocation_messages.invocation_id
+            WHERE invocation_messages.message_id = sources.message_id
+              AND invocations.turn_id = turns.id
+          )
+        )
       GROUP BY turns.id
       ORDER BY MIN(messages.created_at), MIN(messages.id), turns.id
     `).all(runId) as Array<{ id: string }>
