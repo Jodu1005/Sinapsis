@@ -2,6 +2,7 @@ export type MemoryScope = 'global' | 'channel'
 export type MemoryKind = 'preference' | 'decision' | 'constraint' | 'fact' | 'workflow'
 export type MemoryCandidateStatus = 'pending' | 'accepted' | 'ignored' | 'superseded'
 export type DreamRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+export type DreamRunErrorCategory = 'runtime_failure' | 'service_restarted' | 'cancelled'
 
 export interface DreamRun {
   id: string

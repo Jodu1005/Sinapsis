@@ -59,20 +59,26 @@ export function DreamCenter({
     tabToFocus.current = null
   }, [status])
 
+  const reportDreamFailure = useCallback((message: string) => {
+    setActiveRunIds([])
+    setDreamNotice(null)
+    setDreamError(message)
+  }, [])
+
   const finishRuns = useCallback((runs: DreamRunView[]) => {
     const failed = runs.find((run) => run.status === 'failed' || run.status === 'cancelled')
-    setActiveRunIds([])
     if (failed) {
-      setDreamError(`Dream 运行失败：${failed.error ?? (failed.status === 'cancelled' ? '运行已取消' : '未知错误')}`)
+      reportDreamFailure(dreamFailureLabel(failed.errorCategory))
       return
     }
+    setActiveRunIds([])
     const candidateCount = runs.reduce((total, run) => total + run.candidateCount, 0)
     setDreamNotice(candidateCount === 0 ? 'Dream 已完成，没有新增候选。' : `Dream 已完成，新增 ${candidateCount} 条候选。`)
     if (candidateCount > 0) {
       setStatus('pending')
       setSelectedId(null)
     }
-  }, [])
+  }, [reportDreamFailure])
 
   useEffect(() => {
     if (activeRunIds.length === 0) return undefined
@@ -89,20 +95,18 @@ export function DreamCenter({
           return
         }
         if (Date.now() - startedAt >= pollTimeoutMs) {
-          setActiveRunIds([])
-          setDreamError('Dream 运行状态查询超时，请稍后刷新。')
+          reportDreamFailure('Dream 运行状态查询超时，请稍后刷新。')
           return
         }
         timer = setTimeout(() => void poll(), pollIntervalMs)
-      } catch (cause) {
+      } catch {
         if (cancelled) return
-        setActiveRunIds([])
-        setDreamError(`Dream 运行状态查询失败：${cause instanceof Error ? cause.message : '未知错误'}`)
+        reportDreamFailure('Dream 运行状态查询失败，请稍后重试。')
       }
     }
     void poll()
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
-  }, [activeRunIds, api, finishRuns, refreshGeneration])
+  }, [activeRunIds, api, finishRuns, refreshGeneration, reportDreamFailure])
 
   const selectTab = (nextStatus: MemoryCandidateStatus) => {
     setStatus(nextStatus)
@@ -128,8 +132,8 @@ export function DreamCenter({
       } else {
         setActiveRunIds(runs.map((run) => run.id))
       }
-    } catch (cause) {
-      setDreamError(`Dream 运行失败：${cause instanceof Error ? cause.message : '未知错误'}`)
+    } catch {
+      reportDreamFailure('Dream 启动失败，请稍后重试。')
     } finally {
       setStarting(false)
     }
@@ -153,6 +157,11 @@ export function DreamCenter({
 }
 
 function isTerminal(run: DreamRunView): boolean { return run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled' }
+function dreamFailureLabel(category: DreamRunView['errorCategory']): string {
+  if (category === 'cancelled') return 'Dream 运行已取消。'
+  if (category === 'service_restarted') return 'Dream 运行失败：服务已重启，请重新运行。'
+  return 'Dream 运行失败：运行环境执行失败。'
+}
 function displayContent(candidate: MemoryCandidateView): string { return candidate.status === 'pending' ? candidate.proposedContent : candidate.reviewedContent ?? candidate.proposedContent }
 function displayScope(candidate: MemoryCandidateView): MemoryCandidateView['proposedScope'] { return candidate.status === 'pending' ? candidate.proposedScope : candidate.reviewedScope ?? candidate.proposedScope }
 function formatDate(value: string): string { return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) }

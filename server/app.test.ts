@@ -186,6 +186,25 @@ describe('local service API', () => {
     await expect(queued.json()).resolves.toEqual([expect.objectContaining({ scopeId: channel.id, status: expect.stringMatching(/queued|running|completed/) })])
   })
 
+  it('projects Dream failures as deterministic categories without raw runtime errors', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Dream Memory' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'dreams' })
+    const run = repositories.createDreamRun({ scope: 'channel', scopeId: channel.id, trigger: 'manual', from: null, to: null })
+    repositories.updateDreamRun(run.id, { status: 'failed', error: 'RAW_RUNTIME_PROMPT=never expose this', completedAt: '2026-08-02T00:00:00.000Z' })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/dream/runs`)
+    expect(response.status).toBe(200)
+    const runs = await response.json() as Array<Record<string, unknown>>
+    expect(runs).toEqual([expect.objectContaining({ id: run.id, status: 'failed', errorCategory: 'runtime_failure' })])
+    expect(runs[0]).not.toHaveProperty('error')
+    expect(JSON.stringify(runs)).not.toContain('RAW_RUNTIME_PROMPT')
+  })
+
   it('returns stable not-found and strict-body errors for Dream and Memory mutations', async () => {
     const server = await startHttpTestServer(createApp())
     closeServer = server.close

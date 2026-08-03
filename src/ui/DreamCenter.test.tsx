@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { WorkspaceApi } from '../api/client'
@@ -51,7 +51,7 @@ describe('DreamCenter', () => {
     const user = userEvent.setup()
     const startDream = vi.fn()
       .mockResolvedValueOnce([{ id: 'run-empty', scope: 'channel', scopeId: channel.id, trigger: 'manual', status: 'completed', candidateCount: 0, createdAt: '2026-08-01T08:00:00.000Z', startedAt: null, completedAt: '2026-08-01T08:01:00.000Z', error: null }])
-      .mockResolvedValueOnce([{ id: 'run-failed', scope: 'channel', scopeId: channel.id, trigger: 'manual', status: 'failed', candidateCount: 0, createdAt: '2026-08-01T08:00:00.000Z', startedAt: null, completedAt: '2026-08-01T08:01:00.000Z', error: '运行超时' }])
+      .mockResolvedValueOnce([{ id: 'run-failed', scope: 'channel', scopeId: channel.id, trigger: 'manual', status: 'failed', candidateCount: 0, createdAt: '2026-08-01T08:00:00.000Z', startedAt: null, completedAt: '2026-08-01T08:01:00.000Z', errorCategory: 'runtime_failure' }])
     render(<DreamCenter api={api({ startDream })} channels={[channel]} onJumpToSource={vi.fn()} />)
 
     await user.selectOptions(screen.getByLabelText('Dream 范围'), channel.id)
@@ -59,7 +59,7 @@ describe('DreamCenter', () => {
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Dream 已完成，没有新增候选。'))
 
     await user.click(screen.getByRole('button', { name: '立即 Dream' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('Dream 运行失败：运行超时')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Dream 运行失败：运行环境执行失败。')
   })
 
   it('moves an accepted pending candidate into the accepted tab', async () => {
@@ -93,16 +93,47 @@ describe('DreamCenter', () => {
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Dream 已完成，没有新增候选。'))
   })
 
-  it('unlocks and reports a queued Dream run that later fails', async () => {
+  it('clears the running notice for a terminal failed Dream run and shows one safe alert', async () => {
     const user = userEvent.setup()
     const queued = { id: 'run-failing', scope: 'channel' as const, scopeId: channel.id, trigger: 'manual' as const, status: 'queued' as const, candidateCount: 0, createdAt: '2026-08-01T08:00:00.000Z', startedAt: null, completedAt: null, error: null }
-    const failed = { ...queued, status: 'failed' as const, completedAt: '2026-08-01T08:01:00.000Z', error: '提炼超时' }
+    const failed = { ...queued, status: 'failed' as const, completedAt: '2026-08-01T08:01:00.000Z', error: 'RAW_RUNTIME_PROMPT=do-not-display', errorCategory: 'runtime_failure' }
     render(<DreamCenter api={api({ startDream: vi.fn().mockResolvedValue([queued]), listDreamRuns: vi.fn().mockResolvedValueOnce([queued]).mockResolvedValueOnce([failed]) })} channels={[channel]} onJumpToSource={vi.fn()} />)
 
     await user.click(screen.getByRole('button', { name: '立即 Dream' }))
     expect(screen.getByRole('button', { name: '立即 Dream' })).toBeDisabled()
-    expect(await screen.findByRole('alert')).toHaveTextContent('Dream 运行失败：提炼超时')
-    expect(screen.getByRole('button', { name: '立即 Dream' })).toBeEnabled()
+    await expectDreamFailure('Dream 运行失败：运行环境执行失败。')
+  })
+
+  it('clears the running notice after a Dream poll request error', async () => {
+    const user = userEvent.setup()
+    const queued = { id: 'run-poll-error', scope: 'channel' as const, scopeId: channel.id, trigger: 'manual' as const, status: 'queued' as const, candidateCount: 0, createdAt: '2026-08-01T08:00:00.000Z', startedAt: null, completedAt: null, error: null }
+    render(<DreamCenter api={api({ startDream: vi.fn().mockResolvedValue([queued]), listDreamRuns: vi.fn().mockRejectedValue(new Error('RAW_NETWORK_TOKEN')) })} channels={[channel]} onJumpToSource={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '立即 Dream' }))
+    await expectDreamFailure('Dream 运行状态查询失败，请稍后重试。')
+  })
+
+  it('clears the running notice after a Dream start error', async () => {
+    const user = userEvent.setup()
+    render(<DreamCenter api={api({ startDream: vi.fn().mockRejectedValue(new Error('RAW_START_FAILURE')) })} channels={[channel]} onJumpToSource={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '立即 Dream' }))
+    await expectDreamFailure('Dream 启动失败，请稍后重试。')
+  })
+
+  it('clears the running notice after the Dream poll times out', async () => {
+    vi.useFakeTimers()
+    try {
+      const queued = { id: 'run-timeout', scope: 'channel' as const, scopeId: channel.id, trigger: 'manual' as const, status: 'queued' as const, candidateCount: 0, createdAt: '2026-08-01T08:00:00.000Z', startedAt: null, completedAt: null, error: null }
+      render(<DreamCenter api={api({ startDream: vi.fn().mockResolvedValue([queued]), listDreamRuns: vi.fn().mockResolvedValue([queued]) })} channels={[channel]} onJumpToSource={vi.fn()} />)
+
+      fireEvent.click(screen.getByRole('button', { name: '立即 Dream' }))
+      await act(async () => { await Promise.resolve() })
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      expectVisibleDreamFailure('Dream 运行状态查询超时，请稍后刷新。')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('keeps a newer tab result when an older status request resolves last', async () => {
@@ -139,3 +170,16 @@ describe('DreamCenter', () => {
     expect(pending).toHaveFocus()
   })
 })
+
+async function expectDreamFailure(message: string): Promise<void> {
+  await screen.findByRole('alert')
+  expectVisibleDreamFailure(message)
+}
+
+function expectVisibleDreamFailure(message: string): void {
+  expect(screen.getByRole('alert')).toHaveTextContent(message)
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  expect(screen.getAllByRole('alert')).toHaveLength(1)
+  expect(screen.getByRole('button', { name: '立即 Dream' })).toBeEnabled()
+  expect(screen.getByLabelText('Dream 范围')).toBeEnabled()
+}

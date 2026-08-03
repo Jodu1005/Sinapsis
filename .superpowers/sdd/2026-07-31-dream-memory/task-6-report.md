@@ -43,3 +43,15 @@
 - 类型检查：`npx tsc --noEmit` 通过。
 - 全量：`npm test -- --run`，59 个文件、595 项通过。
 - `npm run build` 通过；`git diff --check` 通过。
+
+## Fix Round 2（限定 P1）
+
+- DreamRun 公共 API 不返回内部 raw `error`；失败/取消仅投影确定性 `errorCategory`：`runtime_failure`、`service_restarted`、`cancelled`。
+- Dream Center 改为按安全类别输出中文提示，不再显示“未知错误”或任意运行时/网络/启动错误正文。
+- terminal failed、轮询超时、轮询请求失败、启动失败统一清除绿色“Dream 正在运行...”状态，只保留一个 alert，并重新启用运行按钮和范围选择。
+- 新增真实异步失败路径与 API 投影脱敏 RED 测试后实现 GREEN。
+
+## Fix Round 2 验证
+
+- 聚焦：`src/ui/DreamCenter.test.tsx` 与 `server/app.test.ts`，53 项通过。
+- 类型检查：`npx tsc --noEmit` 通过；全量 `npm test -- --run` 59 个文件、599 项通过；`npm run build` 与 `git diff --check` 通过。

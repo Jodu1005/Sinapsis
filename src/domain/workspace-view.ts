@@ -15,6 +15,7 @@ export interface WorkspaceSnapshot {
 
 export type MemoryCandidateStatus = 'pending' | 'accepted' | 'ignored' | 'superseded'
 export type MemoryScope = 'global' | 'channel'
+export type DreamRunErrorCategory = 'runtime_failure' | 'service_restarted' | 'cancelled'
 
 export interface DreamRunView {
   id: string
@@ -23,7 +24,7 @@ export interface DreamRunView {
   trigger: 'scheduled' | 'manual'
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
   candidateCount: number
-  error: string | null
+  errorCategory: DreamRunErrorCategory | null
   createdAt: string
   startedAt: string | null
   completedAt: string | null

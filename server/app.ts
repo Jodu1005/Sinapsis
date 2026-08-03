@@ -37,7 +37,7 @@ import type {
   TurnParticipant,
 } from './domain/conversation'
 import { DomainError } from './domain/task'
-import type { DreamRun, MemoryCandidate, MemoryCandidateStatus, MemoryRecord } from './domain/memory'
+import type { DreamRun, DreamRunErrorCategory, MemoryCandidate, MemoryCandidateStatus, MemoryRecord } from './domain/memory'
 import type { GitClient } from './ports/git-client'
 import { NodeProcessRunner } from './ports/process-runner'
 import type { ConversationTurnDetails, WorkspaceRepositories, WorkspaceUnitOfWork } from './ports/repositories'
@@ -867,7 +867,16 @@ function toPublicDreamRun(run: DreamRun) {
     fromMessageCreatedAt: run.fromMessageCreatedAt, fromMessageId: run.fromMessageId,
     toMessageCreatedAt: run.toMessageCreatedAt, toMessageId: run.toMessageId,
     candidateCount: run.candidateCount, createdAt: run.createdAt, startedAt: run.startedAt, completedAt: run.completedAt,
+    errorCategory: publicDreamRunErrorCategory(run),
   }
+}
+
+function publicDreamRunErrorCategory(run: DreamRun): DreamRunErrorCategory | null {
+  if (run.status === 'cancelled') return 'cancelled'
+  if (run.status !== 'failed') return null
+  return /(?:service|process).*(?:restart|stopp|interrupt)|(?:restart|stopp|interrupt).*(?:service|process)/i.test(run.error ?? '')
+    ? 'service_restarted'
+    : 'runtime_failure'
 }
 
 function toPublicMemoryCandidate(candidate: MemoryCandidate, sources: Array<{ channelId: string; channelName: string; messageId: string }> = []) {
