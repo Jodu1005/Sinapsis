@@ -5,7 +5,7 @@ import { GitWorktreeManager } from './adapters/git/git-worktree-manager'
 import { ClaudeCodeRuntimeAdapter } from './adapters/runtime/claude-code-runtime-adapter'
 import { OpenCodeRuntimeAdapter } from './adapters/runtime/opencode-runtime-adapter'
 import { PiRuntimeAdapter } from './adapters/runtime/pi-runtime-adapter'
-import { CommandRuntimeAvailabilityDetector, runtimeKinds, type RuntimeAvailabilityDetector } from './adapters/runtime/runtime-profile'
+import { CommandRuntimeAvailabilityDetector, resolveRuntimeProfile, runtimeKinds, type RuntimeAvailabilityDetector } from './adapters/runtime/runtime-profile'
 import { SseDomainEventPublisher } from './adapters/sse/sse-domain-event-publisher'
 import { createSqliteDatabase } from './adapters/sqlite/database'
 import { SqliteRepositories } from './adapters/sqlite/sqlite-repositories'
@@ -15,6 +15,8 @@ import { ChannelMessageService } from './application/channel-message-service'
 import { ChannelContextResetService } from './application/channel-context-reset-service'
 import { ChannelWorkspaceService } from './application/channel-workspace-service'
 import { ConversationCoordinator } from './application/conversation-coordinator'
+import { DreamRunService } from './application/dream-run-service'
+import { MemoryConsolidator } from './application/memory-consolidator'
 import type { TurnActivity } from './application/channel-turn-coordinator'
 import { routeMentions, UnknownMentionError } from './application/mention-router'
 import { TaskExecutionCoordinator } from './application/task-execution-coordinator'
@@ -170,6 +172,18 @@ export function createApp(options: CreateAppOptions = {}): Express {
   )
   const scheduler = options.scheduler ?? new TaskScheduler(repositories, coordinator)
   const reviewService = options.reviewService ?? new TaskReviewService(repositories, coordinator, messages)
+  const dreamRunService = new DreamRunService({
+    repositories,
+    consolidator: new MemoryConsolidator({
+      repositories,
+      runtime: runtimes[serviceConfig.dreamRuntime],
+      dataDir: path.dirname(databasePath),
+      profile: resolveRuntimeProfile(serviceConfig.dreamRuntime, { model: serviceConfig.dreamModel }),
+      timeoutMs: serviceConfig.dreamTimeoutMs,
+      maxCandidates: serviceConfig.maxDreamCandidatesPerRun,
+    }),
+    concurrency: serviceConfig.dreamMaintenanceConcurrency,
+  })
 
   app.locals.closeDatabase = () => database.close()
   app.locals.closeSse = () => eventPublisher.close()
@@ -177,6 +191,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
   app.locals.scheduler = scheduler
   app.locals.executionCoordinator = coordinator
   app.locals.conversationCoordinator = conversationCoordinator
+  app.locals.dreamRunService = dreamRunService
   app.use(express.json())
 
   app.get('/api/health', (_request, response) => {

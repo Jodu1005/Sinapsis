@@ -5,7 +5,10 @@ import { LeaseReaper, LeaseReaperLoop } from './application/lease-reaper'
 import { SchedulerLoop, TaskScheduler } from './application/task-scheduler'
 import { ensureDataDirectory, getServiceConfig } from './config'
 import { TaskExecutionCoordinator } from './application/task-execution-coordinator'
+import { DreamScheduler } from './application/dream-scheduler'
+import type { DreamRunService } from './application/dream-run-service'
 import type { WorkspaceRepositories } from './ports/repositories'
+import { SystemClock } from './ports/clock'
 
 const config = getServiceConfig()
 await ensureDataDirectory(config.dataDir)
@@ -19,10 +22,21 @@ const scheduler = app.locals.scheduler as TaskScheduler
 const coordinator = app.locals.executionCoordinator as TaskExecutionCoordinator
 const schedulerLoop = new SchedulerLoop(scheduler, repositories, 1_000, () => new Date(), coordinator)
 const leaseReaperLoop = new LeaseReaperLoop(new LeaseReaper(repositories, coordinator, repositories))
+const dreamRunService = app.locals.dreamRunService as DreamRunService
+const dreamScheduler = config.dreamEnabled
+  ? new DreamScheduler({
+      clock: new SystemClock(),
+      time: config.dreamTime,
+      timeZone: config.dreamTimeZone,
+      trigger: () => { dreamRunService.enqueueAllActive('scheduled') },
+    })
+  : undefined
 const server = app.listen(config.port, '127.0.0.1', () => {
   console.log(`Sinapsis local service listening on http://127.0.0.1:${config.port}`)
   schedulerLoop.start()
   leaseReaperLoop.start()
+  dreamScheduler?.start()
+  if (dreamScheduler) console.log(`Dream maintenance scheduled for ${config.dreamTime} (${config.dreamTimeZone})`)
 })
 
 let shuttingDown = false
@@ -35,6 +49,7 @@ async function closeGracefully(signal: NodeJS.Signals, service: Server): Promise
   shuttingDown = true
   console.log(`${signal} received, stopping Sinapsis local service.`)
   schedulerLoop.stop()
+  dreamScheduler?.stop()
   await leaseReaperLoop.stop()
   await coordinator.shutdown()
   const closeSse = app.locals.closeSse as (() => void) | undefined

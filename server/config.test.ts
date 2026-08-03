@@ -104,4 +104,38 @@ describe('getServiceConfig', () => {
     expect(() => getServiceConfig({ SINAPSIS_MAX_DREAM_CANDIDATES_PER_RUN: '51' }))
       .toThrow('SINAPSIS_MAX_DREAM_CANDIDATES_PER_RUN must be between 1 and 50.')
   })
+
+  it('defaults Dream scheduling controls', () => {
+    expect(getServiceConfig({})).toMatchObject({
+      dreamEnabled: true,
+      dreamTime: '03:00',
+      dreamTimeZone: 'Asia/Shanghai',
+      dreamMaintenanceConcurrency: 1,
+    })
+  })
+
+  it('parses configured Dream scheduling controls', () => {
+    expect(getServiceConfig({
+      SINAPSIS_DREAM_ENABLED: 'false',
+      SINAPSIS_DREAM_TIME: '22:45',
+      SINAPSIS_DREAM_TIME_ZONE: 'America/New_York',
+      SINAPSIS_DREAM_MAINTENANCE_CONCURRENCY: '3',
+    })).toMatchObject({
+      dreamEnabled: false,
+      dreamTime: '22:45',
+      dreamTimeZone: 'America/New_York',
+      dreamMaintenanceConcurrency: 3,
+    })
+  })
+
+  it('rejects invalid Dream scheduling controls', () => {
+    expect(() => getServiceConfig({ SINAPSIS_DREAM_ENABLED: 'sometimes' }))
+      .toThrow('SINAPSIS_DREAM_ENABLED must be true or false.')
+    expect(() => getServiceConfig({ SINAPSIS_DREAM_TIME: '24:00' }))
+      .toThrow('SINAPSIS_DREAM_TIME must use 24-hour HH:mm format.')
+    expect(() => getServiceConfig({ SINAPSIS_DREAM_TIME_ZONE: 'Mars/Olympus' }))
+      .toThrow('SINAPSIS_DREAM_TIME_ZONE must be a valid IANA time zone.')
+    expect(() => getServiceConfig({ SINAPSIS_DREAM_MAINTENANCE_CONCURRENCY: '0' }))
+      .toThrow('SINAPSIS_DREAM_MAINTENANCE_CONCURRENCY must be a positive integer.')
+  })
 })

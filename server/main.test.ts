@@ -29,7 +29,7 @@ describe('local service shutdown', () => {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 
-    await waitForOutput(child.stdout!, 'Sinapsis local service listening')
+    await waitForOutput(child.stdout!, 'Dream maintenance scheduled')
     const response = await fetch(`http://127.0.0.1:${port}/events`)
     expect(response.status).toBe(200)
 

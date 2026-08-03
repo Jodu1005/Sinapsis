@@ -18,6 +18,10 @@ export interface ServiceConfig {
   dreamModel: string
   dreamTimeoutMs: number
   maxDreamCandidatesPerRun: number
+  dreamEnabled: boolean
+  dreamTime: string
+  dreamTimeZone: string
+  dreamMaintenanceConcurrency: number
 }
 
 const defaultDataDir = path.join(homedir(), '.sinapsis')
@@ -33,6 +37,8 @@ const defaultConversationResponseTimeoutMs = 90_000
 const defaultDreamRuntime: RuntimeKind = 'pi'
 const defaultDreamTimeoutMs = 120_000
 const defaultMaxDreamCandidatesPerRun = 20
+const defaultDreamTime = '03:00'
+const defaultDreamTimeZone = 'Asia/Shanghai'
 
 export function getServiceConfig(environment = process.env): ServiceConfig {
   return {
@@ -69,6 +75,14 @@ export function getServiceConfig(environment = process.env): ServiceConfig {
       defaultMaxDreamCandidatesPerRun,
       'SINAPSIS_MAX_DREAM_CANDIDATES_PER_RUN',
       50,
+    ),
+    dreamEnabled: parseBoolean(environment.SINAPSIS_DREAM_ENABLED, true, 'SINAPSIS_DREAM_ENABLED'),
+    dreamTime: parseTime(environment.SINAPSIS_DREAM_TIME, defaultDreamTime, 'SINAPSIS_DREAM_TIME'),
+    dreamTimeZone: parseTimeZone(environment.SINAPSIS_DREAM_TIME_ZONE, defaultDreamTimeZone, 'SINAPSIS_DREAM_TIME_ZONE'),
+    dreamMaintenanceConcurrency: parsePositiveInteger(
+      environment.SINAPSIS_DREAM_MAINTENANCE_CONCURRENCY,
+      1,
+      'SINAPSIS_DREAM_MAINTENANCE_CONCURRENCY',
     ),
   }
 }
@@ -129,4 +143,31 @@ function parseRuntimeKind(value: string | undefined): RuntimeKind {
     throw new Error(`SINAPSIS_DREAM_RUNTIME must be one of: ${runtimeKinds.join(', ')}.`)
   }
   return runtime as RuntimeKind
+}
+
+function parseBoolean(value: string | undefined, defaultValue: boolean, name: string): boolean {
+  if (value === undefined || !value.trim()) return defaultValue
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'true') return true
+  if (normalized === 'false') return false
+  throw new Error(`${name} must be true or false.`)
+}
+
+function parseTime(value: string | undefined, defaultValue: string, name: string): string {
+  const normalized = value?.trim() || defaultValue
+  const match = /^(\d{2}):(\d{2})$/.exec(normalized)
+  if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) {
+    throw new Error(`${name} must use 24-hour HH:mm format.`)
+  }
+  return normalized
+}
+
+function parseTimeZone(value: string | undefined, defaultValue: string, name: string): string {
+  const normalized = value?.trim() || defaultValue
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: normalized }).format(0)
+    return normalized
+  } catch {
+    throw new Error(`${name} must be a valid IANA time zone.`)
+  }
 }

@@ -26,6 +26,16 @@ describe('local service API', () => {
     await expect(response.json()).resolves.toEqual({ status: 'ok' })
   })
 
+  it('composes Dream maintenance without starting its daily scheduler in the test app', () => {
+    const app = createApp()
+    try {
+      expect(app.locals.dreamRunService).toMatchObject({ enqueue: expect.any(Function), waitFor: expect.any(Function) })
+      expect(app.locals.dreamScheduler).toBeUndefined()
+    } finally {
+      app.locals.closeDatabase()
+    }
+  })
+
   it('creates a workspace from a validated JSON request', async () => {
     const server = await startHttpTestServer(createApp())
     closeServer = server.close
