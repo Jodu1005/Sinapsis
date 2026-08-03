@@ -162,6 +162,82 @@ describe('SQLite workspace repositories', () => {
     expect(repositories.getDreamRun(run.id)?.candidateCount).toBe(0)
   })
 
+  it('restores a recovery-superseded candidate when replay provides a new valid source', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const staleSource = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Source removed before recovery.',
+    })
+    const replaySource = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'A retained source confirms the same fact.',
+    })
+    const run = repositories.createIncrementalDreamRun({ channelId: channel.id, trigger: 'scheduled' })
+    repositories.updateDreamRun(run.id, {
+      status: 'running', startedAt: '2026-08-03T00:00:00.000Z',
+    })
+    const staleCandidate = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Deployments require review.', rationale: 'Confirmed by the original source.',
+      confidence: 0.8, importance: 0.7, sourceMessageIds: [staleSource.id],
+    })
+    repositories.deleteMessage(staleSource.id)
+    repositories.recoverDreamMemory(new Date('2026-08-03T00:01:00.000Z'))
+    expect(repositories.getMemoryCandidate(staleCandidate.id)).toMatchObject({
+      status: 'superseded', reviewedAt: '2026-08-03T00:01:00.000Z',
+    })
+    expect(repositories.listMemoryCandidateSourceMetadata(staleCandidate.id)).toEqual([])
+
+    const restored = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Deployments require review.', rationale: 'Reconfirmed by a retained source.',
+      confidence: 0.95, importance: 0.9, sourceMessageIds: [replaySource.id],
+    })
+
+    expect(restored).toMatchObject({ id: staleCandidate.id, status: 'pending', reviewedAt: null })
+    expect(repositories.listMemoryCandidateSourceMetadata(restored.id)).toEqual([
+      expect.objectContaining({ channelId: channel.id, messageId: replaySource.id }),
+    ])
+    expect(repositories.listMemoryCandidates({ dreamRunId: run.id })).toHaveLength(1)
+    expect(database!.database.prepare(`
+      SELECT message_id FROM memory_candidate_sources WHERE candidate_id = ? ORDER BY message_id
+    `).all(restored.id)).toEqual([
+      { message_id: replaySource.id },
+      { message_id: staleSource.id },
+    ].sort((left, right) => left.message_id.localeCompare(right.message_id)))
+    expect(database!.database.prepare(`
+      SELECT error FROM dream_recovery_audit WHERE entity_id = ?
+    `).get(restored.id)).toEqual({ error: 'invalid_candidate_sources' })
+  })
+
+  it('does not reactivate a superseded candidate without a matching recovery audit', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const source = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Reviewed source.',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'manual', from: null,
+      to: { createdAt: source.createdAt, id: source.id },
+    })
+    const candidate = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Reviewed fact.', rationale: 'Review fixture.', confidence: 0.8, importance: 0.7,
+      sourceMessageIds: [source.id],
+    })
+    repositories.reviewMemoryCandidate({
+      candidateId: candidate.id, status: 'superseded', occurredAt: new Date('2026-08-03T00:00:00.000Z'),
+    })
+
+    expect(() => repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Reviewed fact.', rationale: 'Must not override review.', confidence: 0.9, importance: 0.9,
+      sourceMessageIds: [source.id],
+    })).toThrow(/UNIQUE constraint failed/)
+    expect(repositories.getMemoryCandidate(candidate.id)).toMatchObject({
+      status: 'superseded', reviewedAt: '2026-08-03T00:00:00.000Z',
+    })
+  })
+
   it('creates idempotent incremental Dream runs with a fixed public message snapshot', async () => {
     const { repositories } = await createRepositories()
     const channel = createChannel(repositories)

@@ -1325,7 +1325,37 @@ export class SqliteRepositories implements WorkspaceRepositories {
     `).get(
       candidate.dreamRunId, candidate.contentHash, candidate.proposedScope, candidate.channelId,
     ) as MemoryCandidateRow | undefined
-    if (existing) return mapMemoryCandidate(existing)
+    if (existing) {
+      if (existing.status === 'pending') {
+        this.insertMemoryCandidateSources(existing.id, sourceMessageIds)
+        return mapMemoryCandidate(existing)
+      }
+      const recoverySuperseded = existing.status === 'superseded' && database.prepare(`
+        SELECT 1 FROM dream_recovery_audit
+        WHERE entity_type = 'memory_candidate'
+          AND entity_id = ?
+          AND error = 'invalid_candidate_sources'
+          AND created_at = ?
+      `).get(existing.id, existing.reviewed_at)
+      if (!recoverySuperseded) {
+        throw new Error('UNIQUE constraint failed: memory_candidates_run_content_unique_idx')
+      }
+      database.prepare(`
+        UPDATE memory_candidates
+        SET kind = ?, proposed_content = ?, rationale = ?, confidence = ?, importance = ?,
+          status = 'pending', reviewed_content = NULL, reviewed_scope = NULL,
+          reviewed_channel_id = NULL, reviewed_at = NULL
+        WHERE id = ? AND status = 'superseded'
+      `).run(
+        candidate.kind, candidate.proposedContent, candidate.rationale, candidate.confidence,
+        candidate.importance, existing.id,
+      )
+      this.insertMemoryCandidateSources(existing.id, sourceMessageIds)
+      this.sqlite.afterCommit(() => this.publisher.publish(event(
+        'memory.candidate_created', 'memory_candidate', existing.id, createdAt,
+      )))
+      return this.getMemoryCandidate(existing.id)!
+    }
     database.prepare(`
       INSERT INTO memory_candidates (
         id, dream_run_id, proposed_scope, channel_id, kind, proposed_content, rationale, confidence,
@@ -1336,14 +1366,20 @@ export class SqliteRepositories implements WorkspaceRepositories {
       candidate.proposedContent, candidate.rationale, candidate.confidence, candidate.importance, candidate.contentHash,
       candidate.status, candidate.reviewedContent, candidate.reviewedScope, candidate.reviewedChannelId ?? null, candidate.reviewedAt, candidate.createdAt,
     )
-    for (const sourceMessageId of sourceMessageIds) {
-      database.prepare('INSERT INTO memory_candidate_sources (candidate_id, message_id, turn_id) VALUES (?, ?, ?)').run(
-        candidate.id, sourceMessageId, sourceTurnId(database, sourceMessageId),
-      )
-    }
+    this.insertMemoryCandidateSources(candidate.id, sourceMessageIds)
     database.prepare('UPDATE dream_runs SET candidate_count = candidate_count + 1 WHERE id = ?').run(run.id)
     this.sqlite.afterCommit(() => this.publisher.publish(event('memory.candidate_created', 'memory_candidate', candidate.id, createdAt)))
     return candidate
+  }
+
+  private insertMemoryCandidateSources(candidateId: string, sourceMessageIds: string[]): void {
+    const database = this.sqlite.database
+    const insertSource = database.prepare(`
+      INSERT OR IGNORE INTO memory_candidate_sources (candidate_id, message_id, turn_id) VALUES (?, ?, ?)
+    `)
+    for (const sourceMessageId of sourceMessageIds) {
+      insertSource.run(candidateId, sourceMessageId, sourceTurnId(database, sourceMessageId))
+    }
   }
 
   getMemoryCandidate(candidateId: string): MemoryCandidate | undefined {
