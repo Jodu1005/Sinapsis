@@ -545,6 +545,7 @@ interface AcceptMemoryCandidateRequest {
 - PATCH 保留来源并更新 hash；与现有 Memory 冲突返回 409。
 - DELETE 设置 `archivedAt`，来源行仍存在。
 - API 不返回 Dream Runtime 原始日志和 Prompt。
+- Candidate 查询与所有审核、Memory 写操作必须验证服务进程随机生成的人类 capability；Agent Runtime 不得接收该凭证。
 
 - [ ] **Step 2: 运行测试并确认失败**
 

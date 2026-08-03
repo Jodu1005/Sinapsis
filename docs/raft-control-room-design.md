@@ -400,6 +400,8 @@ Dream 是独立于频道 Agent 对话队列的后台维护流程。定时调度�
 
 提取结果先写入 `MemoryCandidate`，状态为 `pending`，绝不直接进入 Agent Prompt。Dream Center 展示待审核 badge、Run 状态、候选来源和审核动作；人可以在接受前修改内容，并选择 Global 或 Channel scope，也可以忽略 Candidate。Global Memory 对所有频道生效，Channel Memory 仅对目标频道生效；Thread 层不创建独立 Memory scope，而由持久化 Thread Summary 表达。Agent 冷启动 Prompt 按“系统与 Agent 职责 -> 已确认 Global Memory -> 已确认 Channel Memory -> Thread Summary -> Summary 水位之后的近期公开消息 -> 当前调用指令”组装，各历史层都标记为不可信参考。Candidate 未接受前不注入；Memory 编辑后下一次冷启动立即读取新内容；`DELETE /api/memories/:memoryId` 仅将 Memory 软归档，保留 Candidate、来源与审核链，归档内容从后续 Prompt 排除。
 
+Memory Candidate 查询、接受、忽略以及 Memory 编辑、归档属于本地人类控制面。服务每次启动生成 256-bit 随机 capability，只通过启动日志中的人类 UI URL 交给浏览器；前端读取后立即从 URL 移除，并仅保存在当前标签页的 `sessionStorage`，随后只对 Dream/Memory 控制请求附加该 capability。Capability 不写数据库、不进入 Agent Runtime 环境、Prompt、消息或 Artifact；缺失或错误凭证统一返回 403。该机制防止 Agent 通过内置 HTTP API 冒充人工审核，但原型 1 仍没有 OS 级沙箱：拥有同一系统用户任意文件权限的恶意本机进程不在此控制面保证内，后续需要通过独立服务用户或容器进一步隔离。
+
 SQLite 持久化 Dream Run、水位来源、Candidate、Memory、来源映射与 Thread Summary。服务启动监听前在一个 `BEGIN IMMEDIATE` 事务中执行 Dream 恢复：所有遗留 `running` Run 原子改为 `failed`，`error=service_restarted` 且写入 `completedAt`，但保留边界和 `dream_run_sources`，因此成功水位不前移，下一次 enqueue 会复用同一个 Run 并重跑同一输入。恢复同时只隔离仍为 `pending` 且不存在任何未删除、同频道有效来源的 Candidate，将其标记为 `superseded`；其他有效 Candidate、Memory 和来源记录不物理删除。每个被隔离的 Candidate 在 `dream_recovery_audit` 中写入稳定错误码 `invalid_candidate_sources` 和实体 ID，不记录消息或 Candidate 内容。
 
 ## 上线前的人工演练

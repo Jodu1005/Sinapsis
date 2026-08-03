@@ -9,11 +9,13 @@ import { DreamScheduler } from './application/dream-scheduler'
 import type { DreamRunService } from './application/dream-run-service'
 import type { WorkspaceRepositories } from './ports/repositories'
 import { SystemClock } from './ports/clock'
+import { createHumanCapability } from './human-capability'
 
 const config = getServiceConfig()
 await ensureDataDirectory(config.dataDir)
 
-const app = createApp({ databasePath: path.join(config.dataDir, 'sinapsis.sqlite') })
+const humanCapability = createHumanCapability()
+const app = createApp({ databasePath: path.join(config.dataDir, 'sinapsis.sqlite'), humanCapability })
 const repositories = app.locals.repositories as WorkspaceRepositories
 repositories.recoverOrphanedAgents(new Date())
 repositories.recoverDreamMemory(new Date())
@@ -34,6 +36,7 @@ const dreamScheduler = config.dreamEnabled
   : undefined
 const server = app.listen(config.port, '127.0.0.1', () => {
   console.log(`Sinapsis local service listening on http://127.0.0.1:${config.port}`)
+  console.log(`Sinapsis human UI: http://localhost:5173/?humanCapability=${encodeURIComponent(humanCapability)}`)
   schedulerLoop.start()
   leaseReaperLoop.start()
   dreamScheduler?.start()

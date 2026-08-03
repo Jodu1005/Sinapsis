@@ -59,6 +59,8 @@ export interface AcceptMemoryCandidateRequest {
 }
 
 export class ApiClient implements WorkspaceApi {
+  private readonly humanCapability = captureHumanCapability()
+
   async getBootstrap(): Promise<WorkspaceSnapshot> { return this.request('/api/bootstrap') }
   async createWorkspace(input: { name: string }): Promise<WorkspaceView> {
     return this.request('/api/workspaces', { method: 'POST', body: JSON.stringify(input) })
@@ -152,7 +154,11 @@ export class ApiClient implements WorkspaceApi {
   async archiveMemory(id: string): Promise<MemoryView> { return this.request(`/api/memories/${id}`, { method: 'DELETE' }) }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const response = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...init.headers } })
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (isHumanControlPath(path) && this.humanCapability) {
+      headers['X-Sinapsis-Human-Capability'] = this.humanCapability
+    }
+    const response = await fetch(path, { ...init, headers: { ...headers, ...init.headers } })
     const payload: unknown = await response.json().catch(() => undefined)
     if (!response.ok) {
       const message = isErrorPayload(payload) ? payload.error : `请求失败 (${response.status})`
@@ -160,6 +166,28 @@ export class ApiClient implements WorkspaceApi {
     }
     return payload as T
   }
+}
+
+const humanCapabilityStorageKey = 'sinapsis:human-capability'
+
+function captureHumanCapability(): string | null {
+  if (typeof window === 'undefined') return null
+  const url = new URL(window.location.href)
+  const provided = url.searchParams.get('humanCapability')?.trim()
+  if (provided) {
+    window.sessionStorage.setItem(humanCapabilityStorageKey, provided)
+    url.searchParams.delete('humanCapability')
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+    return provided
+  }
+  return window.sessionStorage.getItem(humanCapabilityStorageKey)
+}
+
+function isHumanControlPath(path: string): boolean {
+  return path.startsWith('/api/dream/runs')
+    || path === '/api/memories'
+    || path.startsWith('/api/memories/')
+    || path.startsWith('/api/memory-candidates')
 }
 
 function isErrorPayload(value: unknown): value is { error: string } {

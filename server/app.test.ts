@@ -26,6 +26,52 @@ describe('local service API', () => {
     await expect(response.json()).resolves.toEqual({ status: 'ok' })
   })
 
+  it('requires a server-issued human capability for Memory review routes', async () => {
+    const humanCapability = 'test-human-capability-that-agents-do-not-receive'
+    const app = createApp({ humanCapability })
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Human review gate' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/human-review-gate' })
+    const channel = repositories.createChannel({ name: 'human-review-gate' })
+    const source = repositories.createMessage({
+      channelId: channel.id,
+      senderType: 'human',
+      authorName: 'You',
+      body: 'This candidate requires a human decision.',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'manual', from: null,
+      to: { createdAt: source.createdAt, id: source.id },
+    })
+    const candidate = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Humans approve durable memory.', rationale: 'Explicit review policy.', confidence: 0.9, importance: 0.9,
+      sourceMessageIds: [source.id],
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    expect((await fetch(`${server.baseUrl}/api/dream/runs`)).status).toBe(403)
+    expect((await fetch(`${server.baseUrl}/api/memory-candidates?status=pending`)).status).toBe(403)
+    expect((await fetch(`${server.baseUrl}/api/memory-candidates?status=pending`, {
+      headers: { 'x-sinapsis-human-capability': 'wrong-capability' },
+    })).status).toBe(403)
+    const forgedAccept = await fetch(`${server.baseUrl}/api/memory-candidates/${candidate.id}/accept`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: 'global', content: candidate.proposedContent }),
+    })
+    expect(forgedAccept.status).toBe(403)
+    expect(repositories.getMemoryCandidate(candidate.id)?.status).toBe('pending')
+
+    const authorized = await fetch(`${server.baseUrl}/api/memory-candidates?status=pending`, {
+      headers: { 'x-sinapsis-human-capability': humanCapability },
+    })
+    expect(authorized.status).toBe(200)
+    await expect(authorized.json()).resolves.toEqual([
+      expect.objectContaining({ id: candidate.id, status: 'pending' }),
+    ])
+  })
+
   it('composes Dream maintenance without starting its daily scheduler in the test app', () => {
     const app = createApp()
     try {
@@ -59,19 +105,19 @@ describe('local service API', () => {
     closeServer = server.close
 
     const rejectUnsafe = await fetch(`${server.baseUrl}/api/memory-candidates/${candidate.id}/accept`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: humanHeaders(app, true),
       body: JSON.stringify({ scope: 'global', content: 'API_KEY=super-secret-value', prompt: 'do not accept this' }),
     })
     expect(rejectUnsafe.status).toBe(400)
 
     const rejectOverLimitBeforeTrimming = await fetch(`${server.baseUrl}/api/memory-candidates/${candidate.id}/accept`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: humanHeaders(app, true),
       body: JSON.stringify({ scope: 'channel', channelId: targetChannel.id, content: `A${' '.repeat(10_000)}` }),
     })
     expect(rejectOverLimitBeforeTrimming.status).toBe(400)
 
     const accepted = await fetch(`${server.baseUrl}/api/memory-candidates/${candidate.id}/accept`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: humanHeaders(app, true),
       body: JSON.stringify({ scope: 'channel', channelId: targetChannel.id, content: 'React is the frontend standard.' }),
     })
     expect(accepted.status).toBe(200)
@@ -82,20 +128,20 @@ describe('local service API', () => {
     })
 
     const repeated = await fetch(`${server.baseUrl}/api/memory-candidates/${candidate.id}/accept`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: humanHeaders(app, true),
       body: JSON.stringify({ scope: 'global', content: 'A later request cannot change accepted Memory.' }),
     })
     await expect(repeated.json()).resolves.toMatchObject({ id: memory.id, channelId: targetChannel.id })
 
-    const runs = await fetch(`${server.baseUrl}/api/dream/runs`)
+    const runs = await fetch(`${server.baseUrl}/api/dream/runs`, { headers: humanHeaders(app) })
     const runsJson = await runs.json() as unknown
     expect(JSON.stringify(runsJson)).not.toMatch(/runtime.*(?:log|prompt)|artifact/i)
 
     const changed = await fetch(`${server.baseUrl}/api/memories/${memory.id}`, {
-      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Frontend standard: React.' }),
+      method: 'PATCH', headers: humanHeaders(app, true), body: JSON.stringify({ content: 'Frontend standard: React.' }),
     })
     expect(changed.status).toBe(200)
-    const archived = await fetch(`${server.baseUrl}/api/memories/${memory.id}`, { method: 'DELETE' })
+    const archived = await fetch(`${server.baseUrl}/api/memories/${memory.id}`, { method: 'DELETE', headers: humanHeaders(app) })
     await expect(archived.json()).resolves.toMatchObject({ status: 'archived', sourceCandidateId: candidate.id, archivedAt: expect.any(String) })
   })
 
@@ -124,7 +170,7 @@ describe('local service API', () => {
     const server = await startHttpTestServer(app)
     closeServer = server.close
 
-    const filtered = await fetch(`${server.baseUrl}/api/memory-candidates?status=pending`)
+    const filtered = await fetch(`${server.baseUrl}/api/memory-candidates?status=pending`, { headers: humanHeaders(app) })
     expect(filtered.status).toBe(200)
     const candidates = await filtered.json() as Array<Record<string, unknown>>
     expect(candidates).toHaveLength(1)
@@ -135,7 +181,7 @@ describe('local service API', () => {
     })
     expect(JSON.stringify(candidates)).not.toMatch(/runtime|prompt|log|artifact|公开讨论内容/i)
 
-    const invalid = await fetch(`${server.baseUrl}/api/memory-candidates?status=unknown`)
+    const invalid = await fetch(`${server.baseUrl}/api/memory-candidates?status=unknown`, { headers: humanHeaders(app) })
     expect(invalid.status).toBe(400)
 
     const bootstrap = await fetch(`${server.baseUrl}/api/bootstrap`)
@@ -175,12 +221,12 @@ describe('local service API', () => {
     closeServer = server.close
 
     const invalid = await fetch(`${server.baseUrl}/api/dream/runs`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ channelId: channel.id, runtimeLog: 'private' }),
+      method: 'POST', headers: humanHeaders(app, true), body: JSON.stringify({ channelId: channel.id, runtimeLog: 'private' }),
     })
     expect(invalid.status).toBe(400)
 
     const queued = await fetch(`${server.baseUrl}/api/dream/runs`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ channelId: channel.id }),
+      method: 'POST', headers: humanHeaders(app, true), body: JSON.stringify({ channelId: channel.id }),
     })
     expect(queued.status).toBe(202)
     await expect(queued.json()).resolves.toEqual([expect.objectContaining({ scopeId: channel.id, status: expect.stringMatching(/queued|running|completed/) })])
@@ -197,7 +243,7 @@ describe('local service API', () => {
     const server = await startHttpTestServer(app)
     closeServer = server.close
 
-    const response = await fetch(`${server.baseUrl}/api/dream/runs`)
+    const response = await fetch(`${server.baseUrl}/api/dream/runs`, { headers: humanHeaders(app) })
     expect(response.status).toBe(200)
     const runs = await response.json() as Array<Record<string, unknown>>
     expect(runs).toEqual([expect.objectContaining({ id: run.id, status: 'failed', errorCategory: 'runtime_failure' })])
@@ -206,25 +252,26 @@ describe('local service API', () => {
   })
 
   it('returns stable not-found and strict-body errors for Dream and Memory mutations', async () => {
-    const server = await startHttpTestServer(createApp())
+    const app = createApp()
+    const server = await startHttpTestServer(app)
     closeServer = server.close
 
     const unknownDreamChannel = await fetch(`${server.baseUrl}/api/dream/runs`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ channelId: 'missing-channel' }),
+      method: 'POST', headers: humanHeaders(app, true), body: JSON.stringify({ channelId: 'missing-channel' }),
     })
     expect(unknownDreamChannel.status).toBe(404)
 
     const missingMemoryPatch = await fetch(`${server.baseUrl}/api/memories/missing-memory`, {
-      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Updated.' }),
+      method: 'PATCH', headers: humanHeaders(app, true), body: JSON.stringify({ content: 'Updated.' }),
     })
     expect(missingMemoryPatch.status).toBe(404)
 
     const invalidDelete = await fetch(`${server.baseUrl}/api/memories/missing-memory`, {
-      method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ force: true }),
+      method: 'DELETE', headers: humanHeaders(app, true), body: JSON.stringify({ force: true }),
     })
     expect(invalidDelete.status).toBe(400)
 
-    const missingMemoryDelete = await fetch(`${server.baseUrl}/api/memories/missing-memory`, { method: 'DELETE' })
+    const missingMemoryDelete = await fetch(`${server.baseUrl}/api/memories/missing-memory`, { method: 'DELETE', headers: humanHeaders(app) })
     expect(missingMemoryDelete.status).toBe(404)
   })
 
@@ -1325,5 +1372,12 @@ async function readSseEventsUntil(
       events.push(event)
       if (done(event)) return events
     }
+  }
+}
+
+function humanHeaders(app: ReturnType<typeof createApp>, json = false): Record<string, string> {
+  return {
+    ...(json ? { 'content-type': 'application/json' } : {}),
+    'x-sinapsis-human-capability': app.locals.humanCapability as string,
   }
 }

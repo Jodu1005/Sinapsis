@@ -42,6 +42,7 @@ import type { GitClient } from './ports/git-client'
 import { NodeProcessRunner } from './ports/process-runner'
 import type { ConversationTurnDetails, WorkspaceRepositories, WorkspaceUnitOfWork } from './ports/repositories'
 import type { RuntimeAdapter } from './ports/runtime'
+import { createHumanCapability, requireHumanCapability } from './human-capability'
 
 export interface PublicConversationTurnDetails {
   turn: PublicConversationTurn
@@ -126,11 +127,14 @@ export interface CreateAppOptions {
   >>
   scheduler?: TaskScheduler
   reviewService?: TaskReviewService
+  humanCapability?: string
 }
 
 export function createApp(options: CreateAppOptions = {}): Express {
   const app = express()
   const serviceConfig = getServiceConfig()
+  const humanCapability = options.humanCapability ?? createHumanCapability()
+  const requireHuman = requireHumanCapability(humanCapability)
   const databasePath = options.databasePath ?? defaultDatabasePath(serviceConfig.dataDir)
   const maxWorkspaceBindingsPerChannel = options.maxWorkspaceBindingsPerChannel ?? serviceConfig.maxWorkspaceBindingsPerChannel
   const database = createSqliteDatabase(databasePath)
@@ -192,6 +196,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
   app.locals.closeDatabase = () => database.close()
   app.locals.closeSse = () => eventPublisher.close()
   app.locals.repositories = repositories
+  app.locals.humanCapability = humanCapability
   app.locals.scheduler = scheduler
   app.locals.executionCoordinator = coordinator
   app.locals.conversationCoordinator = conversationCoordinator
@@ -203,11 +208,11 @@ export function createApp(options: CreateAppOptions = {}): Express {
     response.json({ status: 'ok' })
   })
 
-  app.get('/api/dream/runs', (_request, response) => {
+  app.get('/api/dream/runs', requireHuman, (_request, response) => {
     response.json(repositories.listDreamRuns().map(toPublicDreamRun))
   })
 
-  app.post('/api/dream/runs', asyncRoute((request, response) => {
+  app.post('/api/dream/runs', requireHuman, asyncRoute((request, response) => {
     const body = objectBody(request.body)
     assertOnlyKeys(body, ['channelId'])
     let runs: DreamRun[]
@@ -221,13 +226,13 @@ export function createApp(options: CreateAppOptions = {}): Express {
     response.status(202).json(runs.map(toPublicDreamRun))
   }))
 
-  app.get('/api/dream/runs/:runId', asyncRoute((request, response) => {
+  app.get('/api/dream/runs/:runId', requireHuman, asyncRoute((request, response) => {
     const run = repositories.getDreamRun(requiredParam(request.params.runId, 'runId'))
     if (!run) throw new NotFoundError(`Dream run ${request.params.runId} does not exist.`)
     response.json(toPublicDreamRun(run))
   }))
 
-  app.get('/api/memory-candidates', (request, response) => {
+  app.get('/api/memory-candidates', requireHuman, (request, response) => {
     const status = optionalMemoryCandidateStatus(request.query.status)
     response.json(memoryReviewService.listCandidates(status).map((candidate) => toPublicMemoryCandidate(
       candidate,
@@ -235,7 +240,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     )))
   })
 
-  app.post('/api/memory-candidates/:candidateId/accept', asyncRoute((request, response) => {
+  app.post('/api/memory-candidates/:candidateId/accept', requireHuman, asyncRoute((request, response) => {
     const body = objectBody(request.body)
     assertOnlyKeys(body, ['scope', 'channelId', 'content'])
     const scope = memoryScope(body.scope)
@@ -245,17 +250,17 @@ export function createApp(options: CreateAppOptions = {}): Express {
     response.json(toPublicMemory(memory))
   }))
 
-  app.post('/api/memory-candidates/:candidateId/ignore', asyncRoute((request, response) => {
+  app.post('/api/memory-candidates/:candidateId/ignore', requireHuman, asyncRoute((request, response) => {
     const body = objectBody(request.body)
     assertOnlyKeys(body, [])
     response.json(toPublicMemoryCandidate(memoryReviewService.ignore(requiredParam(request.params.candidateId, 'candidateId'))))
   }))
 
-  app.get('/api/memories', (_request, response) => {
+  app.get('/api/memories', requireHuman, (_request, response) => {
     response.json(memoryReviewService.listMemories().map(toPublicMemory))
   })
 
-  app.patch('/api/memories/:memoryId', asyncRoute((request, response) => {
+  app.patch('/api/memories/:memoryId', requireHuman, asyncRoute((request, response) => {
     const body = objectBody(request.body)
     assertOnlyKeys(body, ['content'])
     response.json(toPublicMemory(memoryReviewService.update(
@@ -263,7 +268,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     )))
   }))
 
-  app.delete('/api/memories/:memoryId', asyncRoute((request, response) => {
+  app.delete('/api/memories/:memoryId', requireHuman, asyncRoute((request, response) => {
     const body = request.body === undefined ? {} : objectBody(request.body)
     assertOnlyKeys(body, [])
     response.json(toPublicMemory(memoryReviewService.archive(requiredParam(request.params.memoryId, 'memoryId'))))

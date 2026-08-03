@@ -259,13 +259,13 @@ describe('Dream Memory lifecycle', () => {
     try {
       const manual = await fetch(`${server.baseUrl}/api/dream/runs`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: humanHeaders(app, true),
         body: JSON.stringify({ channelId: alphaId }),
       })
       expect(manual.status).toBe(202)
       const queued = await manual.json() as Array<{ id: string; scopeId: string }>
       expect(queued).toEqual([expect.objectContaining({ scopeId: alphaId })])
-      await expect(waitForDreamRun(server.baseUrl, queued[0]!.id)).resolves.toMatchObject({
+      await expect(waitForDreamRun(server.baseUrl, queued[0]!.id, humanHeaders(app))).resolves.toMatchObject({
         status: 'completed', candidateCount: 3,
       })
       expect(dreamRuntime.requests).toHaveLength(1)
@@ -279,7 +279,7 @@ describe('Dream Memory lifecycle', () => {
         'PRIVATE_RAW_RUNTIME_TEXT', 'PRIVATE_DELIBERATION', 'PRIVATE_STDERR', 'PRIVATE_ARTIFACT',
       ]) expect(dreamRuntime.requests[0]!.description).not.toContain(privateValue)
 
-      const pendingResponse = await fetch(`${server.baseUrl}/api/memory-candidates?status=pending`)
+      const pendingResponse = await fetch(`${server.baseUrl}/api/memory-candidates?status=pending`, { headers: humanHeaders(app) })
       expect(pendingResponse.status).toBe(200)
       const pending = await pendingResponse.json() as Array<{ id: string; proposedContent: string }>
       const candidate = pending.find((item) => item.proposedContent === 'Team uses Chinese for release notes.')
@@ -287,7 +287,7 @@ describe('Dream Memory lifecycle', () => {
 
       const acceptedResponse = await fetch(`${server.baseUrl}/api/memory-candidates/${candidate!.id}/accept`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: humanHeaders(app, true),
         body: JSON.stringify({ scope: 'global', content: candidate!.proposedContent }),
       })
       expect(acceptedResponse.status).toBe(200)
@@ -296,7 +296,7 @@ describe('Dream Memory lifecycle', () => {
 
       const editedResponse = await fetch(`${server.baseUrl}/api/memories/${accepted.id}`, {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        headers: humanHeaders(app, true),
         body: JSON.stringify({ content: 'Team uses bilingual release notes.' }),
       })
       expect(editedResponse.status).toBe(200)
@@ -304,12 +304,12 @@ describe('Dream Memory lifecycle', () => {
         id: accepted.id, content: 'Team uses bilingual release notes.', status: 'active',
       })
 
-      const archivedResponse = await fetch(`${server.baseUrl}/api/memories/${accepted.id}`, { method: 'DELETE' })
+      const archivedResponse = await fetch(`${server.baseUrl}/api/memories/${accepted.id}`, { method: 'DELETE', headers: humanHeaders(app) })
       expect(archivedResponse.status).toBe(200)
       await expect(archivedResponse.json()).resolves.toMatchObject({
         id: accepted.id, status: 'archived', archivedAt: expect.any(String),
       })
-      const memories = await fetch(`${server.baseUrl}/api/memories`).then((response) => response.json()) as unknown[]
+      const memories = await fetch(`${server.baseUrl}/api/memories`, { headers: humanHeaders(app) }).then((response) => response.json()) as unknown[]
       expect(memories).toEqual([])
     } finally {
       await server.close()
@@ -331,6 +331,13 @@ function seedChannels(repositories: WorkspaceRepositories, repositoryPath: strin
   return {
     alphaId: repositories.createChannel({ name: 'dream-alpha' }).id,
     betaId: repositories.createChannel({ name: 'dream-beta' }).id,
+  }
+}
+
+function humanHeaders(app: ReturnType<typeof createApp>, json = false): Record<string, string> {
+  return {
+    ...(json ? { 'content-type': 'application/json' } : {}),
+    'x-sinapsis-human-capability': app.locals.humanCapability as string,
   }
 }
 
@@ -402,10 +409,10 @@ function candidateWithContent(candidates: MemoryCandidate[], content: string): M
   return candidate
 }
 
-async function waitForDreamRun(baseUrl: string, runId: string): Promise<Record<string, unknown>> {
+async function waitForDreamRun(baseUrl: string, runId: string, headers: Record<string, string>): Promise<Record<string, unknown>> {
   const deadline = Date.now() + 2_000
   while (true) {
-    const response = await fetch(`${baseUrl}/api/dream/runs/${runId}`)
+    const response = await fetch(`${baseUrl}/api/dream/runs/${runId}`, { headers })
     expect(response.status).toBe(200)
     const run = await response.json() as Record<string, unknown>
     if (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled') return run

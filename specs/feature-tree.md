@@ -70,7 +70,7 @@
 |-- F7 Dream Memory 与上下文
 |   |-- F7.1 可配置定时 Dream 与手动单频道/全部频道运行
 |   |-- F7.2 独立维护队列、按频道隔离和 completed-only 水位
-|   |-- F7.3 Candidate 来源追溯、人工编辑 scope/content、接受与忽略
+|   |-- F7.3 Candidate 来源追溯、受本地人类 capability 保护的 scope/content 编辑、接受与忽略
 |   |-- F7.4 Global Memory、Channel Memory 与 Thread Summary 分层注入
 |   |-- F7.5 Memory 编辑即时生效、软归档及来源审计保留
 |   |-- F7.6 Dream Center 的待审核 badge、Run 与来源详情
@@ -114,6 +114,7 @@
 - 接受不等于合并；`git push`、合并和仓外副作用必须有独立人工确认。
 - Conversation Turn 的 Runtime 原始 Artifact、私有 Prompt 和结构化路由不得进入频道或公开 Turn 详情。
 - Dream Candidate 在人工接受前不得进入任何 Agent Prompt；Runtime Artifact、敏感内容和无有效来源 Candidate 不得成为可接受 Memory。
+- Memory 审核控制面必须验证服务进程生成的人类 capability；凭证不得进入 Agent Runtime 环境、Prompt、消息、数据库或 Artifact。
 - Dream 成功水位只由 `completed` Run 推进；失败与重启恢复必须保留固定来源集合，使同一输入可重跑。
 - Agent 冷启动上下文按 Global Memory、Channel Memory、Thread Summary、近期公开消息的层级注入；Global 跨频道，Channel 只作用于目标频道，Thread Summary 只作用于对应 Thread。
 - Memory 删除是软归档，不物理删除 Candidate、来源或审核历史。

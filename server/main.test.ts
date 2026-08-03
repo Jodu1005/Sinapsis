@@ -29,7 +29,15 @@ describe('local service shutdown', () => {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 
-    await waitForOutput(child.stdout!, 'Dream maintenance scheduled')
+    const startupOutput = await waitForOutput(child.stdout!, 'Dream maintenance scheduled')
+    const humanCapability = /humanCapability=([^\s]+)/.exec(startupOutput)?.[1]
+    expect(humanCapability).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect((await fetch(`http://127.0.0.1:${port}/api/memory-candidates?status=pending`)).status).toBe(403)
+    const authorizedReview = await fetch(`http://127.0.0.1:${port}/api/memory-candidates?status=pending`, {
+      headers: { 'x-sinapsis-human-capability': humanCapability! },
+    })
+    expect(authorizedReview.status).toBe(200)
+    await expect(authorizedReview.json()).resolves.toEqual([])
     const response = await fetch(`http://127.0.0.1:${port}/events`)
     expect(response.status).toBe(200)
 
@@ -270,13 +278,15 @@ async function reservePort(): Promise<number> {
   return address.port
 }
 
-function waitForOutput(output: NodeJS.ReadableStream, expected: string): Promise<void> {
+function waitForOutput(output: NodeJS.ReadableStream, expected: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error(`Did not receive: ${expected}`)), 2_000)
+    let received = ''
     output.on('data', (chunk: Buffer) => {
-      if (!chunk.toString().includes(expected)) return
+      received += chunk.toString()
+      if (!received.includes(expected)) return
       clearTimeout(timeout)
-      resolve()
+      resolve(received)
     })
   })
 }
