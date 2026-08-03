@@ -55,3 +55,9 @@ Task 3/4 review round 1: 4 P1, 3 P2 (lowercase AWS filtering, same-millisecond l
 Task 3/4 review adjudication: restart recovery is explicitly Task 7 Step 3 and remains scheduled there; all other findings fixed in current round
 Task 3/4 fix round 1: source-completion fallback closes late-message gap; late cancel diagnostics persist; DST is once/day; scheduler generations isolate stale callbacks; shutdown drains maintenance
 Task 3/4 fix verification: focused 6 files and 118/118 tests; full suite 56 files and 568/568 tests; build and diff check passed
+Task 3/4 fix commit: 3681048 fix: harden dream maintenance scheduling
+Task 3/4 scoped re-review: Aquinas, clean; restart recovery accepted as Task 7 Step 3
+Task 3: complete (commits 56d4627..3681048, review clean)
+Task 4: complete (commits b1b9941..3681048, review clean)
+Task 5: in progress
+Task 5 base: 3681048
