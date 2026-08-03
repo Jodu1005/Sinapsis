@@ -1118,6 +1118,62 @@ export class SqliteRepositories implements WorkspaceRepositories {
     })
   }
 
+  createIncrementalDreamRun(input: { channelId: string; trigger: DreamRun['trigger'] }): DreamRun {
+    return this.inTransaction(() => {
+      const database = this.sqlite.database
+      const channel = readChannel(database, input.channelId)
+      if (!channel) throw new Error(`Channel ${input.channelId} does not exist.`)
+      if (channel.archivedAt) throw new Error(`Channel #${channel.name} is archived.`)
+
+      const watermark = this.getDreamWatermark(input.channelId)
+      const rows = database.prepare(`
+        SELECT messages.id, messages.created_at
+        FROM messages
+        JOIN channels ON channels.id = messages.channel_id
+        WHERE messages.channel_id = ?
+          AND messages.deleted_at IS NULL
+          AND (channels.context_reset_at IS NULL OR messages.created_at > channels.context_reset_at)
+          AND (
+            ? IS NULL
+            OR messages.created_at > ?
+            OR (messages.created_at = ? AND messages.id > ?)
+          )
+        ORDER BY messages.created_at, messages.id
+      `).all(
+        input.channelId,
+        watermark?.toMessageCreatedAt ?? null,
+        watermark?.toMessageCreatedAt ?? null,
+        watermark?.toMessageCreatedAt ?? null,
+        watermark?.toMessageId ?? null,
+      ) as Array<{ id: string; created_at: string }>
+      const last = rows.at(-1)
+      const to = last ? { createdAt: last.created_at, id: last.id } : watermark
+        ? { createdAt: watermark.toMessageCreatedAt, id: watermark.toMessageId }
+        : null
+      const existingRow = database.prepare(`
+        SELECT * FROM dream_runs
+        WHERE scope_id = ?
+          AND COALESCE(to_message_created_at, '') = COALESCE(?, '')
+          AND COALESCE(to_message_id, '') = COALESCE(?, '')
+        ORDER BY created_at, id
+        LIMIT 1
+      `).get(input.channelId, to?.createdAt ?? null, to?.id ?? null) as DreamRunRow | undefined
+      if (existingRow) return mapDreamRun(existingRow)
+
+      const run = this.createDreamRun({
+        scope: 'channel', scopeId: input.channelId, trigger: input.trigger,
+        from: watermark ? { createdAt: watermark.toMessageCreatedAt, id: watermark.toMessageId } : null,
+        to,
+      })
+      database.prepare('DELETE FROM dream_run_sources WHERE dream_run_id = ?').run(run.id)
+      const insertSource = database.prepare(
+        'INSERT INTO dream_run_sources (dream_run_id, message_id, turn_id) VALUES (?, ?, ?)',
+      )
+      for (const row of rows) insertSource.run(run.id, row.id, sourceTurnId(database, row.id))
+      return run
+    })
+  }
+
   updateDreamRun(runId: string, patch: DreamRunPatch): DreamRun {
     return this.inTransaction(() => {
       const existing = this.getDreamRun(runId)

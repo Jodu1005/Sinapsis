@@ -183,6 +183,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   getTaskArtifact(taskId: string, artifactId: string): TaskArtifact | undefined
   getMessage(messageId: string): Message | undefined
   createDreamRun(input: CreateDreamRunInput): DreamRun
+  createIncrementalDreamRun(input: { channelId: string; trigger: DreamRun['trigger'] }): DreamRun
   updateDreamRun(runId: string, patch: DreamRunPatch): DreamRun
   getDreamRun(runId: string): DreamRun | undefined
   listDreamRuns(filter?: DreamRunFilter): DreamRun[]

@@ -162,6 +162,46 @@ describe('SQLite workspace repositories', () => {
     expect(repositories.getDreamRun(run.id)?.candidateCount).toBe(0)
   })
 
+  it('creates idempotent incremental Dream runs with a fixed public message snapshot', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const first = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'First fact.',
+    })
+    const second = repositories.createMessage({
+      channelId: channel.id, senderType: 'agent', authorName: 'Ada', body: 'Second fact.',
+    })
+    database!.database.prepare('UPDATE messages SET created_at = ? WHERE id = ?').run('2026-08-03T00:01:00.000Z', first.id)
+    database!.database.prepare('UPDATE messages SET created_at = ? WHERE id = ?').run('2026-08-03T00:02:00.000Z', second.id)
+    const persistedFirst = repositories.getMessage(first.id)!
+    const persistedSecond = repositories.getMessage(second.id)!
+
+    const initial = repositories.createIncrementalDreamRun({ channelId: channel.id, trigger: 'manual' })
+
+    expect(initial).toMatchObject({
+      status: 'queued', fromMessageId: null, toMessageId: persistedSecond.id, toMessageCreatedAt: persistedSecond.createdAt,
+    })
+    expect(repositories.listDreamSourceMessages(initial.id).map((message) => message.id)).toEqual([persistedFirst.id, persistedSecond.id])
+
+    repositories.updateDreamRun(initial.id, {
+      status: 'completed', completedAt: '2026-08-03T01:00:00.000Z', candidateCount: 0,
+    })
+    const third = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Third fact.',
+    })
+    database!.database.prepare('UPDATE messages SET created_at = ? WHERE id = ?').run('2026-08-03T00:03:00.000Z', third.id)
+    const persistedThird = repositories.getMessage(third.id)!
+    const incremental = repositories.createIncrementalDreamRun({ channelId: channel.id, trigger: 'scheduled' })
+    const duplicate = repositories.createIncrementalDreamRun({ channelId: channel.id, trigger: 'manual' })
+
+    expect(incremental).toMatchObject({
+      fromMessageId: persistedSecond.id, fromMessageCreatedAt: persistedSecond.createdAt,
+      toMessageId: persistedThird.id, toMessageCreatedAt: persistedThird.createdAt,
+    })
+    expect(repositories.listDreamSourceMessages(incremental.id).map((message) => message.id)).toEqual([persistedThird.id])
+    expect(duplicate.id).toBe(incremental.id)
+  })
+
   it('persists a Thread Summary with an ordered message watermark', async () => {
     const { repositories } = await createRepositories()
     const channel = createChannel(repositories)
