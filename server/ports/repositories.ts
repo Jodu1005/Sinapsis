@@ -27,6 +27,7 @@ import type {
   DreamWatermark,
   MemoryCandidate,
   MemoryCandidateFilter,
+  MemoryCandidateSourceMetadata,
   MemoryRecord,
   MemoryScope,
   ReviewMemoryCandidateInput,
@@ -55,6 +56,7 @@ export interface BootstrapSnapshot {
   tasks: Task[]
   recentMessages: Message[]
   maxWorkspaceBindingsPerChannel: number
+  pendingMemoryCandidateCount: number
 }
 
 export interface ConversationTurnDetails {
@@ -194,6 +196,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   getMemoryByCandidateId(candidateId: string): MemoryRecord | undefined
   getMemory(memoryId: string): MemoryRecord | undefined
   listMemoryCandidates(filter?: MemoryCandidateFilter): MemoryCandidate[]
+  listMemoryCandidateSourceMetadata(candidateId: string): MemoryCandidateSourceMetadata[]
   reviewMemoryCandidate(input: ReviewMemoryCandidateInput): MemoryCandidate
   createMemoryFromCandidate(input: CreateMemoryFromCandidateInput): MemoryRecord
   listAcceptedMemories(scope: MemoryScope, channelId?: string): MemoryRecord[]

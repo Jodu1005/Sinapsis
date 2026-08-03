@@ -88,6 +88,9 @@ describe('RepositorySidebar', () => {
       onCreateWorkspace: vi.fn(),
       onSelectAgent: vi.fn(),
       onCreateAgent: vi.fn(),
+      pendingMemoryCandidateCount: 0,
+      dreamSelected: false,
+      onSelectDream: vi.fn(),
       mobileOpen: false,
       mobileHidden: false,
       onClose: vi.fn(),
@@ -108,5 +111,41 @@ describe('RepositorySidebar', () => {
     const taskList = within(navigation).getByRole('group', { name: 'Frontend 的任务' })
     expect(channelHeading.compareDocumentPosition(workspaceList) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(workspaceList.compareDocumentPosition(taskList) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('renders the fixed Dream entry with the pending review count', async () => {
+    const user = userEvent.setup()
+    const onSelectDream = vi.fn()
+    render(<RepositorySidebar
+      workspaces={[frontend]}
+      agents={[]}
+      channels={[release]}
+      tasks={[]}
+      selectedChannelId={release.id}
+      selectedWorkspaceId={frontend.id}
+      selectedTaskId={null}
+      onSelectChannel={vi.fn()}
+      onSelectWorkspace={vi.fn()}
+      onSelectTask={vi.fn()}
+      onCreateTask={vi.fn()}
+      onCreateChannel={vi.fn()}
+      onArchiveChannel={vi.fn()}
+      onRestoreChannel={vi.fn()}
+      channelReadOnly={false}
+      onCreateWorkspace={vi.fn()}
+      onSelectAgent={vi.fn()}
+      onCreateAgent={vi.fn()}
+      pendingMemoryCandidateCount={3}
+      dreamSelected={false}
+      onSelectDream={onSelectDream}
+      mobileOpen={false}
+      mobileHidden={false}
+      onClose={vi.fn()}
+    />)
+
+    const dream = screen.getByRole('button', { name: 'Dream（3 个待确认）' })
+    await user.click(dream)
+
+    expect(onSelectDream).toHaveBeenCalledOnce()
   })
 })

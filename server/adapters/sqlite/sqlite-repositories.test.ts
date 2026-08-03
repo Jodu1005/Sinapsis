@@ -1463,6 +1463,7 @@ describe('SQLite workspace repositories', () => {
         tasks: [],
         recentMessages: [],
         maxWorkspaceBindingsPerChannel: 5,
+        pendingMemoryCandidateCount: 0,
         typingAgentIdsByChannel: {},
       })
     } finally {

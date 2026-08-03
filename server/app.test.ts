@@ -99,6 +99,49 @@ describe('local service API', () => {
     await expect(archived.json()).resolves.toMatchObject({ status: 'archived', sourceCandidateId: candidate.id, archivedAt: expect.any(String) })
   })
 
+  it('filters Candidate reviews by a strict status and projects only public source metadata', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Dream Memory' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const sourceChannel = repositories.createChannel({ name: 'source' })
+    const source = repositories.createMessage({
+      channelId: sourceChannel.id, senderType: 'human', authorName: 'Jodu', body: '公开讨论内容。',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: sourceChannel.id, trigger: 'manual', from: null,
+      to: { createdAt: source.createdAt, id: source.id },
+    })
+    const pending = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: sourceChannel.id, kind: 'fact',
+      proposedContent: '公开事实。', rationale: '来源明确。', confidence: 0.9, importance: 0.8, sourceMessageIds: [source.id],
+    })
+    const ignored = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: sourceChannel.id, kind: 'workflow',
+      proposedContent: '被忽略的流程。', rationale: '不再需要。', confidence: 0.6, importance: 0.4, sourceMessageIds: [source.id],
+    })
+    repositories.reviewMemoryCandidate({ candidateId: ignored.id, status: 'ignored', occurredAt: new Date('2026-08-01T00:00:00.000Z') })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const filtered = await fetch(`${server.baseUrl}/api/memory-candidates?status=pending`)
+    expect(filtered.status).toBe(200)
+    const candidates = await filtered.json() as Array<Record<string, unknown>>
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0]).toMatchObject({
+      id: pending.id,
+      sourceMessageCount: 1,
+      sources: [{ channelId: sourceChannel.id, channelName: 'source', messageId: source.id }],
+    })
+    expect(JSON.stringify(candidates)).not.toMatch(/runtime|prompt|log|artifact|公开讨论内容/i)
+
+    const invalid = await fetch(`${server.baseUrl}/api/memory-candidates?status=unknown`)
+    expect(invalid.status).toBe(400)
+
+    const bootstrap = await fetch(`${server.baseUrl}/api/bootstrap`)
+    await expect(bootstrap.json()).resolves.toMatchObject({ pendingMemoryCandidateCount: 1 })
+  })
+
   it('queues persisted Dream runs and rejects fields outside the manual-run contract', async () => {
     const app = createApp()
     const repositories = app.locals.repositories as WorkspaceRepositories

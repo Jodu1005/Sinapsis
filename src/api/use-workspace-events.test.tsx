@@ -34,6 +34,18 @@ describe('useWorkspaceEvents', () => {
     Object.defineProperty(window, 'EventSource', { configurable: true, value: originalEventSource })
   })
 
+  it('refreshes the workspace when Dream or Memory review state changes', () => {
+    const originalEventSource = window.EventSource
+    Object.defineProperty(window, 'EventSource', { configurable: true, value: FakeEventSource })
+    const refresh = vi.fn()
+    render(<Harness refresh={refresh} />)
+
+    act(() => FakeEventSource.current?.listeners.get('memory.candidate_reviewed')?.(new Event('memory.candidate_reviewed')))
+
+    expect(refresh).toHaveBeenCalledOnce()
+    Object.defineProperty(window, 'EventSource', { configurable: true, value: originalEventSource })
+  })
+
   it('subscribes to conversation events and coalesces them into one throttled refresh', () => {
     vi.useFakeTimers()
     const originalEventSource = window.EventSource

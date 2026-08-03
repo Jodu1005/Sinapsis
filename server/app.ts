@@ -37,7 +37,7 @@ import type {
   TurnParticipant,
 } from './domain/conversation'
 import { DomainError } from './domain/task'
-import type { DreamRun, MemoryCandidate, MemoryRecord } from './domain/memory'
+import type { DreamRun, MemoryCandidate, MemoryCandidateStatus, MemoryRecord } from './domain/memory'
 import type { GitClient } from './ports/git-client'
 import { NodeProcessRunner } from './ports/process-runner'
 import type { ConversationTurnDetails, WorkspaceRepositories, WorkspaceUnitOfWork } from './ports/repositories'
@@ -226,8 +226,12 @@ export function createApp(options: CreateAppOptions = {}): Express {
     response.json(toPublicDreamRun(run))
   }))
 
-  app.get('/api/memory-candidates', (_request, response) => {
-    response.json(memoryReviewService.listCandidates().map(toPublicMemoryCandidate))
+  app.get('/api/memory-candidates', (request, response) => {
+    const status = optionalMemoryCandidateStatus(request.query.status)
+    response.json(memoryReviewService.listCandidates(status).map((candidate) => toPublicMemoryCandidate(
+      candidate,
+      repositories.listMemoryCandidateSourceMetadata(candidate.id),
+    )))
   })
 
   app.post('/api/memory-candidates/:candidateId/accept', asyncRoute((request, response) => {
@@ -687,6 +691,12 @@ function memoryScope(value: unknown): 'global' | 'channel' {
   throw new ValidationError('scope must be global or channel.')
 }
 
+function optionalMemoryCandidateStatus(value: unknown): MemoryCandidateStatus | undefined {
+  if (value === undefined) return undefined
+  if (value === 'pending' || value === 'accepted' || value === 'ignored' || value === 'superseded') return value
+  throw new ValidationError('status must be pending, accepted, ignored, or superseded.')
+}
+
 function assertOnlyKeys(body: Record<string, unknown>, acceptedKeys: string[]): void {
   const unknownKeys = Object.keys(body).filter((key) => !acceptedKeys.includes(key))
   if (unknownKeys.length > 0) {
@@ -846,13 +856,15 @@ function toPublicDreamRun(run: DreamRun) {
   }
 }
 
-function toPublicMemoryCandidate(candidate: MemoryCandidate) {
+function toPublicMemoryCandidate(candidate: MemoryCandidate, sources: Array<{ channelId: string; channelName: string; messageId: string }> = []) {
   return {
     id: candidate.id, dreamRunId: candidate.dreamRunId, proposedScope: candidate.proposedScope, channelId: candidate.channelId,
     kind: candidate.kind, proposedContent: candidate.proposedContent, rationale: candidate.rationale,
     confidence: candidate.confidence, importance: candidate.importance, contentHash: candidate.contentHash, status: candidate.status,
     reviewedContent: candidate.reviewedContent, reviewedScope: candidate.reviewedScope,
     reviewedChannelId: candidate.reviewedChannelId ?? null, reviewedAt: candidate.reviewedAt, createdAt: candidate.createdAt,
+    sources,
+    sourceMessageCount: sources.length,
   }
 }
 

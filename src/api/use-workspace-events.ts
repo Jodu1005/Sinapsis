@@ -9,6 +9,7 @@ const refreshEvents = [
   'conversation.participant_updated', 'conversation.participant_decided',
   'conversation.invocation_updated', 'conversation.invocation_queued', 'conversation.invocation_started', 'conversation.invocation_completed',
   'conversation.handoff_created', 'conversation.turn_completed',
+  'dream.run_created', 'dream.run_updated', 'memory.candidate_created', 'memory.candidate_reviewed', 'memory.changed',
 ]
 const throttledEvents = new Set([
   'task.artifact_created', 'runtime.text', 'runtime.tool_start', 'runtime.tool_end', 'runtime.queue', 'task.session_updated',

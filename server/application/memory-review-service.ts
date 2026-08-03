@@ -1,5 +1,5 @@
 import { assertSafeMemoryContent, normalizeMemoryContent } from './memory-consolidation-protocol'
-import type { MemoryCandidate, MemoryRecord, MemoryScope } from '../domain/memory'
+import type { MemoryCandidate, MemoryCandidateStatus, MemoryRecord, MemoryScope } from '../domain/memory'
 import { DomainError } from '../domain/task'
 import { NotFoundError } from './workspace-service'
 
@@ -24,7 +24,7 @@ export interface MemoryReviewRepositories {
   reviewMemoryCandidate(input: { candidateId: string; status: 'ignored' | 'superseded'; occurredAt: Date }): MemoryCandidate
   updateMemory(memoryId: string, content: string): MemoryRecord
   archiveMemory(memoryId: string, occurredAt: Date): MemoryRecord
-  listMemoryCandidates(): MemoryCandidate[]
+  listMemoryCandidates(filter?: { status?: MemoryCandidateStatus }): MemoryCandidate[]
   listAcceptedMemories(scope: MemoryScope, channelId?: string): MemoryRecord[]
   getBootstrap(): { channels: Array<{ id: string }> }
 }
@@ -38,8 +38,8 @@ export class MemoryReviewService {
     this.now = options.now ?? (() => new Date())
   }
 
-  listCandidates(): MemoryCandidate[] {
-    return this.options.repositories.listMemoryCandidates()
+  listCandidates(status?: MemoryCandidateStatus): MemoryCandidate[] {
+    return this.options.repositories.listMemoryCandidates(status ? { status } : undefined)
   }
 
   listMemories(): MemoryRecord[] {

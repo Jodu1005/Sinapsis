@@ -8,8 +8,64 @@ export interface WorkspaceSnapshot {
   tasks: TaskView[]
   recentMessages: ChannelMessage[]
   maxWorkspaceBindingsPerChannel: number
+  pendingMemoryCandidateCount: number
   typingAgentIdsByChannel?: Record<string, string[]>
   activeTurnsByChannel?: Record<string, TurnActivityView[]>
+}
+
+export type MemoryCandidateStatus = 'pending' | 'accepted' | 'ignored' | 'superseded'
+export type MemoryScope = 'global' | 'channel'
+
+export interface DreamRunView {
+  id: string
+  scope: 'channel'
+  scopeId: string
+  trigger: 'scheduled' | 'manual'
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+  candidateCount: number
+  error: string | null
+  createdAt: string
+  startedAt: string | null
+  completedAt: string | null
+}
+
+export interface MemoryCandidateSourceView {
+  channelId: string
+  channelName: string
+  messageId: string
+}
+
+export interface MemoryCandidateView {
+  id: string
+  dreamRunId: string
+  proposedScope: MemoryScope
+  channelId: string | null
+  kind: 'preference' | 'decision' | 'constraint' | 'fact' | 'workflow'
+  proposedContent: string
+  rationale: string
+  confidence: number
+  importance: number
+  status: MemoryCandidateStatus
+  reviewedContent: string | null
+  reviewedScope: MemoryScope | null
+  reviewedChannelId: string | null
+  reviewedAt: string | null
+  createdAt: string
+  sources: MemoryCandidateSourceView[]
+  sourceMessageCount: number
+}
+
+export interface MemoryView {
+  id: string
+  scope: MemoryScope
+  channelId: string | null
+  kind: MemoryCandidateView['kind']
+  content: string
+  status: 'active' | 'archived'
+  sourceCandidateId: string
+  archivedAt: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 export interface WorkspaceView {

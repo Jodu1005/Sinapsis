@@ -22,6 +22,7 @@ import { ChannelAgentMembers } from './ChannelAgentMembers'
 import { ChannelWorkspaceBindings } from './ChannelWorkspaceBindings'
 import { canResetChannelContext } from '../../shared/channel-policy'
 import { ConversationTurnDetail } from './ConversationTurnDetail'
+import { DreamCenter } from './DreamCenter'
 
 export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const [defaultApi] = useState(() => new ApiClient())
@@ -58,6 +59,8 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const previousSnapshotRef = useRef<WorkspaceSnapshot | null>(null)
   const [contextResetDialogOpen, setContextResetDialogOpen] = useState(false)
   const [resettingChannelContext, setResettingChannelContext] = useState(false)
+  const [mainView, setMainView] = useState<'channel' | 'dream'>('channel')
+  const [pendingMessageFocusId, setPendingMessageFocusId] = useState<string | null>(null)
   const narrowNavigation = useMediaQuery('(max-width: 700px)')
   const narrowContext = useMediaQuery('(max-width: 980px)')
   const refresh = useCallback(async (suppressTurnRefreshKey?: string) => {
@@ -90,6 +93,15 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     const nextSelectedAgent = snapshot ? snapshotAgents(snapshot).find((agent) => agent.id === selectedAgent.id) ?? null : null
     setSelectedAgent(nextSelectedAgent)
   }, [snapshot, selectedAgent])
+  useEffect(() => {
+    if (mainView !== 'channel' || !pendingMessageFocusId) return undefined
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(`message-${pendingMessageFocusId}`)
+      target?.scrollIntoView?.({ block: 'center' })
+      setPendingMessageFocusId(null)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [mainView, pendingMessageFocusId, selection.channel?.id, snapshot])
   const taskRepository = useMemo(() => findRepository(workspace, selectedTaskRepositoryId), [workspace, selectedTaskRepositoryId])
   const taskScope = taskRepository ?? workspace?.repositories[0]
   const taskScopeTasks = useMemo(() => snapshot?.tasks.filter((task) =>
@@ -262,6 +274,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     return undefined
   }
   const selectChannel = (channelId: string) => {
+    setMainView('channel')
     setSelectedChannelId(channelId)
     setSelectedWorkspaceId(null)
     setSelectedThreadRootId(null)
@@ -438,9 +451,13 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const displayedTurnDetails = matchingTurnDetails && selectedTurnKey && confirmedCancelledTurnKeys.has(selectedTurnKey)
     ? { ...matchingTurnDetails, turn: { ...matchingTurnDetails.turn, status: 'cancelled' as const } }
     : matchingTurnDetails
-  return <div className="workspace-shell">
-    <RepositorySidebar workspaces={snapshot.workspaces} agents={agents} channels={snapshot.channels} tasks={snapshot.tasks} selectedChannelId={selection.channel.id} selectedWorkspaceId={workspace?.id ?? null} selectedTaskId={selectedTask?.id ?? null} onSelectChannel={selectChannel} onSelectWorkspace={selectWorkspace} onSelectTask={selectTask} onCreateTask={(workspaceId) => setTaskComposerDraft({ initialWorkspaceId: workspaceId })} onCreateChannel={() => setCreatingChannel(true)} onArchiveChannel={archiveChannel} onRestoreChannel={restoreChannel} channelReadOnly={Boolean(selection.channel.archivedAt)} onCreateWorkspace={() => setCreatingWorkspace(true)} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
-    <main className="conversation-panel">
+  const jumpToDreamSource = (channelId: string, messageId: string) => {
+    setPendingMessageFocusId(messageId)
+    selectChannel(channelId)
+  }
+  return <div className={`workspace-shell${mainView === 'dream' ? ' dream-view' : ''}`}>
+    <RepositorySidebar workspaces={snapshot.workspaces} agents={agents} channels={snapshot.channels} tasks={snapshot.tasks} selectedChannelId={selection.channel.id} selectedWorkspaceId={workspace?.id ?? null} selectedTaskId={selectedTask?.id ??null} onSelectChannel={selectChannel} onSelectWorkspace={selectWorkspace} onSelectTask={selectTask} onCreateTask={(workspaceId) => setTaskComposerDraft({ initialWorkspaceId: workspaceId })} onCreateChannel={() => setCreatingChannel(true)} onArchiveChannel={archiveChannel} onRestoreChannel={restoreChannel} channelReadOnly={Boolean(selection.channel.archivedAt)} onCreateWorkspace={() => setCreatingWorkspace(true)} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} pendingMemoryCandidateCount={snapshot.pendingMemoryCandidateCount} dreamSelected={mainView === 'dream'} onSelectDream={() => { setMainView('dream'); setNavOpen(false) }} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
+    {mainView === 'dream' ? <DreamCenter api={api} channels={snapshot.channels} onJumpToSource={jumpToDreamSource} /> : <><main className="conversation-panel">
       <header className="channel-header"><NavigationToggle onClick={() => setNavOpen(true)} /><div className="channel-heading"><h1># {selection.channel.name}</h1><p>{selection.channel.archivedAt ? '已归档频道 · 只读' : '全局频道'}</p></div><div className="header-actions"><span className="connection-state" data-reconnecting={reconnecting}>{reconnecting ? '正在重新连接' : '已连接'}</span><button type="button" className="icon-button" aria-label="打开上下文" data-tooltip="打开上下文" onClick={() => setContextOpen(true)}><PanelRightOpen size={18} /></button></div></header>
       {channelActionError && <p className="channel-action-error" role="alert">{channelActionError}</p>}
       <ChannelTimeline messages={messages} agents={agents} turnActivities={turnActivities} onOpenThread={(message) => { setSelectedThreadRootId(message.id); setSelectedTurnId(null); setContextOpen(true) }} onOpenTurn={(turnId) => { setSelectedTurnId(turnId); setSelectedThreadRootId(null); setContextOpen(true) }} />
@@ -458,7 +475,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
       <ChannelAgentMembers channel={selection.channel} agents={snapshotAgents(snapshot)} api={api} onChanged={refresh} />
       <ChannelWorkspaceBindings channel={selection.channel} workspaces={snapshot.workspaces} limit={snapshot.maxWorkspaceBindingsPerChannel} api={api} onChanged={refresh} />
       <section className="context-section"><h2>频道操作</h2>{!selection.channel.archivedAt && canResetChannelContext(selection.channel.name) && <button type="button" className="context-action context-danger" onClick={() => setContextResetDialogOpen(true)}><Trash2 size={16} /> 清空频道上下文</button>}<button type="button" className="context-action" onClick={() => setContextOpen(false)}><PanelRightClose size={16} /> 收起上下文</button></section>
-    </aside>
+    </aside></>}
     {taskComposerDraft && <TaskComposerPanel workspaces={selection.boundWorkspaces} agents={agents} initialWorkspaceId={taskComposerDraft.initialWorkspaceId} initialTitle={taskComposerDraft.initialTitle} initialDirectAgentId={taskComposerDraft.initialDirectAgentId} onCreate={createTask} onClose={() => setTaskComposerDraft(null)} />}
     {creatingWorkspace && <WorkspaceCreateDialog onCreate={createWorkspace} onClose={() => setCreatingWorkspace(false)} />}
     {creatingChannel && <ChannelCreateDialog onCreate={createChannel} onClose={() => setCreatingChannel(false)} />}

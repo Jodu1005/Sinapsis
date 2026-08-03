@@ -29,6 +29,7 @@ import type {
   DreamWatermark,
   MemoryCandidate,
   MemoryCandidateFilter,
+  MemoryCandidateSourceMetadata,
   MemoryKind,
   MemoryRecord,
   MemoryScope,
@@ -1320,6 +1321,21 @@ export class SqliteRepositories implements WorkspaceRepositories {
       .map(mapMemoryCandidate)
   }
 
+  listMemoryCandidateSourceMetadata(candidateId: string): MemoryCandidateSourceMetadata[] {
+    return this.sqlite.database.prepare(`
+      SELECT messages.channel_id AS channel_id, channels.name AS channel_name, messages.id AS message_id
+      FROM memory_candidate_sources
+      JOIN messages ON messages.id = memory_candidate_sources.message_id
+      JOIN channels ON channels.id = messages.channel_id
+      WHERE memory_candidate_sources.candidate_id = ?
+        AND messages.deleted_at IS NULL
+      ORDER BY messages.created_at, messages.id
+    `).all(candidateId).map((row) => {
+      const source = row as { channel_id: string; channel_name: string; message_id: string }
+      return { channelId: source.channel_id, channelName: source.channel_name, messageId: source.message_id }
+    })
+  }
+
   reviewMemoryCandidate(input: ReviewMemoryCandidateInput): MemoryCandidate {
     return this.inTransaction(() => {
       const candidate = this.getMemoryCandidate(input.candidateId)
@@ -2518,6 +2534,9 @@ export class SqliteRepositories implements WorkspaceRepositories {
       tasks,
       recentMessages,
       maxWorkspaceBindingsPerChannel: this.maxWorkspaceBindingsPerChannel,
+      pendingMemoryCandidateCount: (database.prepare(
+        "SELECT COUNT(*) AS count FROM memory_candidates WHERE status = 'pending'",
+      ).get() as { count: number }).count,
     }
   }
 }

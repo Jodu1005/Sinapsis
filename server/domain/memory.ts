@@ -39,6 +39,12 @@ export interface MemoryCandidate {
   createdAt: string
 }
 
+export interface MemoryCandidateSourceMetadata {
+  channelId: string
+  channelName: string
+  messageId: string
+}
+
 export interface MemoryRecord {
   id: string
   scope: MemoryScope
