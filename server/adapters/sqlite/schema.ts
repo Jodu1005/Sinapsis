@@ -754,6 +754,30 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(22, new Date().toISOString())
     }
 
+    const twentyThirdMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 23').get()
+    if (!twentyThirdMigration) {
+      if (!hasColumn(database, 'memory_candidates', 'reviewed_channel_id')) {
+        database.exec('ALTER TABLE memory_candidates ADD COLUMN reviewed_channel_id TEXT REFERENCES channels(id)')
+      }
+      database.exec(`
+        CREATE TRIGGER IF NOT EXISTS memory_candidates_reviewed_channel_scope_insert
+        BEFORE INSERT ON memory_candidates
+        WHEN (NEW.reviewed_scope = 'global' AND NEW.reviewed_channel_id IS NOT NULL)
+          OR (NEW.reviewed_scope = 'channel' AND NEW.reviewed_channel_id IS NULL)
+        BEGIN
+          SELECT RAISE(ABORT, 'Reviewed Channel must match reviewed Memory scope.');
+        END;
+        CREATE TRIGGER IF NOT EXISTS memory_candidates_reviewed_channel_scope_update
+        BEFORE UPDATE OF reviewed_scope, reviewed_channel_id ON memory_candidates
+        WHEN (NEW.reviewed_scope = 'global' AND NEW.reviewed_channel_id IS NOT NULL)
+          OR (NEW.reviewed_scope = 'channel' AND NEW.reviewed_channel_id IS NULL)
+        BEGIN
+          SELECT RAISE(ABORT, 'Reviewed Channel must match reviewed Memory scope.');
+        END;
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(23, new Date().toISOString())
+    }
+
     database.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS conversation_sessions_grain_unique_idx
         ON conversation_sessions(channel_id, COALESCE(thread_root_message_id, ''), agent_id);

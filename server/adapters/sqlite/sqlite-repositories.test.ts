@@ -454,6 +454,42 @@ describe('SQLite workspace repositories', () => {
     expect(repositories.listAcceptedMemories('global')).toEqual([])
   })
 
+  it('keeps Memory provenance when archiving and rejects content updates that collide with another active Memory', async () => {
+    const { repositories, publisher } = await createRepositories()
+    const channel = createChannel(repositories)
+    const source = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Memory provenance must survive archive.',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'manual', from: null,
+      to: { createdAt: source.createdAt, id: source.id },
+    })
+    const first = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'global', channelId: null, kind: 'fact', proposedContent: 'First Memory.',
+      rationale: 'First source.', confidence: 0.9, importance: 0.8, sourceMessageIds: [source.id],
+    })
+    const second = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'global', channelId: null, kind: 'fact', proposedContent: 'Second Memory.',
+      rationale: 'Second source.', confidence: 0.9, importance: 0.8, sourceMessageIds: [source.id],
+    })
+    const firstMemory = repositories.createMemoryFromCandidate({
+      candidateId: first.id, reviewedContent: 'First Memory.', reviewedScope: 'global', occurredAt: new Date('2026-08-03T00:00:00.000Z'),
+    })
+    repositories.createMemoryFromCandidate({
+      candidateId: second.id, reviewedContent: 'Second Memory.', reviewedScope: 'global', occurredAt: new Date('2026-08-03T00:00:01.000Z'),
+    })
+
+    expect(() => repositories.updateMemory(firstMemory.id, 'Second Memory.')).toThrow(DomainError)
+    const archived = repositories.archiveMemory(firstMemory.id, new Date('2026-08-03T00:00:02.000Z'))
+
+    expect(archived).toMatchObject({ status: 'archived', archivedAt: '2026-08-03T00:00:02.000Z' })
+    expect(database!.database.prepare('SELECT candidate_id FROM memory_sources WHERE memory_id = ?').all(firstMemory.id))
+      .toEqual([{ candidate_id: first.id }])
+    expect(publisher.events.map((event) => event.type)).toEqual(expect.arrayContaining([
+      'dream.run_created', 'memory.candidate_created', 'memory.changed',
+    ]))
+  })
+
   it('reuses a Global Memory across Dream channels while retaining each candidate source provenance', async () => {
     const { repositories } = await createRepositories()
     const channelA = createChannel(repositories)

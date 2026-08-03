@@ -34,6 +34,7 @@ export interface MemoryCandidate {
   status: MemoryCandidateStatus
   reviewedContent: string | null
   reviewedScope: MemoryScope | null
+  reviewedChannelId?: string | null
   reviewedAt: string | null
   createdAt: string
 }
@@ -122,5 +123,6 @@ export interface CreateMemoryFromCandidateInput {
   candidateId: string
   reviewedContent: string
   reviewedScope: MemoryScope
+  reviewedChannelId?: string | null
   occurredAt: Date
 }

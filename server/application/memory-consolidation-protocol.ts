@@ -105,6 +105,10 @@ export function memoryContentHash(content: string): string {
   return createHash('sha256').update(normalizeMemoryContent(content)).digest('hex')
 }
 
+export function assertSafeMemoryContent(content: string): void {
+  assertSafeText(content, 'content')
+}
+
 function parseCandidate(value: unknown, index: number, allowedSources: ReadonlySet<string>): ProposedMemory {
   if (!isRecord(value)) throw new Error(`Memory candidate ${index} must be a JSON object.`)
   assertExactFields(value, candidateFields, `Memory candidate ${index}`)

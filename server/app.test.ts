@@ -36,6 +36,84 @@ describe('local service API', () => {
     }
   })
 
+  it('reviews Candidates through strict Memory APIs without exposing Dream runtime internals', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Dream Memory' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const sourceChannel = repositories.createChannel({ name: 'source' })
+    const targetChannel = repositories.createChannel({ name: 'target' })
+    const source = repositories.createMessage({
+      channelId: sourceChannel.id, senderType: 'human', authorName: 'Jodu', body: 'React is the frontend standard.',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: sourceChannel.id, trigger: 'manual', from: null,
+      to: { createdAt: source.createdAt, id: source.id },
+    })
+    const candidate = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'channel', channelId: sourceChannel.id, kind: 'fact',
+      proposedContent: 'React is the frontend standard.', rationale: 'Repeated decision.', confidence: 0.9, importance: 0.8,
+      sourceMessageIds: [source.id],
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const rejectUnsafe = await fetch(`${server.baseUrl}/api/memory-candidates/${candidate.id}/accept`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: 'global', content: 'API_KEY=super-secret-value', prompt: 'do not accept this' }),
+    })
+    expect(rejectUnsafe.status).toBe(400)
+
+    const accepted = await fetch(`${server.baseUrl}/api/memory-candidates/${candidate.id}/accept`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: 'channel', channelId: targetChannel.id, content: 'React is the frontend standard.' }),
+    })
+    expect(accepted.status).toBe(200)
+    const memory = await accepted.json() as { id: string; channelId: string; sourceCandidateId: string }
+    expect(memory).toMatchObject({ channelId: targetChannel.id, sourceCandidateId: candidate.id })
+    expect(repositories.getMemoryCandidate(candidate.id)).toMatchObject({
+      channelId: sourceChannel.id, reviewedScope: 'channel', reviewedChannelId: targetChannel.id,
+    })
+
+    const repeated = await fetch(`${server.baseUrl}/api/memory-candidates/${candidate.id}/accept`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: 'global', content: 'A later request cannot change accepted Memory.' }),
+    })
+    await expect(repeated.json()).resolves.toMatchObject({ id: memory.id, channelId: targetChannel.id })
+
+    const runs = await fetch(`${server.baseUrl}/api/dream/runs`)
+    const runsJson = await runs.json() as unknown
+    expect(JSON.stringify(runsJson)).not.toMatch(/runtime.*(?:log|prompt)|artifact/i)
+
+    const changed = await fetch(`${server.baseUrl}/api/memories/${memory.id}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Frontend standard: React.' }),
+    })
+    expect(changed.status).toBe(200)
+    const archived = await fetch(`${server.baseUrl}/api/memories/${memory.id}`, { method: 'DELETE' })
+    await expect(archived.json()).resolves.toMatchObject({ status: 'archived', sourceCandidateId: candidate.id, archivedAt: expect.any(String) })
+  })
+
+  it('queues persisted Dream runs and rejects fields outside the manual-run contract', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Dream Memory' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'dreams' })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const invalid = await fetch(`${server.baseUrl}/api/dream/runs`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ channelId: channel.id, runtimeLog: 'private' }),
+    })
+    expect(invalid.status).toBe(400)
+
+    const queued = await fetch(`${server.baseUrl}/api/dream/runs`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ channelId: channel.id }),
+    })
+    expect(queued.status).toBe(202)
+    await expect(queued.json()).resolves.toEqual([expect.objectContaining({ scopeId: channel.id, status: expect.stringMatching(/queued|running|completed/) })])
+  })
+
   it('creates a workspace from a validated JSON request', async () => {
     const server = await startHttpTestServer(createApp())
     closeServer = server.close

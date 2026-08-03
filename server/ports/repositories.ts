@@ -191,6 +191,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   createMemoryCandidate(input: CreateMemoryCandidateInput): MemoryCandidate
   createMemoryCandidates(inputs: CreateMemoryCandidateInput[]): MemoryCandidate[]
   getMemoryCandidate(candidateId: string): MemoryCandidate | undefined
+  getMemoryByCandidateId(candidateId: string): MemoryRecord | undefined
   listMemoryCandidates(filter?: MemoryCandidateFilter): MemoryCandidate[]
   reviewMemoryCandidate(input: ReviewMemoryCandidateInput): MemoryCandidate
   createMemoryFromCandidate(input: CreateMemoryFromCandidateInput): MemoryRecord

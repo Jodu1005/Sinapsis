@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import { conversationEventTypes } from '../../domain/events'
+import { conversationEventTypes, memoryEventTypes } from '../../domain/events'
 import { SseDomainEventPublisher } from './sse-domain-event-publisher'
 
 describe('SseDomainEventPublisher', () => {
@@ -34,6 +34,22 @@ describe('SseDomainEventPublisher', () => {
     for (const type of conversationEventTypes) {
       expect(payloads.some((payload) => payload.includes(`event: ${type}\n`))).toBe(true)
     }
+  })
+
+  it('publishes every Dream and Memory lifecycle event as a named SSE event without content payloads', () => {
+    const publisher = new SseDomainEventPublisher()
+    const response = new FakeResponse()
+    publisher.handle({} as never, response as never)
+
+    memoryEventTypes.forEach((type, index) => publisher.publish({
+      id: `memory-event-${index}`, type, occurredAt: '2026-08-03T08:00:00.000Z',
+      entityType: type.startsWith('dream.') ? 'dream_run' : 'memory', entityId: 'memory-1',
+    }))
+
+    const payloads = response.write.mock.calls.slice(1).map(([payload]) => String(payload))
+    expect(payloads).toHaveLength(memoryEventTypes.length)
+    expect(payloads.join('')).not.toMatch(/proposedContent|reviewedContent|runtime|prompt|artifact/i)
+    for (const type of memoryEventTypes) expect(payloads.some((payload) => payload.includes(`event: ${type}\n`))).toBe(true)
   })
 })
 

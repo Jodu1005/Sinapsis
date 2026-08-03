@@ -222,6 +222,7 @@ interface MemoryCandidateRow {
   status: MemoryCandidate['status']
   reviewed_content: string | null
   reviewed_scope: MemoryScope | null
+  reviewed_channel_id: string | null
   reviewed_at: string | null
   created_at: string
 }
@@ -1114,6 +1115,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
           run.id, messageId, sourceTurnId(database, messageId),
         )
       }
+      this.sqlite.afterCommit(() => this.publisher.publish(event('dream.run_created', 'dream_run', run.id, run.createdAt)))
       return run
     })
   }
@@ -1181,6 +1183,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
         SET status = ?, candidate_count = ?, error = ?, started_at = ?, completed_at = ?
         WHERE id = ?
       `).run(updated.status, updated.candidateCount, updated.error, updated.startedAt, updated.completedAt, runId)
+      this.sqlite.afterCommit(() => this.publisher.publish(event('dream.run_updated', 'dream_run', updated.id, now())))
       return updated
     })
   }
@@ -1249,17 +1252,17 @@ export class SqliteRepositories implements WorkspaceRepositories {
       confidence: unitInterval(input.confidence, 'Memory candidate confidence'),
       importance: unitInterval(input.importance, 'Memory candidate importance'),
       contentHash: contentHash(input.proposedContent), status: 'pending', reviewedContent: null,
-      reviewedScope: null, reviewedAt: null, createdAt,
+      reviewedScope: null, reviewedChannelId: null, reviewedAt: null, createdAt,
     }
     database.prepare(`
       INSERT INTO memory_candidates (
         id, dream_run_id, proposed_scope, channel_id, kind, proposed_content, rationale, confidence,
-        importance, content_hash, status, reviewed_content, reviewed_scope, reviewed_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        importance, content_hash, status, reviewed_content, reviewed_scope, reviewed_channel_id, reviewed_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       candidate.id, candidate.dreamRunId, candidate.proposedScope, candidate.channelId, candidate.kind,
       candidate.proposedContent, candidate.rationale, candidate.confidence, candidate.importance, candidate.contentHash,
-      candidate.status, candidate.reviewedContent, candidate.reviewedScope, candidate.reviewedAt, candidate.createdAt,
+      candidate.status, candidate.reviewedContent, candidate.reviewedScope, candidate.reviewedChannelId ?? null, candidate.reviewedAt, candidate.createdAt,
     )
     for (const sourceMessageId of sourceMessageIds) {
       database.prepare('INSERT INTO memory_candidate_sources (candidate_id, message_id, turn_id) VALUES (?, ?, ?)').run(
@@ -1267,12 +1270,26 @@ export class SqliteRepositories implements WorkspaceRepositories {
       )
     }
     database.prepare('UPDATE dream_runs SET candidate_count = candidate_count + 1 WHERE id = ?').run(run.id)
+    this.sqlite.afterCommit(() => this.publisher.publish(event('memory.candidate_created', 'memory_candidate', candidate.id, createdAt)))
     return candidate
   }
 
   getMemoryCandidate(candidateId: string): MemoryCandidate | undefined {
     const row = this.sqlite.database.prepare('SELECT * FROM memory_candidates WHERE id = ?').get(candidateId) as MemoryCandidateRow | undefined
     return row ? mapMemoryCandidate(row) : undefined
+  }
+
+  getMemoryByCandidateId(candidateId: string): MemoryRecord | undefined {
+    const row = this.sqlite.database.prepare(`
+      SELECT memories.*, source.confidence AS source_confidence, source.importance AS source_importance
+      FROM memory_sources
+      JOIN memories ON memories.id = memory_sources.memory_id
+      JOIN memory_candidates AS source ON source.id = memories.source_candidate_id
+      WHERE memory_sources.candidate_id = ?
+      ORDER BY memories.created_at, memories.id
+      LIMIT 1
+    `).get(candidateId) as MemoryRow | undefined
+    return row ? mapMemory(row) : undefined
   }
 
   listMemoryCandidates(filter: MemoryCandidateFilter = {}): MemoryCandidate[] {
@@ -1322,8 +1339,13 @@ export class SqliteRepositories implements WorkspaceRepositories {
       const dreamRun = this.getDreamRun(candidate.dreamRunId)
       if (!dreamRun) throw new Error(`Dream run ${candidate.dreamRunId} does not exist.`)
       const reviewedContent = requireText(input.reviewedContent, 'Reviewed Memory content')
-      const reviewedChannelId = input.reviewedScope === 'channel' ? candidate.channelId ?? dreamRun.scopeId : null
+      const reviewedChannelId = input.reviewedChannelId === undefined
+        ? input.reviewedScope === 'channel' ? candidate.channelId ?? dreamRun.scopeId : null
+        : input.reviewedChannelId
       assertMemoryScope(input.reviewedScope, reviewedChannelId)
+      if (reviewedChannelId !== null && !readChannel(database, reviewedChannelId)) {
+        throw new Error(`Channel ${reviewedChannelId} does not exist.`)
+      }
       const reviewedContentHash = contentHash(reviewedContent)
       const reviewedAt = input.occurredAt.toISOString()
       const existing = database.prepare(`
@@ -1352,9 +1374,9 @@ export class SqliteRepositories implements WorkspaceRepositories {
       `).run(memory.id, candidate.id, candidate.id)
       const accepted = database.prepare(`
         UPDATE memory_candidates
-        SET status = 'accepted', reviewed_content = ?, reviewed_scope = ?, reviewed_at = ?
+        SET status = 'accepted', reviewed_content = ?, reviewed_scope = ?, reviewed_channel_id = ?, reviewed_at = ?
         WHERE id = ? AND status = 'pending'
-      `).run(reviewedContent, input.reviewedScope, reviewedAt, candidate.id)
+      `).run(reviewedContent, input.reviewedScope, reviewedChannelId, reviewedAt, candidate.id)
       if (accepted.changes !== 1) throw new Error(`Memory candidate ${candidate.id} is already reviewed.`)
       database.prepare(`
         UPDATE memory_candidates
@@ -1387,6 +1409,11 @@ export class SqliteRepositories implements WorkspaceRepositories {
       const updatedContent = requireText(content, 'Memory content')
       const updatedAt = now()
       const updatedContentHash = contentHash(updatedContent)
+      const duplicate = this.sqlite.database.prepare(`
+        SELECT id FROM memories
+        WHERE id != ? AND scope = ? AND channel_id IS ? AND content_hash = ? AND archived_at IS NULL
+      `).get(memoryId, existing.scope, existing.channelId, updatedContentHash)
+      if (duplicate) throw new DomainError('An active Memory with the same content already exists.')
       this.sqlite.database.prepare(`
         UPDATE memories SET content = ?, content_hash = ?, updated_at = ? WHERE id = ?
       `).run(updatedContent, updatedContentHash, updatedAt, memoryId)
@@ -2769,6 +2796,7 @@ function mapMemoryCandidate(row: MemoryCandidateRow): MemoryCandidate {
     status: row.status,
     reviewedContent: row.reviewed_content,
     reviewedScope: row.reviewed_scope,
+    reviewedChannelId: row.reviewed_channel_id,
     reviewedAt: row.reviewed_at,
     createdAt: row.created_at,
   }

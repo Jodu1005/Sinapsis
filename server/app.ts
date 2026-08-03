@@ -17,6 +17,7 @@ import { ChannelWorkspaceService } from './application/channel-workspace-service
 import { ConversationCoordinator } from './application/conversation-coordinator'
 import { DreamRunService } from './application/dream-run-service'
 import { MemoryConsolidator } from './application/memory-consolidator'
+import { MemoryReviewService, MemoryReviewValidationError } from './application/memory-review-service'
 import type { TurnActivity } from './application/channel-turn-coordinator'
 import { routeMentions, UnknownMentionError } from './application/mention-router'
 import { TaskExecutionCoordinator } from './application/task-execution-coordinator'
@@ -36,6 +37,7 @@ import type {
   TurnParticipant,
 } from './domain/conversation'
 import { DomainError } from './domain/task'
+import type { DreamRun, MemoryCandidate, MemoryRecord } from './domain/memory'
 import type { GitClient } from './ports/git-client'
 import { NodeProcessRunner } from './ports/process-runner'
 import type { ConversationTurnDetails, WorkspaceRepositories, WorkspaceUnitOfWork } from './ports/repositories'
@@ -184,6 +186,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     }),
     concurrency: serviceConfig.dreamMaintenanceConcurrency,
   })
+  const memoryReviewService = new MemoryReviewService({ repositories })
 
   app.locals.closeDatabase = () => database.close()
   app.locals.closeSse = () => eventPublisher.close()
@@ -192,11 +195,67 @@ export function createApp(options: CreateAppOptions = {}): Express {
   app.locals.executionCoordinator = coordinator
   app.locals.conversationCoordinator = conversationCoordinator
   app.locals.dreamRunService = dreamRunService
+  app.locals.memoryReviewService = memoryReviewService
   app.use(express.json())
 
   app.get('/api/health', (_request, response) => {
     response.json({ status: 'ok' })
   })
+
+  app.get('/api/dream/runs', (_request, response) => {
+    response.json(repositories.listDreamRuns().map(toPublicDreamRun))
+  })
+
+  app.post('/api/dream/runs', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['channelId'])
+    const runs = body.channelId === undefined
+      ? dreamRunService.enqueueAllActive('manual')
+      : [dreamRunService.enqueue({ channelId: requiredString(body, 'channelId'), trigger: 'manual' })]
+    response.status(202).json(runs.map(toPublicDreamRun))
+  }))
+
+  app.get('/api/dream/runs/:runId', asyncRoute((request, response) => {
+    const run = repositories.getDreamRun(requiredParam(request.params.runId, 'runId'))
+    if (!run) throw new NotFoundError(`Dream run ${request.params.runId} does not exist.`)
+    response.json(toPublicDreamRun(run))
+  }))
+
+  app.get('/api/memory-candidates', (_request, response) => {
+    response.json(memoryReviewService.listCandidates().map(toPublicMemoryCandidate))
+  })
+
+  app.post('/api/memory-candidates/:candidateId/accept', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['scope', 'channelId', 'content'])
+    const scope = memoryScope(body.scope)
+    const memory = memoryReviewService.accept(requiredParam(request.params.candidateId, 'candidateId'), {
+      scope, channelId: optionalString(body, 'channelId'), content: requiredString(body, 'content'),
+    })
+    response.json(toPublicMemory(memory))
+  }))
+
+  app.post('/api/memory-candidates/:candidateId/ignore', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, [])
+    response.json(toPublicMemoryCandidate(memoryReviewService.ignore(requiredParam(request.params.candidateId, 'candidateId'))))
+  }))
+
+  app.get('/api/memories', (_request, response) => {
+    response.json(memoryReviewService.listMemories().map(toPublicMemory))
+  })
+
+  app.patch('/api/memories/:memoryId', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['content'])
+    response.json(toPublicMemory(memoryReviewService.update(
+      requiredParam(request.params.memoryId, 'memoryId'), { content: requiredString(body, 'content') },
+    )))
+  }))
+
+  app.delete('/api/memories/:memoryId', asyncRoute((request, response) => {
+    response.json(toPublicMemory(memoryReviewService.archive(requiredParam(request.params.memoryId, 'memoryId'))))
+  }))
 
   app.get('/api/bootstrap', (_request, response) => {
     const snapshot = repositories.getBootstrap()
@@ -610,6 +669,11 @@ function optionalNonNegativeInteger(body: Record<string, unknown>, key: string):
   return value as number
 }
 
+function memoryScope(value: unknown): 'global' | 'channel' {
+  if (value === 'global' || value === 'channel') return value
+  throw new ValidationError('scope must be global or channel.')
+}
+
 function assertOnlyKeys(body: Record<string, unknown>, acceptedKeys: string[]): void {
   const unknownKeys = Object.keys(body).filter((key) => !acceptedKeys.includes(key))
   if (unknownKeys.length > 0) {
@@ -760,8 +824,36 @@ function sanitizeAgent(agent: ReturnType<WorkspaceRepositories['getBootstrap']>[
   return { ...agent, env: Object.keys(agent.env) }
 }
 
+function toPublicDreamRun(run: DreamRun) {
+  return {
+    id: run.id, scope: run.scope, scopeId: run.scopeId, trigger: run.trigger, status: run.status,
+    fromMessageCreatedAt: run.fromMessageCreatedAt, fromMessageId: run.fromMessageId,
+    toMessageCreatedAt: run.toMessageCreatedAt, toMessageId: run.toMessageId,
+    candidateCount: run.candidateCount, createdAt: run.createdAt, startedAt: run.startedAt, completedAt: run.completedAt,
+  }
+}
+
+function toPublicMemoryCandidate(candidate: MemoryCandidate) {
+  return {
+    id: candidate.id, dreamRunId: candidate.dreamRunId, proposedScope: candidate.proposedScope, channelId: candidate.channelId,
+    kind: candidate.kind, proposedContent: candidate.proposedContent, rationale: candidate.rationale,
+    confidence: candidate.confidence, importance: candidate.importance, contentHash: candidate.contentHash, status: candidate.status,
+    reviewedContent: candidate.reviewedContent, reviewedScope: candidate.reviewedScope,
+    reviewedChannelId: candidate.reviewedChannelId ?? null, reviewedAt: candidate.reviewedAt, createdAt: candidate.createdAt,
+  }
+}
+
+function toPublicMemory(memory: MemoryRecord) {
+  return {
+    id: memory.id, scope: memory.scope, channelId: memory.channelId, kind: memory.kind, content: memory.content,
+    contentHash: memory.contentHash, status: memory.status, sourceCandidateId: memory.sourceCandidateId,
+    archivedAt: memory.archivedAt, createdAt: memory.createdAt, updatedAt: memory.updatedAt,
+    sourceConfidence: memory.sourceConfidence ?? null, sourceImportance: memory.sourceImportance ?? null,
+  }
+}
+
 const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
-  if (error instanceof ValidationError || error instanceof UnknownMentionError || error instanceof SyntaxError) {
+  if (error instanceof ValidationError || error instanceof MemoryReviewValidationError || error instanceof UnknownMentionError || error instanceof SyntaxError) {
     response.status(400).json({ error: error.message })
     return
   }
