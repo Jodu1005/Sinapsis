@@ -1292,6 +1292,10 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return row ? mapMemory(row) : undefined
   }
 
+  getMemory(memoryId: string): MemoryRecord | undefined {
+    return readMemory(this.sqlite.database, memoryId)
+  }
+
   listMemoryCandidates(filter: MemoryCandidateFilter = {}): MemoryCandidate[] {
     const clauses: string[] = []
     const values: string[] = []

@@ -706,6 +706,40 @@ describe('SQLite workspace repositories', () => {
     `).run(root.id, channel.id, root.id)).toThrow(/watermark/i)
   })
 
+  it('backfills the final Channel for accepted v22 Candidates and restores its constraints', async () => {
+    const { repositories, databasePath } = await createRepositories()
+    const channel = createChannel(repositories)
+    const source = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Legacy reviewed Channel candidate.',
+    })
+    const run = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'manual', from: null,
+      to: { createdAt: source.createdAt, id: source.id },
+    })
+    const candidate = repositories.createMemoryCandidate({
+      dreamRunId: run.id, proposedScope: 'global', channelId: null, kind: 'fact', proposedContent: 'Legacy Channel Memory.',
+      rationale: 'Old review behavior.', confidence: 0.9, importance: 0.8, sourceMessageIds: [source.id],
+    })
+    repositories.createMemoryFromCandidate({
+      candidateId: candidate.id, reviewedContent: 'Legacy Channel Memory.', reviewedScope: 'channel',
+      occurredAt: new Date('2026-08-03T00:00:00.000Z'),
+    })
+    database!.close()
+    database = undefined
+    downgradeMemoryReviewToVersion22(databasePath)
+
+    database = createSqliteDatabase(databasePath)
+
+    expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 23').get())
+      .toEqual({ version: 23 })
+    expect(database.database.prepare('SELECT reviewed_channel_id FROM memory_candidates WHERE id = ?').get(candidate.id))
+      .toEqual({ reviewed_channel_id: channel.id })
+    expect(database.database.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(() => database!.database.prepare(`
+      UPDATE memory_candidates SET reviewed_channel_id = NULL WHERE id = ?
+    `).run(candidate.id)).toThrow(/Reviewed Channel/i)
+  })
+
   it('upgrades original migration 19 Dream sources without losing provenance and supports later Global reuse', async () => {
     const { repositories, databasePath } = await createRepositories()
     const channelA = createChannel(repositories)
@@ -2345,6 +2379,20 @@ describe('SQLite workspace repositories', () => {
       DROP TRIGGER IF EXISTS thread_summaries_watermark_pair_insert;
       DROP TRIGGER IF EXISTS thread_summaries_watermark_pair_update;
       DELETE FROM schema_migrations WHERE version = 22;
+      COMMIT;
+    `)
+    legacy.close()
+  }
+
+  function downgradeMemoryReviewToVersion22(databasePath: string): void {
+    const legacy = new DatabaseSync(databasePath)
+    legacy.exec(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN;
+      DROP TRIGGER IF EXISTS memory_candidates_reviewed_channel_scope_insert;
+      DROP TRIGGER IF EXISTS memory_candidates_reviewed_channel_scope_update;
+      ALTER TABLE memory_candidates DROP COLUMN reviewed_channel_id;
+      DELETE FROM schema_migrations WHERE version = 23;
       COMMIT;
     `)
     legacy.close()

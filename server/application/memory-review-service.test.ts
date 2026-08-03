@@ -76,6 +76,10 @@ class FakeMemoryReviewRepositories {
     return [...this.memories.values()].find((memory) => memory.sourceCandidateId === candidateId)
   }
 
+  getMemory(memoryId: string): MemoryRecord | undefined {
+    return this.memories.get(memoryId)
+  }
+
   getChannel(channelId: string): Channel | undefined {
     return this.channels.find((item) => item.id === channelId)
   }

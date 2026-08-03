@@ -760,6 +760,15 @@ export function migrateSchema(database: DatabaseSync): void {
         database.exec('ALTER TABLE memory_candidates ADD COLUMN reviewed_channel_id TEXT REFERENCES channels(id)')
       }
       database.exec(`
+        UPDATE memory_candidates
+        SET reviewed_channel_id = COALESCE(
+          channel_id,
+          (SELECT scope_id FROM dream_runs WHERE dream_runs.id = memory_candidates.dream_run_id)
+        )
+        WHERE status = 'accepted'
+          AND reviewed_scope = 'channel'
+          AND reviewed_channel_id IS NULL;
+
         CREATE TRIGGER IF NOT EXISTS memory_candidates_reviewed_channel_scope_insert
         BEFORE INSERT ON memory_candidates
         WHEN (NEW.reviewed_scope = 'global' AND NEW.reviewed_channel_id IS NOT NULL)

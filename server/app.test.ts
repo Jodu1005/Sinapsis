@@ -64,6 +64,12 @@ describe('local service API', () => {
     })
     expect(rejectUnsafe.status).toBe(400)
 
+    const rejectOverLimitBeforeTrimming = await fetch(`${server.baseUrl}/api/memory-candidates/${candidate.id}/accept`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scope: 'channel', channelId: targetChannel.id, content: `A${' '.repeat(10_000)}` }),
+    })
+    expect(rejectOverLimitBeforeTrimming.status).toBe(400)
+
     const accepted = await fetch(`${server.baseUrl}/api/memory-candidates/${candidate.id}/accept`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ scope: 'channel', channelId: targetChannel.id, content: 'React is the frontend standard.' }),
@@ -112,6 +118,29 @@ describe('local service API', () => {
     })
     expect(queued.status).toBe(202)
     await expect(queued.json()).resolves.toEqual([expect.objectContaining({ scopeId: channel.id, status: expect.stringMatching(/queued|running|completed/) })])
+  })
+
+  it('returns stable not-found and strict-body errors for Dream and Memory mutations', async () => {
+    const server = await startHttpTestServer(createApp())
+    closeServer = server.close
+
+    const unknownDreamChannel = await fetch(`${server.baseUrl}/api/dream/runs`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ channelId: 'missing-channel' }),
+    })
+    expect(unknownDreamChannel.status).toBe(404)
+
+    const missingMemoryPatch = await fetch(`${server.baseUrl}/api/memories/missing-memory`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Updated.' }),
+    })
+    expect(missingMemoryPatch.status).toBe(404)
+
+    const invalidDelete = await fetch(`${server.baseUrl}/api/memories/missing-memory`, {
+      method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ force: true }),
+    })
+    expect(invalidDelete.status).toBe(400)
+
+    const missingMemoryDelete = await fetch(`${server.baseUrl}/api/memories/missing-memory`, { method: 'DELETE' })
+    expect(missingMemoryDelete.status).toBe(404)
   })
 
   it('creates a workspace from a validated JSON request', async () => {

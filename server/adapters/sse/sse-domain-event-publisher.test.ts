@@ -51,6 +51,21 @@ describe('SseDomainEventPublisher', () => {
     expect(payloads.join('')).not.toMatch(/proposedContent|reviewedContent|runtime|prompt|artifact/i)
     for (const type of memoryEventTypes) expect(payloads.some((payload) => payload.includes(`event: ${type}\n`))).toBe(true)
   })
+
+  it('projects maliciously extended DomainEvents to the public SSE fields', () => {
+    const publisher = new SseDomainEventPublisher()
+    const response = new FakeResponse()
+    publisher.handle({} as never, response as never)
+
+    publisher.publish({
+      id: 'event-1', type: 'memory.changed', occurredAt: '2026-08-03T08:00:00.000Z', entityType: 'memory', entityId: 'memory-1',
+      prompt: 'private prompt', content: 'private content', runtimeLog: 'private log', artifact: '/private/artifact',
+    } as import('../../domain/events').DomainEvent)
+
+    const payload = String(response.write.mock.calls[1]?.[0])
+    expect(payload).toContain('"entityId":"memory-1"')
+    expect(payload).not.toMatch(/private|prompt|content|runtimeLog|artifact/i)
+  })
 })
 
 class FakeResponse extends EventEmitter {

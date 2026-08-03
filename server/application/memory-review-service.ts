@@ -12,6 +12,7 @@ export interface AcceptMemoryCandidateRequest {
 export interface MemoryReviewRepositories {
   getMemoryCandidate(candidateId: string): MemoryCandidate | undefined
   getMemoryByCandidateId(candidateId: string): MemoryRecord | undefined
+  getMemory(memoryId: string): MemoryRecord | undefined
   getChannel(channelId: string): { id: string } | undefined
   createMemoryFromCandidate(input: {
     candidateId: string
@@ -75,10 +76,12 @@ export class MemoryReviewService {
   }
 
   update(memoryId: string, request: { content: string }): MemoryRecord {
+    this.requireMemory(memoryId)
     return this.options.repositories.updateMemory(memoryId, reviewedContent(request.content))
   }
 
   archive(memoryId: string): MemoryRecord {
+    this.requireMemory(memoryId)
     return this.options.repositories.archiveMemory(memoryId, this.now())
   }
 
@@ -91,6 +94,12 @@ export class MemoryReviewService {
   private acceptedMemory(candidateId: string): MemoryRecord {
     const memory = this.options.repositories.getMemoryByCandidateId(candidateId)
     if (!memory) throw new DomainError(`Accepted Memory candidate ${candidateId} has no Memory.`)
+    return memory
+  }
+
+  private requireMemory(memoryId: string): MemoryRecord {
+    const memory = this.options.repositories.getMemory(memoryId)
+    if (!memory) throw new NotFoundError(`Memory ${memoryId} does not exist.`)
     return memory
   }
 

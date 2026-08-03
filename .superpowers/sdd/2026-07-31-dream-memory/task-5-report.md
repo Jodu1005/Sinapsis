@@ -63,3 +63,15 @@ git diff --check
 ## Concerns
 
 无已知阻塞项。保留了既有直接仓储调用在未传 `reviewedChannelId` 时使用 Dream 来源频道的兼容行为；HTTP 接口始终传入人工明确选择的最终频道。
+
+## Fix Round 1
+
+独立审查提出的五项边界问题已按 TDD 修复：
+
+1. accept 与 PATCH 路由改为把原始 `content` 字符串交给审核服务；服务在 normalize 前检查原始长度，尾随空白不能绕过 10,000 字符上限。
+2. Dream 手动运行先验证频道并抛出 `NotFoundError`；审核服务通过仓储 `getMemory` 将缺失 Memory 的 PATCH/DELETE 转为同一 404 边界。
+3. migration 23 在安装触发器前回填 v22 中已接受、Channel scope Candidate 的最终频道，使用 `COALESCE(memory_candidates.channel_id, dream_runs.scope_id)`；真实 v22 升级测试验证回填、外键检查与触发器。
+4. SSE publisher 在 `client.write` 前显式投影 `id`、`type`、`occurredAt`、`entityType`、`entityId`，恶意扩展的 prompt/content/log/artifact 会被剥离。
+5. DELETE Memory 把缺省 body 当作空对象，并对存在的 JSON body 执行 `assertOnlyKeys([], body)`；非法字段稳定返回 400。
+
+Fix Round 1 验证：聚焦 100 项、SQLite 54 项、全量 578 项测试均通过；`npm run build` 与 `git diff --check` 通过。

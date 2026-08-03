@@ -209,9 +209,14 @@ export function createApp(options: CreateAppOptions = {}): Express {
   app.post('/api/dream/runs', asyncRoute((request, response) => {
     const body = objectBody(request.body)
     assertOnlyKeys(body, ['channelId'])
-    const runs = body.channelId === undefined
-      ? dreamRunService.enqueueAllActive('manual')
-      : [dreamRunService.enqueue({ channelId: requiredString(body, 'channelId'), trigger: 'manual' })]
+    let runs: DreamRun[]
+    if (body.channelId === undefined) {
+      runs = dreamRunService.enqueueAllActive('manual')
+    } else {
+      const channelId = requiredString(body, 'channelId')
+      if (!repositories.getChannel(channelId)) throw new NotFoundError(`Channel ${channelId} does not exist.`)
+      runs = [dreamRunService.enqueue({ channelId, trigger: 'manual' })]
+    }
     response.status(202).json(runs.map(toPublicDreamRun))
   }))
 
@@ -230,7 +235,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     assertOnlyKeys(body, ['scope', 'channelId', 'content'])
     const scope = memoryScope(body.scope)
     const memory = memoryReviewService.accept(requiredParam(request.params.candidateId, 'candidateId'), {
-      scope, channelId: optionalString(body, 'channelId'), content: requiredString(body, 'content'),
+      scope, channelId: optionalString(body, 'channelId'), content: requiredRawString(body, 'content'),
     })
     response.json(toPublicMemory(memory))
   }))
@@ -249,11 +254,13 @@ export function createApp(options: CreateAppOptions = {}): Express {
     const body = objectBody(request.body)
     assertOnlyKeys(body, ['content'])
     response.json(toPublicMemory(memoryReviewService.update(
-      requiredParam(request.params.memoryId, 'memoryId'), { content: requiredString(body, 'content') },
+      requiredParam(request.params.memoryId, 'memoryId'), { content: requiredRawString(body, 'content') },
     )))
   }))
 
   app.delete('/api/memories/:memoryId', asyncRoute((request, response) => {
+    const body = request.body === undefined ? {} : objectBody(request.body)
+    assertOnlyKeys(body, [])
     response.json(toPublicMemory(memoryReviewService.archive(requiredParam(request.params.memoryId, 'memoryId'))))
   }))
 
@@ -636,6 +643,12 @@ function requiredString(body: Record<string, unknown>, key: string): string {
     throw new ValidationError(`${key} must be a non-empty string.`)
   }
   return value.trim()
+}
+
+function requiredRawString(body: Record<string, unknown>, key: string): string {
+  const value = body[key]
+  if (typeof value !== 'string') throw new ValidationError(`${key} must be a string.`)
+  return value
 }
 
 function optionalString(body: Record<string, unknown>, key: string): string | undefined {
