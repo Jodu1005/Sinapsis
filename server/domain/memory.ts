@@ -43,6 +43,7 @@ export interface MemoryCandidateSourceMetadata {
   channelId: string
   channelName: string
   messageId: string
+  threadRootMessageId: string | null
 }
 
 export interface MemoryRecord {

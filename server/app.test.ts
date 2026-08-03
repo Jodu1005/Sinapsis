@@ -131,7 +131,7 @@ describe('local service API', () => {
     expect(candidates[0]).toMatchObject({
       id: pending.id,
       sourceMessageCount: 1,
-      sources: [{ channelId: sourceChannel.id, channelName: 'source', messageId: source.id }],
+      sources: [{ channelId: sourceChannel.id, channelName: 'source', messageId: source.id, threadRootMessageId: null }],
     })
     expect(JSON.stringify(candidates)).not.toMatch(/runtime|prompt|log|artifact|公开讨论内容/i)
 
@@ -140,6 +140,29 @@ describe('local service API', () => {
 
     const bootstrap = await fetch(`${server.baseUrl}/api/bootstrap`)
     await expect(bootstrap.json()).resolves.toMatchObject({ pendingMemoryCandidateCount: 1 })
+  })
+
+  it('returns an old public source message with its Thread root only in the matching channel', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Dream Memory' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'source' })
+    const other = repositories.createChannel({ name: 'other' })
+    const root = repositories.createMessage({ channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: '很早的公开根消息。' })
+    const reply = repositories.createMessage({ channelId: channel.id, threadRootMessageId: root.id, senderType: 'agent', authorName: 'Agent', body: '很早的公开回复。' })
+    for (let index = 0; index < 51; index += 1) repositories.createMessage({ channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: `较新的消息 ${index}` })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/channels/${channel.id}/messages/${reply.id}`)
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ message: expect.objectContaining({ id: reply.id, body: reply.body, threadRootMessageId: root.id }), threadRoot: expect.objectContaining({ id: root.id, body: root.body }) })
+    const foreign = await fetch(`${server.baseUrl}/api/channels/${other.id}/messages/${reply.id}`)
+    expect(foreign.status).toBe(404)
+    repositories.deleteMessage(root.id)
+    const deletedRoot = await fetch(`${server.baseUrl}/api/channels/${channel.id}/messages/${reply.id}`)
+    expect(deletedRoot.status).toBe(404)
   })
 
   it('queues persisted Dream runs and rejects fields outside the manual-run contract', async () => {

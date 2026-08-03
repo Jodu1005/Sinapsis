@@ -482,6 +482,20 @@ export function createApp(options: CreateAppOptions = {}): Express {
     response.status(201).json(input)
   }))
 
+  app.get('/api/channels/:channelId/messages/:messageId', asyncRoute((request, response) => {
+    const channelId = requiredParam(request.params.channelId, 'channelId')
+    const messageId = requiredParam(request.params.messageId, 'messageId')
+    const message = repositories.getMessage(messageId)
+    if (!message || message.channelId !== channelId || message.deletedAt) {
+      throw new NotFoundError(`Message ${messageId} does not exist in channel ${channelId}.`)
+    }
+    const threadRoot = message.threadRootMessageId ? repositories.getMessage(message.threadRootMessageId) : null
+    if (message.threadRootMessageId && (!threadRoot || threadRoot.channelId !== channelId || threadRoot.deletedAt || threadRoot.threadRootMessageId)) {
+      throw new NotFoundError(`Thread root for message ${messageId} does not exist in channel ${channelId}.`)
+    }
+    response.json({ message, threadRoot })
+  }))
+
   app.post('/api/channels/:channelId/messages', asyncRoute(async (request, response) => {
     const body = objectBody(request.body)
     assertOnlyKeys(body, ['body', 'taskId', 'threadRootMessageId'])

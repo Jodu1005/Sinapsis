@@ -1323,7 +1323,8 @@ export class SqliteRepositories implements WorkspaceRepositories {
 
   listMemoryCandidateSourceMetadata(candidateId: string): MemoryCandidateSourceMetadata[] {
     return this.sqlite.database.prepare(`
-      SELECT messages.channel_id AS channel_id, channels.name AS channel_name, messages.id AS message_id
+      SELECT messages.channel_id AS channel_id, channels.name AS channel_name, messages.id AS message_id,
+        messages.thread_root_id AS thread_root_message_id
       FROM memory_candidate_sources
       JOIN messages ON messages.id = memory_candidate_sources.message_id
       JOIN channels ON channels.id = messages.channel_id
@@ -1331,8 +1332,8 @@ export class SqliteRepositories implements WorkspaceRepositories {
         AND messages.deleted_at IS NULL
       ORDER BY messages.created_at, messages.id
     `).all(candidateId).map((row) => {
-      const source = row as { channel_id: string; channel_name: string; message_id: string }
-      return { channelId: source.channel_id, channelName: source.channel_name, messageId: source.message_id }
+      const source = row as { channel_id: string; channel_name: string; message_id: string; thread_root_message_id: string | null }
+      return { channelId: source.channel_id, channelName: source.channel_name, messageId: source.message_id, threadRootMessageId: source.thread_root_message_id }
     })
   }
 

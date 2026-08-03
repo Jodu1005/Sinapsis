@@ -26,3 +26,20 @@
 ## 注意事项
 
 - 任务开始前已有 `.superpowers/sdd/2026-07-31-dream-memory/progress.md`、`.codex/` 与 `src/.DS_Store` 工作区改动；均未纳入本任务暂存或提交。
+
+## Fix Round 1
+
+- Dream POST 的 `queued` 结果现在持续锁定运行按钮，按目标 run 轮询 `GET /api/dream/runs` 至全部终态；成功分别反馈无候选或候选数量，失败/取消、查询失败和超时均解除运行状态并给出中文反馈。轮询会在卸载或刷新代次变化时清理，避免并发残留。
+- WorkspaceShell 每次 Bootstrap/SSE 刷新都会递增 `refreshGeneration`，Dream Center 只按当前页签重新读取候选并以请求序号丢弃过期响应；`candidate_created`、`candidate_reviewed` 的刷新因此会自动更新审核列表。
+- 390px 窄屏 Dream 视图保留导航切换按钮；审核页签实现 roving `tabIndex`、左右箭头、`aria-controls` 与 `tabpanel`。
+- 已审核候选以 `reviewedContent`、`reviewedScope`、`reviewedChannelId` 展示并全部只读；候选详情提供每一条来源的跳转入口。
+- 新增 `GET /api/channels/:channelId/messages/:messageId`，严格校验频道、未删除状态和 Thread 根关系，只返回公开消息与同频道公开 Thread 根。前端临时合并这些消息，支持 Bootstrap 50 条窗口以外的旧 root/reply；root 在 Timeline 定位，reply 自动打开并聚焦 Thread。
+- 来源元数据增加 `threadRootMessageId`，继续只投影公开频道/消息标识，不暴露 Runtime prompt、日志或 artifact。
+
+## Fix Round 1 验证
+
+- RED：队列轮询、失败终态、移动导航、只读审核值、旧来源 root/reply、多来源跳转、候选读取竞态、ARIA 键盘页签及安全来源端点均先以失败测试确认缺口。
+- 聚焦与受影响测试：5 个文件，157 项通过（现有 SSE 测试仍有既存 React `act(...)` 警告，不影响结果）。
+- 类型检查：`npx tsc --noEmit` 通过。
+- 全量：`npm test -- --run`，59 个文件、595 项通过。
+- `npm run build` 通过；`git diff --check` 通过。

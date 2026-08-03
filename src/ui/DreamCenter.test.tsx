@@ -13,7 +13,7 @@ const candidate: MemoryCandidateView = {
   id: 'candidate-1', dreamRunId: 'run-1', proposedScope: 'channel', channelId: channel.id, kind: 'fact',
   proposedContent: 'React 是前端标准。', rationale: '重复确认。', confidence: 0.9, importance: 0.8, status: 'pending',
   reviewedContent: null, reviewedScope: null, reviewedChannelId: null, reviewedAt: null, createdAt: '2026-08-01T08:00:00.000Z',
-  sources: [{ channelId: channel.id, channelName: channel.name, messageId: 'message-1' }], sourceMessageCount: 1,
+  sources: [{ channelId: channel.id, channelName: channel.name, messageId: 'message-1', threadRootMessageId: null }], sourceMessageCount: 1,
 }
 
 function api(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
@@ -37,6 +37,16 @@ describe('DreamCenter', () => {
     await waitFor(() => expect(listMemoryCandidates).toHaveBeenLastCalledWith('ignored'))
   })
 
+  it('reloads the active candidate status when the workspace refresh generation changes', async () => {
+    const listMemoryCandidates = vi.fn().mockResolvedValue([candidate])
+    const workspaceApi = api({ listMemoryCandidates })
+    const view = render(<DreamCenter api={workspaceApi} channels={[channel]} onJumpToSource={vi.fn()} refreshGeneration={0} />)
+
+    await waitFor(() => expect(listMemoryCandidates).toHaveBeenCalledTimes(1))
+    view.rerender(<DreamCenter api={workspaceApi} channels={[channel]} onJumpToSource={vi.fn()} refreshGeneration={1} />)
+    await waitFor(() => expect(listMemoryCandidates).toHaveBeenCalledTimes(2))
+  })
+
   it('reports an empty completed Dream run and a failed Dream run', async () => {
     const user = userEvent.setup()
     const startDream = vi.fn()
@@ -46,7 +56,7 @@ describe('DreamCenter', () => {
 
     await user.selectOptions(screen.getByLabelText('Dream 范围'), channel.id)
     await user.click(screen.getByRole('button', { name: '立即 Dream' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('Dream 已完成，没有新增候选。')
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Dream 已完成，没有新增候选。'))
 
     await user.click(screen.getByRole('button', { name: '立即 Dream' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Dream 运行失败：运行超时')
@@ -54,14 +64,78 @@ describe('DreamCenter', () => {
 
   it('moves an accepted pending candidate into the accepted tab', async () => {
     const user = userEvent.setup()
-    const listMemoryCandidates = vi.fn().mockResolvedValue([candidate])
+    const reviewed = { ...candidate, status: 'accepted' as const, reviewedContent: '编辑后确认的内容。', reviewedScope: 'global' as const, reviewedChannelId: null }
+    const listMemoryCandidates = vi.fn((nextStatus: string) => Promise.resolve(nextStatus === 'accepted' ? [reviewed] : [candidate]))
     const acceptMemoryCandidate = vi.fn().mockResolvedValue({ id: 'memory-1' })
     render(<DreamCenter api={api({ listMemoryCandidates, acceptMemoryCandidate })} channels={[channel]} onJumpToSource={vi.fn()} />)
 
     await screen.findByRole('button', { name: '接受 Memory' })
+    await user.clear(screen.getByLabelText('Memory 内容'))
+    await user.type(screen.getByLabelText('Memory 内容'), '编辑后确认的内容。')
     await user.click(screen.getByRole('button', { name: '接受 Memory' }))
 
     await waitFor(() => expect(listMemoryCandidates).toHaveBeenLastCalledWith('accepted'))
     expect(screen.getByRole('tab', { name: '已接受' })).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByDisplayValue('编辑后确认的内容。')).toBeDisabled()
+  })
+
+  it('keeps Dream locked through queued runs and reports a terminal no-op after polling', async () => {
+    const user = userEvent.setup()
+    const queued = { id: 'run-queued', scope: 'channel' as const, scopeId: channel.id, trigger: 'manual' as const, status: 'queued' as const, candidateCount: 0, createdAt: '2026-08-01T08:00:00.000Z', startedAt: null, completedAt: null, error: null }
+    const completed = { ...queued, status: 'completed' as const, completedAt: '2026-08-01T08:01:00.000Z' }
+    const listDreamRuns = vi.fn().mockResolvedValueOnce([queued]).mockResolvedValueOnce([completed])
+    render(<DreamCenter api={api({ startDream: vi.fn().mockResolvedValue([queued]), listDreamRuns })} channels={[channel]} onJumpToSource={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '立即 Dream' }))
+    expect(screen.getByRole('button', { name: '立即 Dream' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('Dream 正在运行')
+    expect(listDreamRuns).toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Dream 已完成，没有新增候选。'))
+  })
+
+  it('unlocks and reports a queued Dream run that later fails', async () => {
+    const user = userEvent.setup()
+    const queued = { id: 'run-failing', scope: 'channel' as const, scopeId: channel.id, trigger: 'manual' as const, status: 'queued' as const, candidateCount: 0, createdAt: '2026-08-01T08:00:00.000Z', startedAt: null, completedAt: null, error: null }
+    const failed = { ...queued, status: 'failed' as const, completedAt: '2026-08-01T08:01:00.000Z', error: '提炼超时' }
+    render(<DreamCenter api={api({ startDream: vi.fn().mockResolvedValue([queued]), listDreamRuns: vi.fn().mockResolvedValueOnce([queued]).mockResolvedValueOnce([failed]) })} channels={[channel]} onJumpToSource={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '立即 Dream' }))
+    expect(screen.getByRole('button', { name: '立即 Dream' })).toBeDisabled()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Dream 运行失败：提炼超时')
+    expect(screen.getByRole('button', { name: '立即 Dream' })).toBeEnabled()
+  })
+
+  it('keeps a newer tab result when an older status request resolves last', async () => {
+    let resolvePending: (items: MemoryCandidateView[]) => void = () => undefined
+    const pending = new Promise<MemoryCandidateView[]>((resolve) => { resolvePending = resolve })
+    const ignored = { ...candidate, id: 'candidate-ignored', status: 'ignored' as const, proposedContent: '已忽略内容。' }
+    const listMemoryCandidates = vi.fn((status: string) => status === 'pending' ? pending : Promise.resolve([ignored]))
+    const user = userEvent.setup()
+    render(<DreamCenter api={api({ listMemoryCandidates })} channels={[channel]} onJumpToSource={vi.fn()} />)
+
+    await user.click(screen.getByRole('tab', { name: '已忽略' }))
+    expect(await screen.findByRole('button', { name: /已忽略内容。/ })).toBeInTheDocument()
+    resolvePending([candidate])
+
+    await Promise.resolve()
+    expect(screen.queryByText('React 是前端标准。')).not.toBeInTheDocument()
+  })
+
+  it('implements roving keyboard tabs with tabpanel relationships', async () => {
+    const user = userEvent.setup()
+    render(<DreamCenter api={api()} channels={[channel]} onJumpToSource={vi.fn()} />)
+    const pending = screen.getByRole('tab', { name: '待确认' })
+    pending.focus()
+
+    await user.keyboard('{ArrowRight}')
+
+    const accepted = screen.getByRole('tab', { name: '已接受' })
+    expect(accepted).toHaveFocus()
+    expect(accepted).toHaveAttribute('aria-selected', 'true')
+    expect(accepted).toHaveAttribute('aria-controls')
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', accepted.id)
+
+    await user.keyboard('{ArrowLeft}')
+    expect(pending).toHaveFocus()
   })
 })

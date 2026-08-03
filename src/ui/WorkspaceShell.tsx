@@ -29,6 +29,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const api = providedApi ?? defaultApi
   const [storedSelection] = useState(readStoredSelection)
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null)
+  const [refreshGeneration, setRefreshGeneration] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null)
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(storedSelection?.channelId ?? null)
@@ -61,6 +62,8 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const [resettingChannelContext, setResettingChannelContext] = useState(false)
   const [mainView, setMainView] = useState<'channel' | 'dream'>('channel')
   const [pendingMessageFocusId, setPendingMessageFocusId] = useState<string | null>(null)
+  const [pendingThreadFocusId, setPendingThreadFocusId] = useState<string | null>(null)
+  const [sourceMessages, setSourceMessages] = useState<Map<string, ChannelMessage>>(() => new Map())
   const narrowNavigation = useMediaQuery('(max-width: 700px)')
   const narrowContext = useMediaQuery('(max-width: 980px)')
   const refresh = useCallback(async (suppressTurnRefreshKey?: string) => {
@@ -68,6 +71,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
       const nextSnapshot = await api.getBootstrap()
       if (suppressTurnRefreshKey) suppressedSnapshotTurnRefreshes.current.set(nextSnapshot, suppressTurnRefreshKey)
       setSnapshot(nextSnapshot)
+      setRefreshGeneration((current) => current + 1)
       setError(null)
     } catch (cause) {
       const refreshError = cause instanceof Error ? cause : new Error('无法读取工作空间。')
@@ -102,6 +106,16 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     })
     return () => cancelAnimationFrame(frame)
   }, [mainView, pendingMessageFocusId, selection.channel?.id, snapshot])
+  useEffect(() => {
+    if (mainView !== 'channel' || !pendingThreadFocusId || !selectedThreadRootId) return undefined
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(`message-${pendingThreadFocusId}`)
+      target?.scrollIntoView?.({ block: 'center' })
+      target?.focus?.()
+      setPendingThreadFocusId(null)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [mainView, pendingThreadFocusId, selectedThreadRootId, snapshot])
   const taskRepository = useMemo(() => findRepository(workspace, selectedTaskRepositoryId), [workspace, selectedTaskRepositoryId])
   const taskScope = taskRepository ?? workspace?.repositories[0]
   const taskScopeTasks = useMemo(() => snapshot?.tasks.filter((task) =>
@@ -117,7 +131,12 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     setSelectedTaskId(null)
     setSelectedTaskRepositoryId(null)
   }, [snapshot, selectedTaskId, selectedTask])
-  const messages = useMemo(() => snapshot && selection.channel ? snapshotChannelMessages(snapshot, selection.channel.id) : [], [snapshot, selection.channel])
+  const messages = useMemo(() => {
+    if (!selection.channel) return []
+    const merged = new Map((snapshot ? snapshotChannelMessages(snapshot, selection.channel.id) : []).map((message) => [message.id, message]))
+    for (const message of sourceMessages.values()) if (message.channelId === selection.channel.id) merged.set(message.id, message)
+    return [...merged.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+  }, [snapshot, selection.channel, sourceMessages])
   const agents = useMemo(() => {
     const allAgents = snapshot ? snapshotAgents(snapshot) : []
     return selection.channel ? allAgents.filter((agent) => selection.channel!.memberAgentIds.includes(agent.id)) : allAgents
@@ -451,13 +470,30 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const displayedTurnDetails = matchingTurnDetails && selectedTurnKey && confirmedCancelledTurnKeys.has(selectedTurnKey)
     ? { ...matchingTurnDetails, turn: { ...matchingTurnDetails.turn, status: 'cancelled' as const } }
     : matchingTurnDetails
-  const jumpToDreamSource = (channelId: string, messageId: string) => {
-    setPendingMessageFocusId(messageId)
-    selectChannel(channelId)
+  const jumpToDreamSource = async (channelId: string, messageId: string) => {
+    try {
+      const source = await api.getChannelMessage(channelId, messageId)
+      selectChannel(channelId)
+      setSourceMessages((current) => {
+        const next = new Map(current)
+        next.set(source.message.id, source.message)
+        if (source.threadRoot) next.set(source.threadRoot.id, source.threadRoot)
+        return next
+      })
+      const rootId = source.threadRoot?.id ?? source.message.id
+      setPendingMessageFocusId(rootId)
+      if (source.threadRoot) {
+        setSelectedThreadRootId(source.threadRoot.id)
+        setPendingThreadFocusId(source.message.id)
+        setContextOpen(true)
+      }
+    } catch (cause) {
+      setChannelActionError(cause instanceof Error ? cause.message : '无法读取来源消息。')
+    }
   }
   return <div className={`workspace-shell${mainView === 'dream' ? ' dream-view' : ''}`}>
     <RepositorySidebar workspaces={snapshot.workspaces} agents={agents} channels={snapshot.channels} tasks={snapshot.tasks} selectedChannelId={selection.channel.id} selectedWorkspaceId={workspace?.id ?? null} selectedTaskId={selectedTask?.id ??null} onSelectChannel={selectChannel} onSelectWorkspace={selectWorkspace} onSelectTask={selectTask} onCreateTask={(workspaceId) => setTaskComposerDraft({ initialWorkspaceId: workspaceId })} onCreateChannel={() => setCreatingChannel(true)} onArchiveChannel={archiveChannel} onRestoreChannel={restoreChannel} channelReadOnly={Boolean(selection.channel.archivedAt)} onCreateWorkspace={() => setCreatingWorkspace(true)} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} pendingMemoryCandidateCount={snapshot.pendingMemoryCandidateCount} dreamSelected={mainView === 'dream'} onSelectDream={() => { setMainView('dream'); setNavOpen(false) }} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
-    {mainView === 'dream' ? <DreamCenter api={api} channels={snapshot.channels} onJumpToSource={jumpToDreamSource} /> : <><main className="conversation-panel">
+    {mainView === 'dream' ? <DreamCenter api={api} channels={snapshot.channels} onJumpToSource={jumpToDreamSource} refreshGeneration={refreshGeneration} onOpenNavigation={() => setNavOpen(true)} /> : <><main className="conversation-panel">
       <header className="channel-header"><NavigationToggle onClick={() => setNavOpen(true)} /><div className="channel-heading"><h1># {selection.channel.name}</h1><p>{selection.channel.archivedAt ? '已归档频道 · 只读' : '全局频道'}</p></div><div className="header-actions"><span className="connection-state" data-reconnecting={reconnecting}>{reconnecting ? '正在重新连接' : '已连接'}</span><button type="button" className="icon-button" aria-label="打开上下文" data-tooltip="打开上下文" onClick={() => setContextOpen(true)}><PanelRightOpen size={18} /></button></div></header>
       {channelActionError && <p className="channel-action-error" role="alert">{channelActionError}</p>}
       <ChannelTimeline messages={messages} agents={agents} turnActivities={turnActivities} onOpenThread={(message) => { setSelectedThreadRootId(message.id); setSelectedTurnId(null); setContextOpen(true) }} onOpenTurn={(turnId) => { setSelectedTurnId(turnId); setSelectedThreadRootId(null); setContextOpen(true) }} />

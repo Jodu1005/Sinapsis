@@ -372,6 +372,7 @@ ol.turn-detail-list { padding-left: 18px; list-style: decimal; }
 .workspace-shell.dream-view { grid-template-columns: 260px minmax(0, 1fr); }
 .dream-center { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto auto auto minmax(0, 1fr); overflow: hidden; background: var(--paper); }
 .dream-header { display: flex; align-items: end; justify-content: space-between; gap: 18px; padding: 16px 20px 13px; border-bottom: 1px solid var(--line); }
+.dream-heading { display: flex; min-width: 0; align-items: start; gap: 8px; }
 .dream-title { display: flex; align-items: center; gap: 8px; color: var(--green); }
 .dream-title h1 { margin: 0; color: var(--ink); font-size: 18px; letter-spacing: 0; }
 .dream-header p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
@@ -414,6 +415,7 @@ ol.turn-detail-list { padding-left: 18px; list-style: decimal; }
 @media (max-width: 700px) {
   .workspace-shell.dream-view { display: block; }
   .dream-header { align-items: stretch; flex-direction: column; padding: 13px 14px 11px; }
+  .dream-heading { align-items: center; }
   .dream-run-controls { align-items: end; }
   .dream-run-controls label { flex: 1; min-width: 0; }
   .dream-run-controls select { width: 100%; max-width: none; }

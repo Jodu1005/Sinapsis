@@ -33,6 +33,7 @@ export interface MemoryCandidateSourceView {
   channelId: string
   channelName: string
   messageId: string
+  threadRootMessageId: string | null
 }
 
 export interface MemoryCandidateView {

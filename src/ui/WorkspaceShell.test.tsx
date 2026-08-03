@@ -60,6 +60,7 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     refreshAgentRuntime: vi.fn(),
     updateAgentResponsibilities: vi.fn().mockResolvedValue(snapshot.agents[0]!),
     postMessage: vi.fn().mockResolvedValue(undefined),
+    getChannelMessage: vi.fn(),
     createChannel: vi.fn(),
     archiveChannel: vi.fn(),
     restoreChannel: vi.fn(),
@@ -157,7 +158,7 @@ const dreamCandidate: MemoryCandidateView = {
   id: 'candidate-1', dreamRunId: 'run-1', proposedScope: 'channel', channelId: 'channel-general', kind: 'fact',
   proposedContent: 'React 是前端标准。', rationale: '多次确认。', confidence: 0.9, importance: 0.8, status: 'pending',
   reviewedContent: null, reviewedScope: null, reviewedChannelId: null, reviewedAt: null, createdAt: '2026-08-01T08:00:00.000Z',
-  sources: [{ channelId: 'channel-general', channelName: 'general', messageId: 'message-1' }], sourceMessageCount: 1,
+  sources: [{ channelId: 'channel-general', channelName: 'general', messageId: 'message-1', threadRootMessageId: null }], sourceMessageCount: 1,
 }
 
 describe('WorkspaceShell', () => {
@@ -194,7 +195,7 @@ describe('WorkspaceShell', () => {
   it('keeps the persisted channel selection while Dream Center is open and returns to a source message channel', async () => {
     window.localStorage.setItem('sinapsis:workspace-selection', JSON.stringify({ channelId: 'channel-build' }))
     const dreamSnapshot = { ...snapshot, pendingMemoryCandidateCount: 1 }
-    render(<WorkspaceShell api={makeApi({ getBootstrap: vi.fn().mockResolvedValue(dreamSnapshot), listMemoryCandidates: vi.fn().mockResolvedValue([dreamCandidate]) })} />)
+    render(<WorkspaceShell api={makeApi({ getBootstrap: vi.fn().mockResolvedValue(dreamSnapshot), listMemoryCandidates: vi.fn().mockResolvedValue([dreamCandidate]), getChannelMessage: vi.fn().mockResolvedValue({ message: snapshot.recentMessages[0], threadRoot: null }) })} />)
 
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Dream（1 个待确认）' }))
 
@@ -205,6 +206,46 @@ describe('WorkspaceShell', () => {
     expect(await screen.findByRole('heading', { name: '# general' })).toBeInTheDocument()
     expect(screen.getByText('先看一下任务队列。')).toBeInTheDocument()
     expect(window.localStorage.getItem('sinapsis:workspace-selection')).toBe(JSON.stringify({ channelId: 'channel-general' }))
+  })
+
+  it('fetches an old reply source, focuses its Timeline root, and opens its Thread', async () => {
+    const oldRoot = { id: 'message-old-root', channelId: 'channel-general', taskId: null, senderType: 'human' as const, senderId: null, authorName: '你', body: '旧 Thread 根消息。', createdAt: '2026-07-20T08:00:00.000Z', updatedAt: '2026-07-20T08:00:00.000Z', deletedAt: null }
+    const oldReply = { id: 'message-old-reply', channelId: 'channel-general', threadRootMessageId: oldRoot.id, taskId: null, senderType: 'agent' as const, senderId: 'agent-1', authorName: '实现 Agent', body: '旧 Thread 回复。', createdAt: '2026-07-20T08:01:00.000Z', updatedAt: '2026-07-20T08:01:00.000Z', deletedAt: null }
+    const oldCandidate = { ...dreamCandidate, sources: [
+      { channelId: 'channel-general', channelName: 'general', messageId: oldRoot.id, threadRootMessageId: null },
+      { channelId: 'channel-general', channelName: 'general', messageId: oldReply.id, threadRootMessageId: oldRoot.id },
+    ], sourceMessageCount: 2 }
+    const api = makeApi({ getBootstrap: vi.fn().mockResolvedValue({ ...snapshot, pendingMemoryCandidateCount: 1 }), listMemoryCandidates: vi.fn().mockResolvedValue([oldCandidate]) }) as WorkspaceApi & { getChannelMessage: ReturnType<typeof vi.fn> }
+    api.getChannelMessage = vi.fn()
+      .mockResolvedValueOnce({ message: oldRoot, threadRoot: null })
+      .mockResolvedValueOnce({ message: oldReply, threadRoot: oldRoot })
+    render(<WorkspaceShell api={api} />)
+
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Dream（1 个待确认）' }))
+    await userEvent.setup().click(await screen.findByRole('button', { name: '跳转到 # general 的来源消息' }))
+
+    expect((await screen.findAllByText('旧 Thread 根消息。')).length).toBeGreaterThan(0)
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Dream（1 个待确认）' }))
+    await userEvent.setup().click(await screen.findByRole('button', { name: '跳转到 # general 的来源消息 2' }))
+    expect(await screen.findByText('旧 Thread 回复。')).toBeInTheDocument()
+    expect(api.getChannelMessage).toHaveBeenNthCalledWith(1, 'channel-general', oldRoot.id)
+    expect(api.getChannelMessage).toHaveBeenNthCalledWith(2, 'channel-general', oldReply.id)
+  })
+
+  it('keeps a mobile navigation toggle available in Dream Center', async () => {
+    const originalMatchMedia = Object.getOwnPropertyDescriptor(window, 'matchMedia')
+    Object.defineProperty(window, 'matchMedia', { configurable: true, writable: true, value: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }) })
+    try {
+      render(<WorkspaceShell api={makeApi({ getBootstrap: vi.fn().mockResolvedValue({ ...snapshot, pendingMemoryCandidateCount: 1 }) })} />)
+      await userEvent.setup().click(await screen.findByRole('button', { name: '打开导航' }))
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Dream（1 个待确认）' }))
+
+      await userEvent.setup().click(screen.getByRole('button', { name: '打开导航' }))
+      expect(screen.getByRole('navigation', { name: '工作空间', hidden: true })).toHaveAttribute('data-mobile-open', 'true')
+    } finally {
+      if (originalMatchMedia) Object.defineProperty(window, 'matchMedia', originalMatchMedia)
+      else delete (window as { matchMedia?: typeof window.matchMedia }).matchMedia
+    }
   })
 
   it('shows only the workspaces bound to the selected channel', async () => {
