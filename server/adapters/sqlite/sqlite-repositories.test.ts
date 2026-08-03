@@ -740,6 +740,75 @@ describe('SQLite workspace repositories', () => {
     `).run(candidate.id)).toThrow(/Reviewed Channel/i)
   })
 
+  it('upgrades a populated v23 Dream database to v24 without losing provenance and can recover it', async () => {
+    const { repositories, databasePath } = await createRepositories()
+    const channel = createChannel(repositories)
+    const acceptedSource = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Accepted v23 source.',
+    })
+    const completedRun = repositories.createDreamRun({
+      scope: 'channel', scopeId: channel.id, trigger: 'manual', from: null,
+      to: { createdAt: acceptedSource.createdAt, id: acceptedSource.id },
+    })
+    const acceptedCandidate = repositories.createMemoryCandidate({
+      dreamRunId: completedRun.id, proposedScope: 'global', channelId: null, kind: 'fact',
+      proposedContent: 'V23 retained Memory.', rationale: 'Confirmed before upgrade.', confidence: 0.9, importance: 0.8,
+      sourceMessageIds: [acceptedSource.id],
+    })
+    const memory = repositories.createMemoryFromCandidate({
+      candidateId: acceptedCandidate.id, reviewedContent: acceptedCandidate.proposedContent, reviewedScope: 'global',
+      occurredAt: new Date('2026-08-03T00:00:00.000Z'),
+    })
+    repositories.updateDreamRun(completedRun.id, {
+      status: 'completed', startedAt: '2026-08-03T00:00:00.000Z', completedAt: '2026-08-03T00:00:01.000Z',
+    })
+    const interruptedSource = repositories.createMessage({
+      channelId: channel.id, senderType: 'human', authorName: 'Jodu', body: 'Interrupted v23 source.',
+    })
+    const interruptedRun = repositories.createIncrementalDreamRun({ channelId: channel.id, trigger: 'scheduled' })
+    repositories.updateDreamRun(interruptedRun.id, {
+      status: 'running', startedAt: '2026-08-03T00:00:02.000Z',
+    })
+    const invalidCandidate = repositories.createMemoryCandidate({
+      dreamRunId: interruptedRun.id, proposedScope: 'channel', channelId: channel.id, kind: 'fact',
+      proposedContent: 'Invalid v23 candidate.', rationale: 'Missing its source relation.', confidence: 0.7, importance: 0.6,
+      sourceMessageIds: [],
+    })
+    database!.close()
+    database = undefined
+    downgradeDreamRecoveryToVersion23(databasePath)
+
+    const version23 = new DatabaseSync(databasePath)
+    expect(version23.prepare('SELECT MAX(version) AS version FROM schema_migrations').get()).toEqual({ version: 23 })
+    expect(version23.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'dream_recovery_audit'`).get())
+      .toBeUndefined()
+    version23.close()
+
+    database = createSqliteDatabase(databasePath)
+    const upgraded = new SqliteRepositories(database, new RecordingPublisher())
+    expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 24').get())
+      .toEqual({ version: 24 })
+    expect(upgraded.getDreamRun(completedRun.id)).toMatchObject({ status: 'completed' })
+    expect(upgraded.getMemoryCandidate(acceptedCandidate.id)).toMatchObject({ status: 'accepted' })
+    expect(upgraded.getMemory(memory.id)).toMatchObject({ content: 'V23 retained Memory.', status: 'active' })
+    expect(database.database.prepare(`
+      SELECT candidate_id, message_id FROM memory_sources WHERE memory_id = ?
+    `).all(memory.id)).toEqual([{ candidate_id: acceptedCandidate.id, message_id: acceptedSource.id }])
+    expect(upgraded.listDreamSourceMessages(interruptedRun.id).map((message) => message.id))
+      .toEqual([interruptedSource.id])
+
+    upgraded.recoverDreamMemory(new Date('2026-08-03T00:00:03.000Z'))
+    expect(upgraded.getDreamRun(interruptedRun.id)).toMatchObject({
+      status: 'failed', error: 'service_restarted', completedAt: '2026-08-03T00:00:03.000Z',
+    })
+    expect(upgraded.getMemoryCandidate(invalidCandidate.id)).toMatchObject({
+      status: 'superseded', reviewedAt: '2026-08-03T00:00:03.000Z',
+    })
+    expect(database.database.prepare(`
+      SELECT entity_id, error FROM dream_recovery_audit WHERE entity_id = ?
+    `).get(invalidCandidate.id)).toEqual({ entity_id: invalidCandidate.id, error: 'invalid_candidate_sources' })
+  })
+
   it('upgrades original migration 19 Dream sources without losing provenance and supports later Global reuse', async () => {
     const { repositories, databasePath } = await createRepositories()
     const channelA = createChannel(repositories)
@@ -2394,6 +2463,17 @@ describe('SQLite workspace repositories', () => {
       DROP TRIGGER IF EXISTS memory_candidates_reviewed_channel_scope_update;
       ALTER TABLE memory_candidates DROP COLUMN reviewed_channel_id;
       DELETE FROM schema_migrations WHERE version = 23;
+      COMMIT;
+    `)
+    legacy.close()
+  }
+
+  function downgradeDreamRecoveryToVersion23(databasePath: string): void {
+    const legacy = new DatabaseSync(databasePath)
+    legacy.exec(`
+      BEGIN;
+      DROP TABLE dream_recovery_audit;
+      DELETE FROM schema_migrations WHERE version = 24;
       COMMIT;
     `)
     legacy.close()

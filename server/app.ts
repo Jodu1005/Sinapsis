@@ -119,6 +119,7 @@ export interface CreateAppOptions {
   runtimeAvailabilityDetector?: RuntimeAvailabilityDetector
   executionCoordinator?: TaskExecutionCoordinator
   conversationRuntimes?: Partial<Record<import('./adapters/runtime/runtime-profile').RuntimeKind, RuntimeAdapter>>
+  dreamRuntime?: RuntimeAdapter
   conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'> & Partial<Pick<
     ConversationCoordinator,
     'getActiveStatesByChannel' | 'cancel' | 'cancelChannel' | 'cancelAgentInChannel'
@@ -178,7 +179,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     repositories,
     consolidator: new MemoryConsolidator({
       repositories,
-      runtime: runtimes[serviceConfig.dreamRuntime],
+      runtime: options.dreamRuntime ?? runtimes[serviceConfig.dreamRuntime],
       dataDir: path.dirname(databasePath),
       profile: resolveRuntimeProfile(serviceConfig.dreamRuntime, { model: serviceConfig.dreamModel }),
       timeoutMs: serviceConfig.dreamTimeoutMs,

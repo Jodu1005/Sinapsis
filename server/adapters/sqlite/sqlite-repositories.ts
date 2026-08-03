@@ -1286,7 +1286,15 @@ export class SqliteRepositories implements WorkspaceRepositories {
 
   createMemoryCandidates(inputs: CreateMemoryCandidateInput[]): MemoryCandidate[] {
     return this.inTransaction(() => {
-      return inputs.map((input) => this.insertMemoryCandidate(input))
+      const candidateIds = new Set<string>()
+      return inputs.map((input) => {
+        const candidate = this.insertMemoryCandidate(input)
+        if (candidateIds.has(candidate.id)) {
+          throw new Error('UNIQUE constraint failed: memory_candidates_run_content_unique_idx')
+        }
+        candidateIds.add(candidate.id)
+        return candidate
+      })
     })
   }
 
@@ -1310,6 +1318,14 @@ export class SqliteRepositories implements WorkspaceRepositories {
       contentHash: contentHash(input.proposedContent), status: 'pending', reviewedContent: null,
       reviewedScope: null, reviewedChannelId: null, reviewedAt: null, createdAt,
     }
+    const existing = database.prepare(`
+      SELECT * FROM memory_candidates
+      WHERE dream_run_id = ? AND content_hash = ? AND proposed_scope = ? AND channel_id IS ?
+      LIMIT 1
+    `).get(
+      candidate.dreamRunId, candidate.contentHash, candidate.proposedScope, candidate.channelId,
+    ) as MemoryCandidateRow | undefined
+    if (existing) return mapMemoryCandidate(existing)
     database.prepare(`
       INSERT INTO memory_candidates (
         id, dream_run_id, proposed_scope, channel_id, kind, proposed_content, rationale, confidence,

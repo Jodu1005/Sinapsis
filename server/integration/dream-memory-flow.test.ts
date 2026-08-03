@@ -11,6 +11,7 @@ import type { MemoryCandidate } from '../domain/memory'
 import type { Message } from '../domain/message'
 import type { WorkspaceRepositories } from '../ports/repositories'
 import type { RuntimeAdapter, RuntimeEventSink, RuntimeSession, RuntimeTaskRequest } from '../ports/runtime'
+import { startHttpTestServer } from '../test/http-test-server'
 
 describe('Dream Memory lifecycle', () => {
   let dataDirectory: string | undefined
@@ -159,6 +160,18 @@ describe('Dream Memory lifecycle', () => {
     })
     const sourceIds = rebuiltRepositories.listDreamSourceMessages(interrupted.id).map((message) => message.id)
     expect(sourceIds.length).toBeGreaterThan(0)
+    const retainedReplayCandidate = rebuiltRepositories.createMemoryCandidate({
+      dreamRunId: interrupted.id,
+      proposedScope: 'global',
+      channelId: null,
+      kind: 'fact',
+      proposedContent: 'Team uses Chinese for release notes.',
+      rationale: 'The user confirmed this durable convention.',
+      confidence: 0.9,
+      importance: 0.8,
+      sourceMessageIds: [sourceIds[0]!],
+    })
+    const retainedSources = rebuiltRepositories.listMemoryCandidateSourceMetadata(retainedReplayCandidate.id)
     rebuiltRepositories.recoverDreamMemory(new Date('2026-08-03T02:01:00.000Z'))
     expect(rebuiltRepositories.getDreamRun(interrupted.id)).toMatchObject({
       status: 'failed',
@@ -175,8 +188,78 @@ describe('Dream Memory lifecycle', () => {
     await expect(replayService.waitFor(replayed.id)).resolves.toMatchObject({ status: 'completed' })
     expect(replayRuntime.requests).toHaveLength(1)
     expect(rebuiltRepositories.listDreamSourceMessages(replayed.id).map((message) => message.id)).toEqual(sourceIds)
+    expect(rebuiltRepositories.getMemoryCandidate(retainedReplayCandidate.id)).toEqual(retainedReplayCandidate)
+    expect(rebuiltRepositories.listMemoryCandidateSourceMetadata(retainedReplayCandidate.id)).toEqual(retainedSources)
+    expect(rebuiltRepositories.listMemoryCandidates({ dreamRunId: replayed.id })).toHaveLength(2)
     expect(rebuiltRepositories.getDreamWatermark(alphaId)?.toMessageId).toBe(sourceIds.at(-1))
     expect(rebuiltRepositories.listDreamRuns({ channelId: alphaId })).toHaveLength(interruptedSourcesBefore + 1)
+  })
+
+  it('runs Dream and reviews its Memory through the fully assembled HTTP API', async () => {
+    dataDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-dream-http-flow-'))
+    const databasePath = path.join(dataDirectory, 'sinapsis.sqlite')
+    const dreamRuntime = new ScriptedDreamRuntime()
+    const app = createApp({ databasePath, dreamRuntime })
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const { alphaId } = seedChannels(repositories, dataDirectory)
+    repositories.createMessage({
+      channelId: alphaId,
+      senderType: 'human',
+      authorName: 'You',
+      body: 'The team confirmed durable release practices.',
+    })
+    const server = await startHttpTestServer(app)
+
+    try {
+      const manual = await fetch(`${server.baseUrl}/api/dream/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ channelId: alphaId }),
+      })
+      expect(manual.status).toBe(202)
+      const queued = await manual.json() as Array<{ id: string; scopeId: string }>
+      expect(queued).toEqual([expect.objectContaining({ scopeId: alphaId })])
+      await expect(waitForDreamRun(server.baseUrl, queued[0]!.id)).resolves.toMatchObject({
+        status: 'completed', candidateCount: 3,
+      })
+      expect(dreamRuntime.requests).toHaveLength(1)
+
+      const pendingResponse = await fetch(`${server.baseUrl}/api/memory-candidates?status=pending`)
+      expect(pendingResponse.status).toBe(200)
+      const pending = await pendingResponse.json() as Array<{ id: string; proposedContent: string }>
+      const candidate = pending.find((item) => item.proposedContent === 'Team uses Chinese for release notes.')
+      expect(candidate).toBeDefined()
+
+      const acceptedResponse = await fetch(`${server.baseUrl}/api/memory-candidates/${candidate!.id}/accept`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ scope: 'global', content: candidate!.proposedContent }),
+      })
+      expect(acceptedResponse.status).toBe(200)
+      const accepted = await acceptedResponse.json() as { id: string; status: string; sourceCandidateId: string }
+      expect(accepted).toMatchObject({ status: 'active', sourceCandidateId: candidate!.id })
+
+      const editedResponse = await fetch(`${server.baseUrl}/api/memories/${accepted.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ content: 'Team uses bilingual release notes.' }),
+      })
+      expect(editedResponse.status).toBe(200)
+      await expect(editedResponse.json()).resolves.toMatchObject({
+        id: accepted.id, content: 'Team uses bilingual release notes.', status: 'active',
+      })
+
+      const archivedResponse = await fetch(`${server.baseUrl}/api/memories/${accepted.id}`, { method: 'DELETE' })
+      expect(archivedResponse.status).toBe(200)
+      await expect(archivedResponse.json()).resolves.toMatchObject({
+        id: accepted.id, status: 'archived', archivedAt: expect.any(String),
+      })
+      const memories = await fetch(`${server.baseUrl}/api/memories`).then((response) => response.json()) as unknown[]
+      expect(memories).toEqual([])
+    } finally {
+      await server.close()
+      closeApp(app)()
+    }
   })
 })
 
@@ -262,6 +345,18 @@ function candidateWithContent(candidates: MemoryCandidate[], content: string): M
   const candidate = candidates.find((item) => item.proposedContent === content)
   if (!candidate) throw new Error(`Missing candidate: ${content}`)
   return candidate
+}
+
+async function waitForDreamRun(baseUrl: string, runId: string): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + 2_000
+  while (true) {
+    const response = await fetch(`${baseUrl}/api/dream/runs/${runId}`)
+    expect(response.status).toBe(200)
+    const run = await response.json() as Record<string, unknown>
+    if (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled') return run
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for Dream run ${runId}.`)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
 }
 
 function closeApp(app: ReturnType<typeof createApp>): () => void {
