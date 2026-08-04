@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { CommandRuntimeAvailabilityDetector, type RuntimeAvailability, type RuntimeAvailabilityDetector } from './runtime-profile'
 import { LfJsonlParser } from './lf-jsonl-parser'
+import { classifyRuntimeError } from './runtime-errors'
 import type { ProcessHandle, ProcessRunner } from '../../ports/process-runner'
 import type { RuntimeAdapter, RuntimeEventSink, RuntimeSession, RuntimeTaskRequest } from '../../ports/runtime'
 
@@ -8,6 +9,7 @@ export class ClaudeCodeRuntimeAdapter implements RuntimeAdapter {
   private readonly processes = new WeakMap<RuntimeSession, ProcessHandle>()
   private readonly toolNames = new WeakMap<RuntimeSession, Map<string, string>>()
   private readonly conversationSessions = new WeakSet<RuntimeSession>()
+  private readonly sessionLostSessions = new WeakSet<RuntimeSession>()
 
   constructor(
     private readonly processRunner: ProcessRunner,
@@ -55,6 +57,7 @@ export class ClaudeCodeRuntimeAdapter implements RuntimeAdapter {
       env: session.profile.env,
     })
     const parser = new LfJsonlParser()
+    let stderr = ''
     session.isStreaming = true
     this.processes.set(session, process)
 
@@ -62,7 +65,10 @@ export class ClaudeCodeRuntimeAdapter implements RuntimeAdapter {
       sink({ kind: 'artifact', taskId: session.taskId, artifactType: 'runtime-jsonl', content: chunk })
       for (const line of parser.push(chunk)) this.recordJson(session, line.value, sink)
     })
-    process.onStderr((chunk) => sink({ kind: 'artifact', taskId: session.taskId, artifactType: 'runtime-stderr', content: chunk }))
+    process.onStderr((chunk) => {
+      stderr += chunk
+      sink({ kind: 'artifact', taskId: session.taskId, artifactType: 'runtime-stderr', content: chunk })
+    })
     process.onError((error) => sink({ kind: 'error', taskId: session.taskId, message: error.message }))
     process.onExit(({ code, signal }) => {
       session.isStreaming = false
@@ -73,7 +79,15 @@ export class ClaudeCodeRuntimeAdapter implements RuntimeAdapter {
         content: JSON.stringify({ command: session.profile.command, args: redactArgs(args), cwd: session.worktreePath, code, signal }),
       })
       if (code !== 0) {
-        sink({ kind: 'error', taskId: session.taskId, message: `Claude Code exited with ${code ?? signal ?? 'an unknown status'}.` })
+        if (this.sessionLostSessions.has(session)) return
+        const message = stderr.trim() || `Claude Code exited with ${code ?? signal ?? 'an unknown status'}.`
+        const errorCode = classifyRuntimeError(message)
+        sink({
+          kind: 'error',
+          taskId: session.taskId,
+          message: errorCode === 'session_lost' ? 'Claude Code session not found.' : `Claude Code exited with ${code ?? signal ?? 'an unknown status'}.`,
+          ...(errorCode === 'session_lost' ? { errorCode } : {}),
+        })
         return
       }
       if (session.pendingInputs.length > 0) {
@@ -110,7 +124,11 @@ export class ClaudeCodeRuntimeAdapter implements RuntimeAdapter {
 
     if (type === 'error' || subtype === 'error' || value.success === false || value.is_error === true) {
       const message = errorMessage(value)
-      if (message) sink({ kind: 'error', taskId: session.taskId, message })
+      if (message) {
+        const errorCode = classifyRuntimeError(message)
+        if (errorCode === 'session_lost') this.sessionLostSessions.add(session)
+        sink({ kind: 'error', taskId: session.taskId, message, ...(errorCode === 'session_lost' ? { errorCode } : {}) })
+      }
     }
 
     if (type === 'result' && subtype !== 'error') {

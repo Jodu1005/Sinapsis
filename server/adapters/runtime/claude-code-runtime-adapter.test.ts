@@ -204,6 +204,23 @@ describe('ClaudeCodeRuntimeAdapter', () => {
     expect(events.filter((event) => event.kind === 'settled')).toEqual([])
   })
 
+  it('classifies stale native sessions from stderr as session_lost', async () => {
+    const runner = new FakeProcessRunner()
+    const events: RuntimeEvent[] = []
+    const adapter = new ClaudeCodeRuntimeAdapter(runner)
+
+    await adapter.start(task, (event) => events.push(event))
+    runner.spawns[0]?.process.emitStderr('No conversation found with session ID abc\n')
+    runner.spawns[0]?.process.exit(1)
+
+    expect(events).toContainEqual({
+      kind: 'error',
+      taskId: task.taskId,
+      message: 'Claude Code session not found.',
+      errorCode: 'session_lost',
+    })
+  })
+
   it('redacts secret arguments in exit metadata', async () => {
     const runner = new FakeProcessRunner()
     const events: RuntimeEvent[] = []

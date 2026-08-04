@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { CommandRuntimeAvailabilityDetector, type RuntimeAvailability, type RuntimeAvailabilityDetector } from './runtime-profile'
 import { LfJsonlParser } from './lf-jsonl-parser'
+import { classifyRuntimeError } from './runtime-errors'
 import type { ProcessHandle, ProcessRunner } from '../../ports/process-runner'
 import type { RuntimeAdapter, RuntimeEventSink, RuntimeSession, RuntimeTaskRequest } from '../../ports/runtime'
 
@@ -42,6 +43,7 @@ export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
   private readonly conversationSessions = new WeakSet<RuntimeSession>()
   private readonly conversationTimers = new WeakMap<RuntimeSession, ReturnType<typeof setTimeout>>()
   private readonly timedOutSessions = new WeakSet<RuntimeSession>()
+  private readonly sessionLostSessions = new WeakSet<RuntimeSession>()
 
   constructor(
     private readonly processRunner: ProcessRunner,
@@ -98,6 +100,7 @@ export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
       stdinMode: 'ignore',
     })
     const parser = new LfJsonlParser()
+    let stderr = ''
     session.isStreaming = true
     this.processes.set(session, process)
     this.startConversationTimer(session, process, sink)
@@ -106,7 +109,10 @@ export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
       sink({ kind: 'artifact', taskId: session.taskId, artifactType: 'runtime-jsonl', content: chunk })
       for (const line of parser.push(chunk)) this.recordJson(session, line.value, sink)
     })
-    process.onStderr((chunk) => sink({ kind: 'artifact', taskId: session.taskId, artifactType: 'runtime-stderr', content: chunk }))
+    process.onStderr((chunk) => {
+      stderr += chunk
+      sink({ kind: 'artifact', taskId: session.taskId, artifactType: 'runtime-stderr', content: chunk })
+    })
     process.onError((error) => sink({ kind: 'error', taskId: session.taskId, message: error.message }))
     process.onExit(({ code, signal }) => {
       session.isStreaming = false
@@ -119,7 +125,15 @@ export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
       })
       if (this.timedOutSessions.delete(session)) return
       if (code !== 0) {
-        sink({ kind: 'error', taskId: session.taskId, message: `OpenCode exited with ${code ?? signal ?? 'an unknown status'}.` })
+        if (this.sessionLostSessions.has(session)) return
+        const message = stderr.trim() || `OpenCode exited with ${code ?? signal ?? 'an unknown status'}.`
+        const errorCode = classifyRuntimeError(message)
+        sink({
+          kind: 'error',
+          taskId: session.taskId,
+          message: errorCode === 'session_lost' ? 'OpenCode session not found.' : `OpenCode exited with ${code ?? signal ?? 'an unknown status'}.`,
+          ...(errorCode === 'session_lost' ? { errorCode } : {}),
+        })
         return
       }
       if (session.pendingInputs.length > 0) {
@@ -137,7 +151,7 @@ export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
       if (this.processes.get(session) !== process || !session.isStreaming) return
       this.timedOutSessions.add(session)
       process.kill()
-      sink({ kind: 'error', taskId: session.taskId, message: 'OpenCode 在 90 秒内没有返回回复。' })
+      sink({ kind: 'error', taskId: session.taskId, message: 'OpenCode 在 90 秒内没有返回回复。', errorCode: 'timeout' })
     }, 90_000))
   }
 
@@ -160,7 +174,12 @@ export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
     if (text && (type === 'text' || type === 'message')) sink({ kind: 'text', taskId: session.taskId, text })
     if (type === 'tool_start') sink({ kind: 'tool_start', taskId: session.taskId, toolName: stringValue(value.tool) ?? stringValue(part?.tool) ?? 'unknown', toolCallId: stringValue(value.id) ?? stringValue(part?.id) })
     if (type === 'tool_end') sink({ kind: 'tool_end', taskId: session.taskId, toolName: stringValue(value.tool) ?? stringValue(part?.tool) ?? 'unknown', toolCallId: stringValue(value.id) ?? stringValue(part?.id), success: value.success === true })
-    if (type === 'error') sink({ kind: 'error', taskId: session.taskId, message: stringValue(value.message) ?? 'OpenCode reported an error.' })
+    if (type === 'error') {
+      const message = stringValue(value.message) ?? stringValue(value.error) ?? 'OpenCode reported an error.'
+      const errorCode = classifyRuntimeError(message)
+      if (errorCode === 'session_lost') this.sessionLostSessions.add(session)
+      sink({ kind: 'error', taskId: session.taskId, message, ...(errorCode === 'session_lost' ? { errorCode } : {}) })
+    }
   }
 }
 

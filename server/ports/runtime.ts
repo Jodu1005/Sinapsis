@@ -2,13 +2,14 @@ import type { RuntimeAvailability, RuntimeAvailabilityDetector, RuntimeKind, Run
 import type { InvocationKind } from '../domain/conversation'
 
 export type RuntimeArtifactType = 'runtime-stdout' | 'runtime-jsonl' | 'runtime-stderr' | 'runtime-exit'
+export type RuntimeErrorCode = 'session_lost' | 'timeout' | 'runtime_failure'
 
 export type RuntimeEvent =
   | { kind: 'artifact'; taskId: string; artifactType: RuntimeArtifactType; content: string }
   | { kind: 'text'; taskId: string; text: string }
   | { kind: 'tool_start'; taskId: string; toolName: string; toolCallId?: string }
   | { kind: 'tool_end'; taskId: string; toolName: string; toolCallId?: string; success?: boolean }
-  | { kind: 'error'; taskId: string; message: string }
+  | { kind: 'error'; taskId: string; message: string; errorCode?: RuntimeErrorCode }
   | { kind: 'session'; taskId: string; sessionId: string; sessionFile?: string }
   | { kind: 'queue'; taskId: string; queueLength: number }
   | { kind: 'needs_input'; taskId: string; prompt: string }
