@@ -23,6 +23,7 @@ const conversationCoordinator = app.locals.conversationCoordinator as { recover?
 await conversationCoordinator.recover?.()
 const scheduler = app.locals.scheduler as TaskScheduler
 const coordinator = app.locals.executionCoordinator as TaskExecutionCoordinator
+coordinator.recover()
 const schedulerLoop = new SchedulerLoop(scheduler, repositories, 1_000, () => new Date(), coordinator)
 const leaseReaperLoop = new LeaseReaperLoop(new LeaseReaper(repositories, coordinator, repositories))
 const dreamRunService = app.locals.dreamRunService as DreamRunService
@@ -45,7 +46,7 @@ const server = app.listen(config.port, '127.0.0.1', () => {
 
 let shuttingDown = false
 
-async function closeGracefully(signal: NodeJS.Signals, service: Server): Promise<void> {
+async function closeGracefully(signal: string, service: Server): Promise<void> {
   if (shuttingDown) {
     return
   }
@@ -59,9 +60,12 @@ async function closeGracefully(signal: NodeJS.Signals, service: Server): Promise
   await coordinator.shutdown()
   const closeSse = app.locals.closeSse as (() => void) | undefined
   closeSse?.()
+  service.closeAllConnections?.()
   await new Promise<void>((resolve) => service.close((error) => {
     const closeDatabase = app.locals.closeDatabase as (() => void) | undefined
     closeDatabase?.()
+    const disconnect = process.disconnect
+    if (process.connected && disconnect) disconnect.call(process)
     if (error) {
       console.error('Unable to stop Sinapsis local service cleanly.', error)
       process.exitCode = 1
@@ -72,3 +76,8 @@ async function closeGracefully(signal: NodeJS.Signals, service: Server): Promise
 
 process.once('SIGINT', () => void closeGracefully('SIGINT', server))
 process.once('SIGTERM', () => void closeGracefully('SIGTERM', server))
+if (typeof process.send === 'function') {
+  process.on('message', (message: unknown) => {
+    if (message === 'sinapsis:shutdown') void closeGracefully('IPC', server)
+  })
+}

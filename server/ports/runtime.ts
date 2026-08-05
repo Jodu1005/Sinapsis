@@ -1,4 +1,4 @@
-import type { RuntimeAvailability, RuntimeAvailabilityDetector, RuntimeKind, RuntimeProfile } from '../adapters/runtime/runtime-profile'
+import type { RuntimeAvailability, RuntimeAvailabilityDetector, RuntimeKind, RuntimeProfile } from './runtime-profile'
 import type { InvocationKind } from '../domain/conversation'
 
 export type RuntimeArtifactType = 'runtime-stdout' | 'runtime-jsonl' | 'runtime-stderr' | 'runtime-exit'

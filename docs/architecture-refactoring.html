@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sinapsis 架构重构说明</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #5c6678;
+      --line: #d9dee8;
+      --paper: #ffffff;
+      --canvas: #f4f6f9;
+      --blue: #0b67c2;
+      --blue-soft: #e8f2ff;
+      --green: #137a4b;
+      --green-soft: #e7f7ee;
+      --amber: #9b5a00;
+      --amber-soft: #fff4dc;
+      --red: #b42318;
+      --red-soft: #feebea;
+      --slate: #364153;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: Inter, "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.65;
+    }
+
+    .page { max-width: 1180px; margin: 0 auto; padding: 32px 24px 64px; }
+    .hero { padding: 18px 0 28px; border-bottom: 1px solid var(--line); }
+    .eyebrow { margin: 0 0 8px; color: var(--blue); font-size: 13px; font-weight: 750; letter-spacing: 0; text-transform: uppercase; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { max-width: 800px; margin-bottom: 12px; font-size: 36px; line-height: 1.2; letter-spacing: 0; }
+    h2 { margin: 42px 0 14px; font-size: 24px; line-height: 1.3; letter-spacing: 0; }
+    h3 { margin: 0 0 8px; font-size: 17px; line-height: 1.35; }
+    .lede { max-width: 790px; margin-bottom: 0; color: var(--muted); font-size: 18px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+    .tag { display: inline-flex; padding: 3px 9px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--slate); font-size: 13px; }
+    .toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 0; }
+    .toc a { padding: 5px 9px; border: 1px solid var(--line); border-radius: 4px; color: var(--blue); background: var(--paper); font-size: 14px; text-decoration: none; }
+    .toc a:hover { border-color: var(--blue); }
+
+    .callout { margin: 18px 0; padding: 15px 17px; border-left: 4px solid var(--blue); background: var(--blue-soft); }
+    .callout strong { display: block; margin-bottom: 3px; }
+    .callout.warning { border-left-color: var(--amber); background: var(--amber-soft); }
+    .callout.danger { border-left-color: var(--red); background: var(--red-soft); }
+
+    .grid { display: grid; gap: 14px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card { padding: 17px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); }
+    .card p:last-child { margin-bottom: 0; }
+    .severity { display: inline-flex; margin-bottom: 9px; padding: 2px 7px; border-radius: 3px; font-size: 12px; font-weight: 750; }
+    .p1 { color: var(--red); background: var(--red-soft); }
+    .p2 { color: var(--amber); background: var(--amber-soft); }
+    .p3 { color: var(--blue); background: var(--blue-soft); }
+
+    .diagram { overflow-x: auto; margin: 18px 0; padding: 20px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); }
+    .flow { display: flex; align-items: stretch; min-width: 820px; }
+    .node { flex: 1; min-width: 150px; padding: 14px; border: 1px solid var(--line); border-radius: 5px; background: #fbfcfe; }
+    .node strong, .node small { display: block; }
+    .node small { margin-top: 5px; color: var(--muted); line-height: 1.45; }
+    .node.target { border-color: #91c9aa; background: var(--green-soft); }
+    .node.problem { border-color: #e8b3ae; background: var(--red-soft); }
+    .arrow { display: flex; align-items: center; padding: 0 10px; color: var(--muted); font-size: 21px; }
+    .flow-label { margin: 0 0 8px; color: var(--muted); font-size: 13px; font-weight: 700; }
+
+    table { width: 100%; border-collapse: collapse; background: var(--paper); }
+    th, td { padding: 12px; border: 1px solid var(--line); vertical-align: top; text-align: left; }
+    th { background: #f7f9fc; font-size: 14px; }
+    td { font-size: 14px; }
+    code { padding: 1px 4px; border-radius: 3px; background: #edf0f5; color: #26344d; font-family: "Cascadia Code", Consolas, monospace; font-size: .9em; }
+    .source { color: var(--muted); font-size: 13px; }
+    .source a { color: var(--blue); text-decoration: none; }
+    .source a:hover { text-decoration: underline; }
+
+    .phase { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 14px; padding: 17px 0; border-top: 1px solid var(--line); }
+    .phase:first-of-type { border-top: 0; }
+    .phase-number { display: flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 4px; background: var(--slate); color: white; font-weight: 800; font-size: 18px; }
+    ul { padding-left: 22px; }
+    li + li { margin-top: 5px; }
+    .checklist { list-style: none; padding-left: 0; }
+    .checklist li { position: relative; padding-left: 26px; }
+    .checklist li::before { content: "□"; position: absolute; left: 0; color: var(--blue); font-weight: 800; }
+    footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+
+    @media (max-width: 760px) {
+      .page { padding: 22px 16px 44px; }
+      h1 { font-size: 29px; }
+      .grid.two, .grid.three { grid-template-columns: 1fr; }
+      .phase { grid-template-columns: 56px minmax(0, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">Sinapsis / Architecture</p>
+      <h1>架构重构说明</h1>
+      <p class="lede">这份文档从当前代码出发，说明为什么需要重构、要把边界放在哪里，以及如何用低风险的阶段性迁移完成它。目标不是把本地单体拆成分布式系统，而是让它在持续运行、任务增多、会话规则变复杂时仍然可控。</p>
+      <div class="meta">
+        <span class="tag">范围：本地单机控制室</span>
+        <span class="tag">数据库：SQLite</span>
+        <span class="tag">状态：重构基线</span>
+        <span class="tag">更新时间：2026-08-05</span>
+      </div>
+      <nav class="toc" aria-label="目录">
+        <a href="#summary">结论</a>
+        <a href="#current">现状</a>
+        <a href="#problems">关键问题</a>
+        <a href="#target">目标架构</a>
+        <a href="#plan">迁移计划</a>
+        <a href="#rules">约束与验收</a>
+      </nav>
+    </header>
+
+    <section id="summary">
+      <h2>一句话结论</h2>
+      <div class="callout">
+        <strong>现有架构适合产品验证，但不适合继续堆叠执行与协作能力。</strong>
+        当前项目已经有 Domain / Application / Ports / Adapters 的分层意识；真正的问题是运行时控制、持久化访问、HTTP 聚合读取和前端刷新都集中在少数几个入口中，导致故障恢复和功能扩展的改动面过大。
+      </div>
+      <div class="grid three">
+        <article class="card"><h3>保留</h3><p>本地单进程部署、SQLite、Runtime Adapter、Git worktree、SSE。这些选择和产品定位一致。</p></article>
+        <article class="card"><h3>调整</h3><p>执行器需要持久化所有权；Repository 需要按上下文拆分；读取需要从全量快照改为范围化查询。</p></article>
+        <article class="card"><h3>不做</h3><p>本轮不引入微服务、消息队列、远程 worker 或通用事件溯源。复杂度要服务于本地可靠性。</p></article>
+      </div>
+    </section>
+
+    <section id="current">
+      <h2>当前结构与请求路径</h2>
+      <p>服务端的目录结构已经清楚地区分了领域、应用、端口和适配器；问题在于关键路径仍会跨越这些边界，最终汇聚到少数大型类。</p>
+      <div class="diagram" aria-label="当前架构图">
+        <p class="flow-label">当前：一次消息与一次 Runtime 事件的主要路径</p>
+        <div class="flow">
+          <div class="node"><strong>React UI</strong><small>单一 WorkspaceSnapshot 状态</small></div>
+          <div class="arrow">→</div>
+          <div class="node problem"><strong>Express app.ts</strong><small>装配、路由、校验、DTO、业务协作</small></div>
+          <div class="arrow">→</div>
+          <div class="node problem"><strong>大型 Coordinator</strong><small>执行、会话、恢复、取消、事件</small></div>
+          <div class="arrow">→</div>
+          <div class="node problem"><strong>WorkspaceRepositories</strong><small>所有业务上下文共用一个端口</small></div>
+          <div class="arrow">→</div>
+          <div class="node"><strong>SQLite / Runtime / Git</strong><small>同步数据库与进程、worktree 副作用</small></div>
+        </div>
+      </div>
+      <p class="source">代码依据：<a href="../server/app.ts">server/app.ts</a>、<a href="../server/application/task-execution-coordinator.ts">task-execution-coordinator.ts</a>、<a href="../server/application/channel-turn-coordinator.ts">channel-turn-coordinator.ts</a>、<a href="../server/ports/repositories.ts">repositories.ts</a>。</p>
+    </section>
+
+    <section id="problems">
+      <h2>关键问题</h2>
+      <div class="grid two">
+        <article class="card">
+          <span class="severity p1">P1 可靠性</span>
+          <h3>Runtime 的所有权只存在于内存</h3>
+          <p><code>TaskExecutionCoordinator</code> 通过内存 <code>Map</code> 保存 session、timer 和 execution。服务异常退出后，数据库有租约，但没有可验证的进程所有权、PID 或恢复策略。</p>
+          <p>租约过期后任务会被重新排队；新执行会复用已有 worktree。若旧 Runtime 仍在运行，两个进程可能同时写同一目录。</p>
+        </article>
+        <article class="card">
+          <span class="severity p2">P2 可维护性</span>
+          <h3>一个 Repository 覆盖全部业务</h3>
+          <p><code>WorkspaceRepositories</code> 同时负责频道、成员关系、任务、租约、会话、记忆和 Dream。应用服务无法只依赖自己需要的能力，SQLite 实现也成为超大型文件。</p>
+        </article>
+        <article class="card">
+          <span class="severity p2">P2 可维护性</span>
+          <h3>会话编排器混合了六类职责</h3>
+          <p>参与者选择、优先队列、Runtime 调用、持久化状态机、恢复、取消和事件发布都在 <code>ChannelTurnCoordinator</code> 中。任何新规则都容易触及整条会话生命周期。</p>
+        </article>
+        <article class="card">
+          <span class="severity p2">P2 扩展性</span>
+          <h3>所有事件都刷新完整 bootstrap</h3>
+          <p>SSE 收到事件后，前端重新拉取整个 <code>WorkspaceSnapshot</code>。这个快照包含所有任务，任务历史越多，Runtime 输出越频繁，主线程和 SQLite 的压力越大。</p>
+        </article>
+        <article class="card">
+          <span class="severity p2">P2 模型一致性</span>
+          <h3>全局实体仍依赖旧归属字段</h3>
+          <p>产品语义中 Agent 和 Channel 是全局实体，但创建时仍以最早的 Workspace 或 Repository 作为隐藏外键锚点。这会把历史模型残留带进所有后续规则。</p>
+        </article>
+        <article class="card">
+          <span class="severity p3">P3 边界清晰度</span>
+          <h3>端口层引用了适配器类型</h3>
+          <p>Runtime 类型定义位于 adapter 下，ports 与 application 反向引用它。适配器替换和测试可以继续做，但依赖方向已经不再严格。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="target">
+      <h2>目标架构</h2>
+      <p>目标仍是一个本地进程，但要把“业务状态”“外部副作用”“读模型”分开。数据库是状态的唯一来源；进程与 Git 操作由可审计的执行层管理；SSE 只通知数据发生变化，不承担同步全部状态的职责。</p>
+      <div class="diagram" aria-label="目标架构图">
+        <p class="flow-label">目标：按职责和数据流拆分</p>
+        <div class="flow">
+          <div class="node target"><strong>HTTP Controllers</strong><small>协议校验、调用用例、返回 DTO</small></div>
+          <div class="arrow">→</div>
+          <div class="node target"><strong>Use Cases</strong><small>PostMessage、ClaimTask、ReviewTask、StartDream</small></div>
+          <div class="arrow">→</div>
+          <div class="node target"><strong>领域服务</strong><small>任务策略、会话规划、成员与频道规则</small></div>
+          <div class="arrow">→</div>
+          <div class="node target"><strong>小型 Ports</strong><small>Task、Conversation、Channel、Memory、Execution</small></div>
+          <div class="arrow">→</div>
+          <div class="node target"><strong>Adapters</strong><small>SQLite、Git、Runtime、SSE、文件系统</small></div>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>模块</th><th>负责什么</th><th>不负责什么</th></tr></thead>
+        <tbody>
+          <tr><td>Execution Manager</td><td>启动、登记、心跳、取消、恢复判定、worktree 独占</td><td>任务挑选、频道业务规则、UI DTO</td></tr>
+          <tr><td>Task Use Cases</td><td>创建、认领、重试、验收、人工输入</td><td>直接管理子进程或拼接 HTTP 响应</td></tr>
+          <tr><td>Conversation Planner</td><td>参与者、轮次、handoff、状态转移决策</td><td>直接写 SQLite 或直接调用 SSE</td></tr>
+          <tr><td>Read Model</td><td>频道时间线、任务详情、侧栏摘要、执行活动</td><td>写入业务状态或调度 Runtime</td></tr>
+          <tr><td>Controllers</td><td>认证、参数校验、调用单个用例、DTO 映射</td><td>跨多个服务编排业务流程</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>任务执行的目标生命周期</h2>
+      <div class="diagram" aria-label="目标执行生命周期">
+        <p class="flow-label">任何时刻都能回答：谁拥有执行、进程是否仍在、worktree 是否可安全复用</p>
+        <div class="flow">
+          <div class="node target"><strong>Claimed</strong><small>数据库原子认领任务和执行 slot</small></div>
+          <div class="arrow">→</div>
+          <div class="node target"><strong>Allocated</strong><small>持久化 worktree reservation</small></div>
+          <div class="arrow">→</div>
+          <div class="node target"><strong>Started</strong><small>持久化 execution id、PID、session id</small></div>
+          <div class="arrow">→</div>
+          <div class="node target"><strong>Running</strong><small>心跳更新，不依赖内存才可判断</small></div>
+          <div class="arrow">→</div>
+          <div class="node target"><strong>Terminal</strong><small>退出、超时或取消后释放 slot 与 reservation</small></div>
+        </div>
+      </div>
+      <div class="callout warning">
+        <strong>崩溃恢复原则</strong>
+        重启后的默认行为不是立即重跑。先检查持久化 execution 的心跳、PID 和 worktree reservation；无法确认旧进程已终止时，任务进入 <code>needs_human</code>，避免并发写入。
+      </div>
+    </section>
+
+    <section id="plan">
+      <h2>分阶段迁移计划</h2>
+      <p>每阶段都保持可运行、可测试、可回滚。不要先进行目录级大搬迁；先建立新接口，让现有逻辑逐步迁移过去。</p>
+
+      <article class="phase">
+        <div class="phase-number">01</div>
+        <div>
+          <h3>执行可靠性</h3>
+          <p>引入 <code>ExecutionRepository</code> 和 <code>ExecutionManager</code>，持久化 execution、worktree reservation、PID、启动时间、心跳时间和终止原因。Task coordinator 改为只驱动 manager。</p>
+          <ul><li>同一 worktree 在同一时刻只能被一个 active execution 持有。</li><li>启动、取消、超时和崩溃恢复必须都留下持久化事件。</li><li>重启测试覆盖“旧进程仍在”和“旧进程已消失”两种情况。</li></ul>
+        </div>
+      </article>
+
+      <article class="phase">
+        <div class="phase-number">02</div>
+        <div>
+          <h3>拆分写模型与 Repository</h3>
+          <p>先提取 <code>TaskRepository</code>、<code>ExecutionRepository</code>、<code>ChannelRepository</code>。SQLite 仍可共享同一个数据库对象和事务实现，但应用服务只接收自身最小依赖。</p>
+          <ul><li>保留一个基础 <code>UnitOfWork</code>，不保留一个全能业务接口。</li><li>SQLite 文件按上下文拆成 store、mapper 和 query 文件。</li><li>Runtime profile 类型移动到 ports 或 shared contract，消除 ports 对 adapter 的依赖。</li></ul>
+        </div>
+      </article>
+
+      <article class="phase">
+        <div class="phase-number">03</div>
+        <div>
+          <h3>会话编排解耦</h3>
+          <p>将 <code>ChannelTurnCoordinator</code> 分为 planner、runner、recovery 和 state writer。保留现有持久化结构，先改变依赖关系，再考虑优化数据表。</p>
+          <ul><li>Planner 输出下一批 invocation，而不直接执行 Runtime。</li><li>Runner 只执行一条 invocation 并写回结果。</li><li>Recovery 只处理未完成 turn 的认领和续租。</li></ul>
+        </div>
+      </article>
+
+      <article class="phase">
+        <div class="phase-number">04</div>
+        <div>
+          <h3>读模型与 API 收敛</h3>
+          <p>将 bootstrap 缩小为侧栏与当前选择摘要；频道消息、任务详情、运行活动改为独立查询。SSE 事件携带实体类型与 id，前端只失效对应查询。</p>
+          <ul><li>任务列表必须分页或按频道与状态过滤。</li><li>前端不再把全站数据放在一个 snapshot 中。</li><li>按资源拆 controller，<code>app.ts</code> 仅保留 composition root。</li></ul>
+        </div>
+      </article>
+    </section>
+
+    <section id="rules">
+      <h2>重构约束与验收</h2>
+      <div class="grid two">
+        <article class="card">
+          <h3>必须保持的产品行为</h3>
+          <ul class="checklist">
+            <li>本地服务仍只监听 loopback 地址。</li>
+            <li>Runtime adapter 仍可替换，现有 Claude Code、Pi、OpenCode 配置不破坏。</li>
+            <li>任务仍在独立 Git worktree 中执行，验收不自动 merge。</li>
+            <li>现有 SQLite 数据可升级，不要求用户重建数据目录。</li>
+            <li>现有 SSE 用户体验不下降，连接重建后能恢复当前可见状态。</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>每阶段的工程验收</h3>
+          <ul class="checklist">
+            <li>新增迁移具备版本号，启动时通过外键检查。</li>
+            <li>每个新用例依赖小型 port，不接受全能 Repository。</li>
+            <li>为崩溃、重启、租约超时和重复请求编写集成测试。</li>
+            <li>运行 <code>npm run test:run</code> 与 <code>npm run build</code>。</li>
+            <li>代码变更后更新本文件中的“当前状态”和迁移进度。</li>
+          </ul>
+        </article>
+      </div>
+      <div class="callout danger">
+        <strong>本轮最大的禁区</strong>
+        不要在没有持久化 execution ownership 的前提下，通过缩短租约或增加自动重试来“修复”卡住任务。那会提高旧 Runtime 与新 Runtime 并发写同一 worktree 的概率。
+      </div>
+    </section>
+
+    <section>
+      <h2>建议的首个实现切口</h2>
+      <p>从阶段 01 开始：只为任务执行新增持久化 execution 和 worktree reservation，不先动会话系统与前端。它直接消除最高风险，同时建立后续拆分 Repository 所需的清晰事务边界。</p>
+    </section>
+
+    <footer>本文档基于 2026-08-05 对当前工作树的静态架构审视编写。它是重构指南，不替代代码、迁移和集成测试的验收。</footer>
+  </main>
+</body>
+</html>

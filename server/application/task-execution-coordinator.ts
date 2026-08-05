@@ -3,23 +3,26 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import type { RuntimeKind } from '../adapters/runtime/runtime-profile'
+import type { RuntimeKind } from '../ports/runtime-profile'
 import type { Agent } from '../domain/agent'
 import { DomainError, type Task } from '../domain/task'
-import type { TaskClaim, WorkspaceRepositories } from '../ports/repositories'
+import type { TaskClaim } from '../ports/repositories'
+import type { TaskExecutionCoordinatorRepository } from '../ports/task-execution-repository'
 import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../ports/runtime'
+import type { TaskExecutionStore } from '../ports/task-execution-store'
 import type { WorktreeManager } from '../ports/worktree-manager'
 import { ChannelMessageService } from './channel-message-service'
 
 const execFileAsync = promisify(execFile)
 
 export interface TaskExecutionCoordinatorOptions {
-  repositories: WorkspaceRepositories
+  repositories: TaskExecutionCoordinatorRepository
   runtimes: Partial<Record<RuntimeKind, RuntimeAdapter>>
   worktrees: WorktreeManager
   artifactDirectory: string
   messages?: ChannelMessageService
   collectReviewEvidence?: ReviewEvidenceCollector
+  executionStore?: TaskExecutionStore
 }
 
 type ReviewEvidence = { commit: string; changedFiles: string; diffSummary: string }
@@ -38,15 +41,17 @@ interface ManagedExecution {
   pendingArtifacts: Map<string, string[]>
   pendingText: string[]
   active: boolean
+  executionId: string
 }
 
 export class TaskExecutionCoordinator {
-  private readonly repositories: WorkspaceRepositories
+  private readonly repositories: TaskExecutionCoordinatorRepository
   private readonly runtimes: Partial<Record<RuntimeKind, RuntimeAdapter>>
   private readonly worktrees: WorktreeManager
   private readonly artifactDirectory: string
   private readonly messages: ChannelMessageService
   private readonly collectReviewEvidence: ReviewEvidenceCollector
+  private readonly executionStore: TaskExecutionStore
   private readonly executions = new Map<string, ManagedExecution>()
   private readonly pending = new Map<string, Promise<void>>()
 
@@ -57,13 +62,16 @@ export class TaskExecutionCoordinator {
     this.artifactDirectory = options.artifactDirectory
     this.messages = options.messages ?? new ChannelMessageService(options.repositories)
     this.collectReviewEvidence = options.collectReviewEvidence ?? collectGitReviewEvidence
+    this.executionStore = options.executionStore ?? options.repositories as unknown as TaskExecutionStore
   }
 
   async startClaim(claim: TaskClaim): Promise<void> {
     const task = claim.task
     const agentId = claim.lease.agentId
+    let executionId: string | undefined
     try {
       const { agent, repository } = this.requireClaimContext(claim)
+      executionId = this.executionStore.startTaskExecution({ taskId: task.id, agentId, runtime: agent.runtime }).id
       const allocation = task.worktreePath && task.branchName
         ? { worktreePath: task.worktreePath, branchName: task.branchName }
         : await this.worktrees.create({ id: task.id, repositoryId: repository.id, repositoryRoot: repository.path, targetBranch: repository.defaultBranch })
@@ -94,14 +102,26 @@ export class TaskExecutionCoordinator {
         pendingArtifacts: new Map(),
         pendingText: [],
         active: true,
+        executionId,
       }
       this.executions.set(task.id, execution)
       this.armTimeout(task, execution)
       this.repositories.updateTaskSession(task.id, agent.id, { runtimeSessionId: session.sessionId, status: 'running' })
+      this.executionStore.activateTaskExecution({
+        executionId,
+        worktreePath: allocation.worktreePath,
+        runtimeSessionId: session.sessionId,
+        occurredAt: new Date(),
+      })
       this.deliverUnconsumedInputs(task.id)
     } catch (error) {
-      this.fail(task.id, agentId, error instanceof Error ? error.message : 'Runtime 启动失败')
+      this.fail(task.id, agentId, error instanceof Error ? error.message : 'Runtime 启动失败', 'task.execution_failed', executionId)
     }
+  }
+
+  /** Reconciles durable execution ownership before new claims can start. */
+  recover(): void {
+    this.executionStore.orphanActiveTaskExecutions(new Date())
   }
 
   queueInputForActiveAgent(agentId: string, channelId: string, body: string): void {
@@ -131,15 +151,27 @@ export class TaskExecutionCoordinator {
     if (!execution) throw new DomainError('The original runtime session is no longer available locally.')
     const claim = this.repositories.reclaimReturnedTask(taskId, execution.agentId, new Date())
     if (!claim) throw new DomainError('Task cannot be resumed by its original agent.')
+    const resumedExecution = this.executionStore.startTaskExecution({
+      taskId,
+      agentId: execution.agentId,
+      runtime: execution.session.runtime,
+    })
     this.repositories.transitionTask(taskId, 'running', '人工退回后恢复原 Runtime 会话')
     try {
       await execution.adapter.resume(execution.session, (event) => this.enqueue(event.taskId, () => this.handleRuntimeEvent(event)))
       execution.active = true
+      execution.executionId = resumedExecution.id
       this.armTimeout(this.task(taskId), execution)
       this.deliverUnconsumedInputs(taskId)
       this.repositories.updateTaskSession(taskId, execution.agentId, { status: 'running' })
+      this.executionStore.activateTaskExecution({
+        executionId: resumedExecution.id,
+        worktreePath: execution.session.worktreePath,
+        runtimeSessionId: execution.session.sessionId,
+        occurredAt: new Date(),
+      })
     } catch (error) {
-      this.fail(taskId, execution.agentId, error instanceof Error ? error.message : 'Runtime 会话恢复失败')
+      this.fail(taskId, execution.agentId, error instanceof Error ? error.message : 'Runtime 会话恢复失败', 'task.execution_failed', resumedExecution.id)
       throw error
     }
   }
@@ -169,6 +201,7 @@ export class TaskExecutionCoordinator {
       await this.flushRuntimeOutput(execution)
       await execution.adapter.cancel(execution.session)
     } finally {
+      this.executionStore.completeTaskExecutionRecord(execution.executionId, 'runtime_cancelled', new Date())
       this.clearExecution(taskId, execution)
     }
   }
@@ -260,7 +293,10 @@ export class TaskExecutionCoordinator {
       this.failReviewEvidence(task, execution.agentId, error)
       return
     }
-    this.repositories.finishTaskExecution(task.id, execution.agentId, 'in_review', 'Runtime 完成并检测到任务分支提交')
+    this.repositories.inTransaction(() => {
+      this.repositories.finishTaskExecution(task.id, execution.agentId, 'in_review', 'Runtime 完成并检测到任务分支提交')
+      this.executionStore.completeTaskExecutionRecord(execution.executionId, 'review_ready', new Date())
+    })
     this.messages.postAgent(task.channelId, task.id, execution.agentId, execution.agentName, `已完成「${task.title}」，已提交改动，等待你验收。`, task.threadRootMessageId)
     execution.active = false
     this.disarmTimeout(execution)
@@ -271,11 +307,19 @@ export class TaskExecutionCoordinator {
     this.fail(task.id, agentId, `评审证据收集失败：${detail}`, 'task.review_evidence_failed')
   }
 
-  private fail(taskId: string, agentId: string, reason: string, eventType = 'task.execution_failed'): void {
+  private fail(
+    taskId: string,
+    agentId: string,
+    reason: string,
+    eventType = 'task.execution_failed',
+    executionId?: string,
+  ): void {
+    const activeExecutionId = executionId ?? this.executions.get(taskId)?.executionId
     this.repositories.inTransaction((unitOfWork) => {
       const task = this.task(taskId)
       unitOfWork.recordTaskEvent(taskId, eventType, { reason })
       this.repositories.finishTaskExecution(taskId, agentId, 'needs_human', reason)
+      if (activeExecutionId) this.executionStore.completeTaskExecutionRecord(activeExecutionId, reason, new Date())
       unitOfWork.createMessage({
         channelId: task.channelId,
         threadRootMessageId: task.threadRootMessageId,

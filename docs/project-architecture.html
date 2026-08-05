@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sinapsis 完整项目架构</title>
+  <style>
+    :root {
+      --ink: #162033;
+      --muted: #5d6879;
+      --line: #d7dee8;
+      --canvas: #f5f7fa;
+      --surface: #ffffff;
+      --blue: #0969c7;
+      --blue-soft: #eaf3ff;
+      --green: #147348;
+      --green-soft: #e9f7ef;
+      --amber: #986000;
+      --amber-soft: #fff4dc;
+      --slate: #3a4658;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--canvas); color: var(--ink); font: 16px/1.65 Inter, "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; }
+    main { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 34px 0 64px; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 12px; font-size: 38px; line-height: 1.18; letter-spacing: 0; }
+    h2 { margin: 46px 0 14px; font-size: 25px; line-height: 1.3; letter-spacing: 0; }
+    h3 { margin-bottom: 7px; font-size: 17px; line-height: 1.35; }
+    .eyebrow { margin-bottom: 8px; color: var(--blue); font-size: 13px; font-weight: 750; }
+    .lede { max-width: 850px; color: var(--muted); font-size: 18px; }
+    .meta, .toc { display: flex; flex-wrap: wrap; gap: 8px; }
+    .meta { margin-top: 18px; }
+    .toc { margin-top: 24px; }
+    .tag, .toc a { border: 1px solid var(--line); border-radius: 4px; background: var(--surface); padding: 4px 9px; color: var(--slate); font-size: 13px; text-decoration: none; }
+    .toc a { color: var(--blue); }
+    .toc a:hover { border-color: var(--blue); }
+    .callout { margin: 17px 0; padding: 15px 17px; border-left: 4px solid var(--blue); background: var(--blue-soft); }
+    .callout.good { border-left-color: var(--green); background: var(--green-soft); }
+    .callout.warning { border-left-color: var(--amber); background: var(--amber-soft); }
+    .grid { display: grid; gap: 14px; }
+    .two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card { padding: 17px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .card p:last-child { margin-bottom: 0; }
+    .diagram { overflow-x: auto; margin: 17px 0; padding: 20px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .caption { margin-bottom: 10px; color: var(--muted); font-size: 13px; font-weight: 700; }
+    .flow { display: flex; align-items: stretch; min-width: 860px; }
+    .node { flex: 1; min-width: 145px; padding: 13px; border: 1px solid var(--line); border-radius: 5px; background: #fbfcfe; }
+    .node.primary { border-color: #8ab7e9; background: var(--blue-soft); }
+    .node.safe { border-color: #8dc4a3; background: var(--green-soft); }
+    .node strong, .node small { display: block; }
+    .node small { margin-top: 5px; color: var(--muted); line-height: 1.45; }
+    .arrow { display: flex; align-items: center; padding: 0 9px; color: var(--muted); font-size: 20px; }
+    table { width: 100%; border-collapse: collapse; background: var(--surface); }
+    th, td { padding: 11px 12px; border: 1px solid var(--line); vertical-align: top; text-align: left; }
+    th { background: #f7f9fc; font-size: 14px; }
+    td { font-size: 14px; }
+    code { padding: 1px 4px; border-radius: 3px; background: #edf1f6; color: #2b3950; font: .9em "Cascadia Code", Consolas, monospace; }
+    ul { padding-left: 21px; }
+    li + li { margin-top: 5px; }
+    .tree { padding: 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: #24324a; font: 14px/1.65 "Cascadia Code", Consolas, monospace; white-space: pre; }
+    .status { display: inline-block; margin-bottom: 8px; padding: 2px 7px; border-radius: 3px; background: var(--green-soft); color: var(--green); font-size: 12px; font-weight: 750; }
+    footer { margin-top: 50px; padding-top: 17px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+    @media (max-width: 760px) { main { width: min(100% - 24px, 1180px); padding-top: 24px; } h1 { font-size: 30px; } .two, .three { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">SINAPSIS / PROJECT ARCHITECTURE</p>
+      <h1>Sinapsis 完整项目架构</h1>
+      <p class="lede">Sinapsis 是一个运行在开发者本机的 Agent 控制室。它把全局 Agent、频道、工作空间与 Git worktree 组合起来，让人能创建任务、观察 Runtime 输出、干预执行并进行人工验收。</p>
+      <div class="meta"><span class="tag">单进程本地服务</span><span class="tag">React + Express</span><span class="tag">SQLite 为事实来源</span><span class="tag">更新时间：2026-08-05</span></div>
+      <nav class="toc"><a href="#overview">总览</a><a href="#modules">模块</a><a href="#domains">领域</a><a href="#flows">关键流程</a><a href="#data">数据</a><a href="#frontend">前端</a><a href="#operations">运行与测试</a></nav>
+    </header>
+
+    <section id="overview">
+      <h2>系统总览</h2>
+      <div class="diagram">
+        <p class="caption">浏览器通过 Vite 代理访问本地 API 和 SSE；服务只监听 <code>127.0.0.1</code>。</p>
+        <div class="flow">
+          <div class="node primary"><strong>React UI</strong><small>频道、任务、对话、记忆和审阅界面</small></div><div class="arrow">→</div>
+          <div class="node primary"><strong>Express API</strong><small>请求校验、鉴权、DTO 和用例协作</small></div><div class="arrow">→</div>
+          <div class="node"><strong>Application</strong><small>任务调度、执行编排、会话协作、Dream 和记忆</small></div><div class="arrow">→</div>
+          <div class="node"><strong>Ports</strong><small>Repository、Runtime、Git、worktree、事件、时钟</small></div><div class="arrow">→</div>
+          <div class="node safe"><strong>Adapters</strong><small>SQLite、SSE、Git CLI、OpenCode、Pi、Claude Code</small></div>
+        </div>
+      </div>
+      <div class="grid three">
+        <article class="card"><h3>本地优先</h3><p>用户数据保存在 <code>~/.sinapsis</code>：SQLite、工件、会话文件和 worktree 都不依赖云端服务。</p></article>
+        <article class="card"><h3>人保持控制权</h3><p>Agent 产出进入 <code>in_review</code> 后，只有人能做 accept 或 return。产品不自动 merge 或 push。</p></article>
+        <article class="card"><h3>可替换 Runtime</h3><p>Runtime 通过统一端口接入；每个 Agent 配置命令、参数、模型和环境变量。</p></article>
+      </div>
+    </section>
+
+    <section id="modules">
+      <h2>源码组织</h2>
+      <div class="tree">src/                         React 前端
+  api/                       HTTP client 与 SSE hook
+  domain/                    前端视图模型与展示规则
+  ui/                        频道、任务、Agent、Dream、Memory 组件
+  app/                       应用入口和 WorkspaceShell
+
+server/                      本地服务
+  domain/                    Task、Agent、Message、Conversation、Memory、Workspace
+  application/               用例与编排服务
+  ports/                     依赖契约
+  adapters/
+    sqlite/                  schema、事务、Repository 实现
+    runtime/                 OpenCode、Pi、Claude Code 适配器
+    git/                     Git CLI 与 worktree 管理
+    sse/                     Domain Event 到 EventSource
+  app.ts                     HTTP composition root 与路由
+  main.ts                    进程启动、循环、恢复与优雅关闭
+
+shared/                      前后端共享的频道策略
+docs/                        产品、重构与架构文档</div>
+      <div class="callout good"><strong>本轮新增的边界</strong> <code>domain/task-execution.ts</code> 描述持久化执行记录；<code>ports/task-execution-store.ts</code> 将 Runtime 所有权从任务 session 中分离；<code>ports/runtime-profile.ts</code> 成为 Runtime 契约的稳定位置。</div>
+    </section>
+
+    <section id="domains">
+      <h2>核心领域模型</h2>
+      <table>
+        <thead><tr><th>领域</th><th>主要实体</th><th>核心关系</th><th>负责的规则</th></tr></thead>
+        <tbody>
+          <tr><td>Workspace</td><td>Workspace、Repository、Channel</td><td>Workspace 拥有多个 Repository；Channel 可绑定多个 Workspace。</td><td>仓库必须是有效 Git 仓库；频道绑定受上限和未完成任务约束。</td></tr>
+          <tr><td>Agent</td><td>Agent、Runtime Profile</td><td>Agent 是全局实体，通过 membership 加入普通 Channel。</td><td>mention 唯一、能力标签匹配、idle/busy/offline 状态。</td></tr>
+          <tr><td>Task</td><td>Task、Lease、Session、Artifact、Review</td><td>Task 属于 Channel 和 Repository；一个 Lease 指派给一个 Agent。</td><td>严格状态转移、FIFO 认领、人工输入、评审与重试。</td></tr>
+          <tr><td>Execution</td><td>TaskExecution</td><td>一次 Runtime 执行绑定一个 Task、Agent 和可选 worktree。</td><td>同一 Task 或 worktree 不能同时有两个 active execution；重启后 active execution 被隔离。</td></tr>
+          <tr><td>Conversation</td><td>Turn、Participant、Invocation、Handoff</td><td>人类消息触发 Turn；多个 Agent invocation 按队列与轮次运行。</td><td>提及路由、参与选择、去重、handoff、取消和恢复认领。</td></tr>
+          <tr><td>Memory</td><td>DreamRun、Candidate、Memory、ThreadSummary</td><td>Dream 从频道增量消息中提取候选记忆；人审核后形成记忆。</td><td>候选溯源、频道边界、重复内容、归档和重启恢复。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="flows">
+      <h2>关键运行流程</h2>
+      <h3>任务创建、认领与执行</h3>
+      <div class="diagram">
+        <div class="flow">
+          <div class="node"><strong>创建 Task</strong><small>API 校验频道、workspace、repository 和 Agent 约束</small></div><div class="arrow">→</div>
+          <div class="node"><strong>Scheduler</strong><small>为 idle Agent 以 FIFO 认领，并创建 lease</small></div><div class="arrow">→</div>
+          <div class="node safe"><strong>Execution Reservation</strong><small>持久化 starting record，阻止同一任务重复启动</small></div><div class="arrow">→</div>
+          <div class="node"><strong>Git Worktree</strong><small>创建任务分支与隔离目录</small></div><div class="arrow">→</div>
+          <div class="node safe"><strong>Runtime</strong><small>记录 session 后激活 execution，流式保存工件</small></div>
+        </div>
+      </div>
+      <p>Runtime 成功且分支有提交时，任务进入 <code>in_review</code>。失败、取消、超时会结束 execution、释放 lease 和 Agent；人工验收不会自动合并代码。</p>
+
+      <h3>服务重启保护</h3>
+      <div class="diagram">
+        <div class="flow">
+          <div class="node"><strong>服务启动</strong><small>迁移 SQLite，并恢复频道会话与 Dream</small></div><div class="arrow">→</div>
+          <div class="node safe"><strong>扫描 active execution</strong><small>查找 starting / running 的持久化记录</small></div><div class="arrow">→</div>
+          <div class="node safe"><strong>标记 orphaned</strong><small>记录 service_restarted，不自动复用 worktree</small></div><div class="arrow">→</div>
+          <div class="node"><strong>needs_human</strong><small>释放 lease，等待人确认旧进程和工作目录状态</small></div>
+        </div>
+      </div>
+      <div class="callout warning"><strong>安全策略</strong> 重启后宁可停在人工处理，也不自动重跑可能仍被旧 Runtime 写入的 worktree。这个策略优先保护代码和 Git 历史。</div>
+
+      <h3>频道消息与协作会话</h3>
+      <div class="diagram">
+        <div class="flow">
+          <div class="node"><strong>Human Message</strong><small>持久化消息与 thread 归属</small></div><div class="arrow">→</div>
+          <div class="node"><strong>Mention Router</strong><small>识别 @Agent，校验频道成员</small></div><div class="arrow">→</div>
+          <div class="node"><strong>Turn Coordinator</strong><small>建立 Turn，选择参与者和 invocation</small></div><div class="arrow">→</div>
+          <div class="node"><strong>Conversation Session</strong><small>按 Agent 队列调用 Runtime</small></div><div class="arrow">→</div>
+          <div class="node"><strong>Public Reply</strong><small>写回消息、handoff 与 turn 状态</small></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="data">
+      <h2>持久化、事务与事件</h2>
+      <div class="grid two">
+        <article class="card"><h3>SQLite 是事实来源</h3><p>Repository 的写操作使用 <code>BEGIN IMMEDIATE</code>。领域事件通过 <code>afterCommit</code> 在提交后发布，因此浏览器不会看到已回滚的数据变化。</p></article>
+        <article class="card"><h3>数据表分组</h3><p>workspaces / repositories / channels / agents；tasks / task_leases / task_sessions / task_executions / artifacts；messages / conversation_*；dream_runs / memory_* / thread_summaries。</p></article>
+      </div>
+      <table>
+        <thead><tr><th>事件链</th><th>生产方</th><th>消费方</th><th>用途</th></tr></thead>
+        <tbody>
+          <tr><td><code>task.*</code>、<code>agent.*</code>、<code>message.*</code></td><td>SQLite Unit of Work、Task coordinator</td><td>SSE Publisher、React</td><td>刷新可见任务、消息和状态。</td></tr>
+          <tr><td><code>conversation.*</code></td><td>ChannelTurnCoordinator</td><td>SSE Publisher、React</td><td>展示参与者、调用、handoff 和运行活动。</td></tr>
+          <tr><td><code>dream.*</code>、<code>memory.*</code></td><td>DreamRunService、MemoryReviewService</td><td>SSE Publisher、React</td><td>同步候选记忆和审核结果。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="frontend">
+      <h2>前端架构</h2>
+      <div class="grid two">
+        <article class="card"><h3>状态入口</h3><p><code>WorkspaceShell</code> 获取 bootstrap、保存频道选择、加载任务和 turn 详情，并向子组件传递动作。<code>ApiClient</code> 处理请求与 human capability header。</p></article>
+        <article class="card"><h3>实时更新</h3><p><code>useWorkspaceEvents</code> 使用 <code>EventSource</code> 监听领域事件。当前实现以全量 bootstrap 刷新为主，Runtime 高频事件做 200ms 合并。</p></article>
+      </div>
+      <p>主要 UI 模块包括频道时间线、任务列表与详情、Agent 配置、频道成员与 workspace binding、会话 Turn 详情、Dream Center 和 Memory Candidate 评审。前端的 <code>workspace-view.ts</code> 是浏览器专用的安全 DTO，Runtime 环境变量只暴露变量名。</p>
+    </section>
+
+    <section id="operations">
+      <h2>启动、配置与验证</h2>
+      <div class="grid two">
+        <article class="card"><h3>进程生命周期</h3><p><code>main.ts</code> 建立 app，恢复 orphaned Agent、Dream 和记忆、对话 invocation 与 task execution；随后启动 task scheduler、lease reaper 和可选 Dream scheduler。关闭时依次停止循环、Runtime、SSE、HTTP 和 SQLite。</p></article>
+        <article class="card"><h3>环境配置</h3><p><code>SINAPSIS_DATA_DIR</code> 指定数据目录；<code>SINAPSIS_PORT</code> 指定本地端口；Dream 的 runtime、时间、时区、并发与超时由对应的 <code>SINAPSIS_DREAM_*</code> 配置控制。</p></article>
+      </div>
+      <div class="grid three">
+        <article class="card"><span class="status">测试</span><h3>单元测试</h3><p>领域规则、应用服务、Runtime parser 与 React 组件。</p></article>
+        <article class="card"><span class="status">测试</span><h3>集成测试</h3><p>SQLite 迁移、Git fixture、多 Agent 会话、Dream 记忆流和本地启动恢复。</p></article>
+        <article class="card"><span class="status">验证</span><h3>构建检查</h3><p><code>npm run test:run</code>、<code>npm run build</code>、<code>npm run runtime:check</code>。</p></article>
+      </div>
+    </section>
+
+    <section>
+      <h2>当前架构边界</h2>
+      <div class="callout good"><strong>已经完成</strong> Runtime 执行的持久化所有权、启动时隔离、worktree 并发保护、Runtime 公共契约迁移到 ports、任务执行器和消息服务的最小依赖接口。</div>
+      <div class="callout warning"><strong>后续演进方向</strong> 会话协调器仍然较大；API bootstrap 仍是一个较粗的读模型；SQLite Repository 还需要按 Task、Conversation、Memory 和 Channel 拆分为多个 store。它们适合后续独立迭代，不影响本轮执行安全保护。</div>
+    </section>
+
+    <footer>本文档描述当前项目结构，而不是产品宣传页。重构路线请参阅 <a href="architecture-refactoring.html">architecture-refactoring.html</a>。</footer>
+  </main>
+</body>
+</html>

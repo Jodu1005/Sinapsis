@@ -1,10 +1,7 @@
 import {
-  type RuntimeAvailability,
-  type RuntimeAvailabilityDetector,
-  type RuntimeKind,
-  type RuntimeProfile,
   type RuntimeProfileOverrides,
 } from '../adapters/runtime/runtime-profile'
+import type { RuntimeAvailability, RuntimeAvailabilityDetector, RuntimeKind, RuntimeProfile } from '../ports/runtime-profile'
 import { RuntimeProfileService } from './runtime-profile-service'
 import { NotFoundError, ValidationError } from './workspace-service'
 import { DomainError } from '../domain/task'

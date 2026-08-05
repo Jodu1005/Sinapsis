@@ -1,28 +1,16 @@
 import { spawn } from 'node:child_process'
 import { ValidationError } from '../../application/workspace-service'
+import {
+  runtimeKinds,
+  type RuntimeAvailability,
+  type RuntimeAvailabilityDetector,
+  type RuntimeKind,
+  type RuntimeProfile,
+} from '../../ports/runtime-profile'
 
-export const runtimeKinds = ['opencode', 'pi', 'claude-code'] as const
-export type RuntimeKind = (typeof runtimeKinds)[number]
-
-export interface RuntimeProfile {
-  runtime: RuntimeKind
-  command: string
-  args: string[]
-  model: string
-  env: Record<string, string>
-  policy: 'task-worktree'
-}
+export { runtimeKinds, type RuntimeAvailability, type RuntimeAvailabilityDetector, type RuntimeKind, type RuntimeProfile } from '../../ports/runtime-profile'
 
 export type RuntimeProfileOverrides = Partial<Pick<RuntimeProfile, 'command' | 'args' | 'model' | 'env'>>
-
-export interface RuntimeAvailability {
-  executable: 'available' | 'missing'
-  taskExecution: 'unverified' | 'unhealthy' | 'unavailable'
-}
-
-export interface RuntimeAvailabilityDetector {
-  detect(profile: RuntimeProfile): Promise<RuntimeAvailability>
-}
 
 export const runtimePresets = {
   opencode: { command: 'opencode', args: ['run'], model: '', env: {}, policy: 'task-worktree' },

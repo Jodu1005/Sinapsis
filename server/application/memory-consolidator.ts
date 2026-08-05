@@ -1,6 +1,6 @@
 import { appendFile, mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { RuntimeProfile } from '../adapters/runtime/runtime-profile'
+import type { RuntimeProfile } from '../ports/runtime-profile'
 import type { MemoryCandidate, MemoryRecord, CreateMemoryCandidateInput } from '../domain/memory'
 import type { Message } from '../domain/message'
 import type { Channel } from '../domain/workspace'

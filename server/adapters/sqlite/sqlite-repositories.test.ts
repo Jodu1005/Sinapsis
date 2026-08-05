@@ -970,7 +970,7 @@ describe('SQLite workspace repositories', () => {
     `).run(candidate.id)).toThrow(/Reviewed Channel/i)
   })
 
-  it('upgrades a populated v23 Dream database to v24 without losing provenance and can recover it', async () => {
+  it('upgrades a populated v23 Dream database to the current schema without losing provenance and can recover it', async () => {
     const { repositories, databasePath } = await createRepositories()
     const channel = createChannel(repositories)
     const acceptedSource = repositories.createMessage({
@@ -1016,8 +1016,8 @@ describe('SQLite workspace repositories', () => {
 
     database = createSqliteDatabase(databasePath)
     const upgraded = new SqliteRepositories(database, new RecordingPublisher())
-    expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 24').get())
-      .toEqual({ version: 24 })
+    expect(database.database.prepare('SELECT version FROM schema_migrations WHERE version = 25').get())
+      .toEqual({ version: 25 })
     expect(upgraded.getDreamRun(completedRun.id)).toMatchObject({ status: 'completed' })
     expect(upgraded.getMemoryCandidate(acceptedCandidate.id)).toMatchObject({ status: 'accepted' })
     expect(upgraded.getMemory(memory.id)).toMatchObject({ content: 'V23 retained Memory.', status: 'active' })
@@ -2702,8 +2702,9 @@ describe('SQLite workspace repositories', () => {
     const legacy = new DatabaseSync(databasePath)
     legacy.exec(`
       BEGIN;
+      DROP TABLE task_executions;
       DROP TABLE dream_recovery_audit;
-      DELETE FROM schema_migrations WHERE version = 24;
+      DELETE FROM schema_migrations WHERE version IN (24, 25);
       COMMIT;
     `)
     legacy.close()

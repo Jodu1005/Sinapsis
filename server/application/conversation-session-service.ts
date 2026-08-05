@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
-import type { RuntimeKind } from '../adapters/runtime/runtime-profile'
+import type { RuntimeKind } from '../ports/runtime-profile'
 import type { Agent } from '../domain/agent'
 import type { ConversationSession } from '../domain/conversation'
 import type { WorkspaceRepositories } from '../ports/repositories'

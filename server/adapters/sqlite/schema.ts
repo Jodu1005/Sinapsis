@@ -803,6 +803,34 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(24, new Date().toISOString())
     }
 
+    const twentyFifthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 25').get()
+    if (!twentyFifthMigration) {
+      database.exec(`
+        CREATE TABLE task_executions (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL REFERENCES tasks(id),
+          agent_id TEXT NOT NULL REFERENCES agents(id),
+          runtime TEXT NOT NULL CHECK(runtime IN ('opencode', 'pi', 'claude-code')),
+          worktree_path TEXT,
+          runtime_session_id TEXT,
+          status TEXT NOT NULL CHECK(status IN ('starting', 'running', 'finished', 'orphaned')),
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          heartbeat_at TEXT NOT NULL,
+          ended_at TEXT,
+          end_reason TEXT,
+          CHECK((status IN ('starting', 'running') AND ended_at IS NULL) OR status IN ('finished', 'orphaned'))
+        );
+        CREATE UNIQUE INDEX task_executions_active_task_unique_idx
+          ON task_executions(task_id)
+          WHERE status IN ('starting', 'running');
+        CREATE UNIQUE INDEX task_executions_active_worktree_unique_idx
+          ON task_executions(worktree_path)
+          WHERE status IN ('starting', 'running') AND worktree_path IS NOT NULL;
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(25, new Date().toISOString())
+    }
+
     database.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS conversation_sessions_grain_unique_idx
         ON conversation_sessions(channel_id, COALESCE(thread_root_message_id, ''), agent_id);

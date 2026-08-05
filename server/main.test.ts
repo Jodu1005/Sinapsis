@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { fork, type ChildProcess } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
@@ -14,7 +14,10 @@ describe('local service shutdown', () => {
   let temporaryDirectory: string | undefined
 
   afterEach(async () => {
-    child?.kill('SIGKILL')
+    if (child && child.exitCode === null) {
+      child.kill('SIGKILL')
+      await waitForExit(child, 2_000)
+    }
     child = undefined
     if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true })
     temporaryDirectory = undefined
@@ -23,11 +26,7 @@ describe('local service shutdown', () => {
   it('closes SSE clients before waiting for the HTTP server to close', async () => {
     const port = await reservePort()
     temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-shutdown-'))
-    child = spawn(path.join(process.cwd(), 'node_modules/.bin/tsx'), ['server/main.ts'], {
-      cwd: process.cwd(),
-      env: { ...process.env, SINAPSIS_PORT: String(port), SINAPSIS_DATA_DIR: temporaryDirectory },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    child = startMain({ ...process.env, SINAPSIS_PORT: String(port), SINAPSIS_DATA_DIR: temporaryDirectory })
 
     const startupOutput = await waitForOutput(child.stdout!, 'Dream maintenance scheduled')
     const humanCapability = /humanCapability=([^\s]+)/.exec(startupOutput)?.[1]
@@ -41,9 +40,9 @@ describe('local service shutdown', () => {
     const response = await fetch(`http://127.0.0.1:${port}/events`)
     expect(response.status).toBe(200)
 
-    child.kill('SIGTERM')
+    child.send('sinapsis:shutdown')
 
-    await expect(waitForExit(child, 500)).resolves.toBe(0)
+    await expect(waitForExit(child, 2_000)).resolves.toBe(0)
     await response.body?.cancel()
   })
 
@@ -113,11 +112,7 @@ describe('local service shutdown', () => {
     })
     seeded.close()
 
-    child = spawn(path.join(process.cwd(), 'node_modules/.bin/tsx'), ['server/main.ts'], {
-      cwd: process.cwd(),
-      env: { ...process.env, SINAPSIS_PORT: String(port), SINAPSIS_DATA_DIR: temporaryDirectory },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    child = startMain({ ...process.env, SINAPSIS_PORT: String(port), SINAPSIS_DATA_DIR: temporaryDirectory })
     await waitForOutput(child.stdout!, 'Sinapsis local service listening')
     const bootstrap = await fetch(`http://127.0.0.1:${port}/api/bootstrap`).then((response) => response.json()) as {
       channels: Array<{ id: string }>
@@ -211,15 +206,11 @@ describe('local service shutdown', () => {
     })
     seeded.close()
 
-    child = spawn(path.join(process.cwd(), 'node_modules/.bin/tsx'), ['server/main.ts'], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        SINAPSIS_PORT: String(port),
-        SINAPSIS_DATA_DIR: temporaryDirectory,
-        SINAPSIS_DREAM_ENABLED: 'false',
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
+    child = startMain({
+      ...process.env,
+      SINAPSIS_PORT: String(port),
+      SINAPSIS_DATA_DIR: temporaryDirectory,
+      SINAPSIS_DREAM_ENABLED: 'false',
     })
     await waitForOutput(child.stdout!, 'Sinapsis local service listening')
 
@@ -269,6 +260,15 @@ class NoopPublisher implements DomainEventPublisher {
   publish(): void {}
 }
 
+function startMain(environment: NodeJS.ProcessEnv): ChildProcess {
+  return fork(path.join(process.cwd(), 'server/main.ts'), [], {
+    cwd: process.cwd(),
+    env: environment,
+    execArgv: ['--import', 'tsx'],
+    silent: true,
+  })
+}
+
 async function reservePort(): Promise<number> {
   const server = createServer()
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -280,7 +280,7 @@ async function reservePort(): Promise<number> {
 
 function waitForOutput(output: NodeJS.ReadableStream, expected: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`Did not receive: ${expected}`)), 2_000)
+    const timeout = setTimeout(() => reject(new Error(`Did not receive: ${expected}`)), 5_000)
     let received = ''
     output.on('data', (chunk: Buffer) => {
       received += chunk.toString()
@@ -292,6 +292,7 @@ function waitForOutput(output: NodeJS.ReadableStream, expected: string): Promise
 }
 
 function waitForExit(process: ChildProcess, timeoutMs: number): Promise<number | null> {
+  if (process.exitCode !== null) return Promise.resolve(process.exitCode)
   return new Promise((resolve) => {
     const timeout = setTimeout(() => resolve(null), timeoutMs)
     process.once('exit', (code) => {

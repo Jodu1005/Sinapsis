@@ -60,6 +60,8 @@ import type {
   Workspace,
 } from '../../domain/workspace'
 import type { DomainEventPublisher } from '../../ports/domain-event-publisher'
+import type { TaskExecutionStore } from '../../ports/task-execution-store'
+import type { StartTaskExecutionInput, TaskExecution } from '../../domain/task-execution'
 import type {
   BootstrapSnapshot,
   ActiveConversationTurnProjection,
@@ -153,6 +155,21 @@ interface TaskLeaseRow {
   agent_id: string
   expires_at: string
   created_at: string
+}
+
+interface TaskExecutionRow {
+  id: string
+  task_id: string
+  agent_id: string
+  runtime: TaskExecution['runtime']
+  worktree_path: string | null
+  runtime_session_id: string | null
+  status: TaskExecution['status']
+  created_at: string
+  started_at: string | null
+  heartbeat_at: string
+  ended_at: string | null
+  end_reason: string | null
 }
 
 interface TaskArtifactRow {
@@ -867,7 +884,7 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
   }
 }
 
-export class SqliteRepositories implements WorkspaceRepositories {
+export class SqliteRepositories implements WorkspaceRepositories, TaskExecutionStore {
   constructor(
     private readonly sqlite: SqliteDatabase,
     private readonly publisher: DomainEventPublisher,
@@ -1012,6 +1029,147 @@ export class SqliteRepositories implements WorkspaceRepositories {
       }
       unitOfWork.afterCommit(event('agent.status_changed', 'agent', agentId, updatedAt.toISOString()))
       return transitioned
+    })
+  }
+
+  startTaskExecution(input: StartTaskExecutionInput): TaskExecution {
+    return this.inTransaction((unitOfWork) => {
+      const database = this.sqlite.database
+      const task = readTask(database, input.taskId)
+      if (!task) throw new Error(`Task ${input.taskId} does not exist.`)
+      const lease = readLeaseForTaskAgent(database, input.taskId, input.agentId)
+      if (!lease) throw new DomainError('A task execution requires an active task lease.')
+      const active = database.prepare(`
+        SELECT * FROM task_executions
+        WHERE task_id = ? AND status IN ('starting', 'running')
+        LIMIT 1
+      `).get(input.taskId) as TaskExecutionRow | undefined
+      if (active) throw new DomainError(`Task ${input.taskId} already has an active execution.`)
+
+      const createdAt = now()
+      const execution: TaskExecution = {
+        id: randomUUID(),
+        taskId: input.taskId,
+        agentId: input.agentId,
+        runtime: input.runtime,
+        worktreePath: null,
+        runtimeSessionId: null,
+        status: 'starting',
+        createdAt,
+        startedAt: null,
+        heartbeatAt: createdAt,
+        endedAt: null,
+        endReason: null,
+      }
+      database.prepare(`
+        INSERT INTO task_executions (
+          id, task_id, agent_id, runtime, worktree_path, runtime_session_id, status,
+          created_at, started_at, heartbeat_at, ended_at, end_reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        execution.id, execution.taskId, execution.agentId, execution.runtime, execution.worktreePath,
+        execution.runtimeSessionId, execution.status, execution.createdAt, execution.startedAt,
+        execution.heartbeatAt, execution.endedAt, execution.endReason,
+      )
+      unitOfWork.recordTaskEvent(input.taskId, 'task.execution_reserved', { executionId: execution.id, agentId: input.agentId })
+      return execution
+    })
+  }
+
+  activateTaskExecution(input: {
+    executionId: string
+    worktreePath: string
+    runtimeSessionId: string | null
+    occurredAt: Date
+  }): TaskExecution {
+    return this.inTransaction((unitOfWork) => {
+      const execution = this.getTaskExecution(input.executionId)
+      if (!execution) throw new Error(`Task execution ${input.executionId} does not exist.`)
+      if (execution.status !== 'starting' && execution.status !== 'running') {
+        throw new DomainError(`Task execution ${input.executionId} is no longer active.`)
+      }
+      const occurredAtIso = input.occurredAt.toISOString()
+      this.sqlite.database.prepare(`
+        UPDATE task_executions
+        SET worktree_path = ?, runtime_session_id = ?, status = 'running',
+          started_at = COALESCE(started_at, ?), heartbeat_at = ?
+        WHERE id = ?
+      `).run(input.worktreePath, input.runtimeSessionId, occurredAtIso, occurredAtIso, input.executionId)
+      unitOfWork.recordTaskEvent(execution.taskId, 'task.execution_started', { executionId: execution.id })
+      return {
+        ...execution,
+        worktreePath: input.worktreePath,
+        runtimeSessionId: input.runtimeSessionId,
+        status: 'running',
+        startedAt: execution.startedAt ?? occurredAtIso,
+        heartbeatAt: occurredAtIso,
+      }
+    })
+  }
+
+  completeTaskExecutionRecord(executionId: string, reason: string, occurredAt: Date): TaskExecution | undefined {
+    return this.inTransaction((unitOfWork) => {
+      const execution = this.getTaskExecution(executionId)
+      if (!execution) return undefined
+      if (execution.status === 'finished' || execution.status === 'orphaned') return execution
+      const occurredAtIso = occurredAt.toISOString()
+      this.sqlite.database.prepare(`
+        UPDATE task_executions
+        SET status = 'finished', heartbeat_at = ?, ended_at = ?, end_reason = ?
+        WHERE id = ?
+      `).run(occurredAtIso, occurredAtIso, reason, executionId)
+      unitOfWork.recordTaskEvent(execution.taskId, 'task.execution_finished', { executionId, reason })
+      return { ...execution, status: 'finished', heartbeatAt: occurredAtIso, endedAt: occurredAtIso, endReason: reason }
+    })
+  }
+
+  getTaskExecution(executionId: string): TaskExecution | undefined {
+    const row = this.sqlite.database.prepare('SELECT * FROM task_executions WHERE id = ?').get(executionId) as TaskExecutionRow | undefined
+    return row ? mapTaskExecution(row) : undefined
+  }
+
+  getActiveTaskExecution(taskId: string): TaskExecution | undefined {
+    const row = this.sqlite.database.prepare(`
+      SELECT * FROM task_executions
+      WHERE task_id = ? AND status IN ('starting', 'running')
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1
+    `).get(taskId) as TaskExecutionRow | undefined
+    return row ? mapTaskExecution(row) : undefined
+  }
+
+  orphanActiveTaskExecutions(occurredAt: Date): TaskExecution[] {
+    return this.inTransaction((unitOfWork) => {
+      const database = this.sqlite.database
+      const active = database.prepare(`
+        SELECT * FROM task_executions
+        WHERE status IN ('starting', 'running')
+        ORDER BY created_at, rowid
+      `).all() as unknown as TaskExecutionRow[]
+      const occurredAtIso = occurredAt.toISOString()
+      const orphaned: TaskExecution[] = []
+      for (const row of active) {
+        const execution = mapTaskExecution(row)
+        database.prepare(`
+          UPDATE task_executions
+          SET status = 'orphaned', heartbeat_at = ?, ended_at = ?, end_reason = 'service_restarted'
+          WHERE id = ?
+        `).run(occurredAtIso, occurredAtIso, execution.id)
+        const task = readTask(database, execution.taskId)
+        if (task && (task.status === 'claimed' || task.status === 'running' || task.status === 'waiting_input')) {
+          unitOfWork.transitionTask(task.id, 'needs_human', 'Service restarted while a Runtime execution was active.')
+          database.prepare('DELETE FROM task_leases WHERE task_id = ? AND agent_id = ?').run(task.id, execution.agentId)
+          database.prepare('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?').run('idle', occurredAtIso, execution.agentId)
+          database.prepare(`
+            UPDATE task_sessions SET status = 'failed', updated_at = ?
+            WHERE task_id = ? AND agent_id = ? AND status NOT IN ('completed', 'cancelled', 'failed', 'timed_out')
+          `).run(occurredAtIso, task.id, execution.agentId)
+          unitOfWork.recordTaskEvent(task.id, 'task.execution_orphaned', { executionId: execution.id, reason: 'service_restarted' })
+          unitOfWork.afterCommit(event('agent.status_changed', 'agent', execution.agentId, occurredAtIso))
+        }
+        orphaned.push({ ...execution, status: 'orphaned', heartbeatAt: occurredAtIso, endedAt: occurredAtIso, endReason: 'service_restarted' })
+      }
+      return orphaned
     })
   }
 
@@ -2895,6 +3053,23 @@ function mapTaskSession(row: TaskSessionRow): TaskSession {
 
 function mapTaskLease(row: TaskLeaseRow): TaskLease {
   return { id: row.id, taskId: row.task_id, agentId: row.agent_id, expiresAt: row.expires_at, createdAt: row.created_at }
+}
+
+function mapTaskExecution(row: TaskExecutionRow): TaskExecution {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    agentId: row.agent_id,
+    runtime: row.runtime,
+    worktreePath: row.worktree_path,
+    runtimeSessionId: row.runtime_session_id,
+    status: row.status,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    heartbeatAt: row.heartbeat_at,
+    endedAt: row.ended_at,
+    endReason: row.end_reason,
+  }
 }
 
 function mapTaskArtifact(row: TaskArtifactRow): TaskArtifact {

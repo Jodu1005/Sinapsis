@@ -1,4 +1,4 @@
-import type { RuntimeKind } from '../adapters/runtime/runtime-profile'
+import type { RuntimeKind } from '../ports/runtime-profile'
 import type { Message } from '../domain/message'
 import { DomainError } from '../domain/task'
 import type { WorkspaceRepositories } from '../ports/repositories'

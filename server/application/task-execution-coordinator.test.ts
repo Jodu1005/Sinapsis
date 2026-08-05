@@ -150,6 +150,29 @@ describe('TaskExecutionCoordinator', () => {
     expect(fixture.repositories.getTaskDetails(claim.task.id)?.leases).toEqual([])
   })
 
+  it('quarantines an execution left active by a service restart instead of requeueing its worktree', async () => {
+    const fixture = await createFixture()
+    const claim = fixture.scheduler.claimNext(fixture.agent.id)!
+    await fixture.coordinator.startClaim(claim)
+    const persisted = fixture.repositories.getActiveTaskExecution(claim.task.id)
+
+    const recovered = new TaskExecutionCoordinator({
+      repositories: fixture.repositories,
+      runtimes: {},
+      worktrees: { create: async () => { throw new Error('recovery must not create a worktree') } },
+      artifactDirectory: path.join(temporaryDirectory!, 'recovery-artifacts'),
+    })
+    recovered.recover()
+
+    expect(fixture.repositories.getTask(claim.task.id)).toMatchObject({ status: 'needs_human' })
+    expect(fixture.repositories.getTaskDetails(claim.task.id)?.leases).toEqual([])
+    expect(fixture.repositories.getBootstrap().agents[0].status).toBe('idle')
+    expect(fixture.repositories.getActiveTaskExecution(claim.task.id)).toBeUndefined()
+    expect(fixture.repositories.getTaskExecution(persisted!.id)).toMatchObject({
+      status: 'orphaned', endReason: 'service_restarted',
+    })
+  })
+
   it('requires a real task branch commit before moving a settled task into review', async () => {
     const fixture = await createFixture()
     const claim = fixture.scheduler.claimNext(fixture.agent.id)!

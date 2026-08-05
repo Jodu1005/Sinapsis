@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { RuntimeKind } from '../adapters/runtime/runtime-profile'
+import type { RuntimeKind } from '../ports/runtime-profile'
 import type { Agent } from '../domain/agent'
 import type {
   AgentInvocation,

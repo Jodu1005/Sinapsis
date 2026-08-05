@@ -10,7 +10,12 @@ export interface SqliteDatabase {
 
 export function createSqliteDatabase(filename: string): SqliteDatabase {
   const database = new DatabaseSync(filename)
-  migrateSchema(database)
+  try {
+    migrateSchema(database)
+  } catch (error) {
+    database.close()
+    throw error
+  }
   let transactionDepth = 0
   let afterCommitCallbacks: Array<() => void> | undefined
 

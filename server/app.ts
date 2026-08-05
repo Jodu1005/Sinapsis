@@ -6,6 +6,7 @@ import { ClaudeCodeRuntimeAdapter } from './adapters/runtime/claude-code-runtime
 import { OpenCodeRuntimeAdapter } from './adapters/runtime/opencode-runtime-adapter'
 import { PiRuntimeAdapter } from './adapters/runtime/pi-runtime-adapter'
 import { CommandRuntimeAvailabilityDetector, resolveRuntimeProfile, runtimeKinds, type RuntimeAvailabilityDetector } from './adapters/runtime/runtime-profile'
+import type { RuntimeKind } from './ports/runtime-profile'
 import { SseDomainEventPublisher } from './adapters/sse/sse-domain-event-publisher'
 import { createSqliteDatabase } from './adapters/sqlite/database'
 import { SqliteRepositories } from './adapters/sqlite/sqlite-repositories'
@@ -119,7 +120,7 @@ export interface CreateAppOptions {
   gitClient?: GitClient
   runtimeAvailabilityDetector?: RuntimeAvailabilityDetector
   executionCoordinator?: TaskExecutionCoordinator
-  conversationRuntimes?: Partial<Record<import('./adapters/runtime/runtime-profile').RuntimeKind, RuntimeAdapter>>
+  conversationRuntimes?: Partial<Record<RuntimeKind, RuntimeAdapter>>
   dreamRuntime?: RuntimeAdapter
   conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'> & Partial<Pick<
     ConversationCoordinator,
@@ -156,6 +157,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     worktrees: new GitWorktreeManager({ dataDir: path.dirname(databasePath) }),
     artifactDirectory: path.join(path.dirname(databasePath), 'artifacts'),
     messages,
+    executionStore: repositories,
   })
   const conversationCoordinator = options.conversationCoordinator ?? new ConversationCoordinator({
     repositories,

@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
-import { runtimeKinds, type RuntimeKind } from './adapters/runtime/runtime-profile'
+import { runtimeKinds, type RuntimeKind } from './ports/runtime-profile'
 
 export interface ServiceConfig {
   dataDir: string
