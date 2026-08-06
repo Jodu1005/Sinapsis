@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { CommandRuntimeAvailabilityDetector, type RuntimeAvailability, type RuntimeAvailabilityDetector } from './runtime-profile'
 import { LfJsonlParser } from './lf-jsonl-parser'
+import { classifyRuntimeError } from './runtime-errors'
 import type { ProcessHandle, ProcessRunner } from '../../ports/process-runner'
 import type { RuntimeAdapter, RuntimeEventSink, RuntimeSession, RuntimeTaskRequest } from '../../ports/runtime'
 
@@ -67,13 +68,17 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
       env: session.profile.env,
     })
     const parser = new LfJsonlParser()
+    let stderr = ''
     session.isStreaming = true
     this.processes.set(session, process)
     process.onStdout((chunk) => {
       sink({ kind: 'artifact', taskId: session.taskId, artifactType: 'runtime-jsonl', content: chunk })
       for (const line of parser.push(chunk)) this.recordJson(session, line.value, sink)
     })
-    process.onStderr((chunk) => sink({ kind: 'artifact', taskId: session.taskId, artifactType: 'runtime-stderr', content: chunk }))
+    process.onStderr((chunk) => {
+      stderr += chunk
+      sink({ kind: 'artifact', taskId: session.taskId, artifactType: 'runtime-stderr', content: chunk })
+    })
     process.onError((error) => sink({ kind: 'error', taskId: session.taskId, message: error.message }))
     process.onExit(({ code, signal }) => {
       session.isStreaming = false
@@ -83,7 +88,16 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
         artifactType: 'runtime-exit',
         content: JSON.stringify({ command: session.profile.command, args: redactArgs(args), cwd: session.worktreePath, code, signal }),
       })
-      if (code !== 0) sink({ kind: 'error', taskId: session.taskId, message: `Pi exited with ${code ?? signal ?? 'an unknown status'}.` })
+      if (code !== 0) {
+        const message = stderr.trim() || `Pi exited with ${code ?? signal ?? 'an unknown status'}.`
+        const errorCode = classifyRuntimeError(message)
+        sink({
+          kind: 'error',
+          taskId: session.taskId,
+          message: errorCode === 'session_lost' ? 'Pi session not found.' : `Pi exited with ${code ?? signal ?? 'an unknown status'}.`,
+          ...(errorCode === 'session_lost' ? { errorCode } : {}),
+        })
+      }
     })
   }
 
@@ -137,7 +151,9 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
     }
     if (type === 'response' && value.command === 'switch_session' && value.success === true) this.completeRestoration(session)
     if (type === 'response' && value.success === false) {
-      sink({ kind: 'error', taskId: session.taskId, message: stringValue(value.error) ?? `Pi rejected ${stringValue(value.command) ?? 'an RPC command'}.` })
+      const message = stringValue(value.error) ?? `Pi rejected ${stringValue(value.command) ?? 'an RPC command'}.`
+      const errorCode = value.command === 'switch_session' ? 'session_lost' : classifyRuntimeError(message)
+      sink({ kind: 'error', taskId: session.taskId, message, ...(errorCode === 'session_lost' ? { errorCode } : {}) })
     }
   }
 

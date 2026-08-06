@@ -148,6 +148,31 @@ describe('PiRuntimeAdapter', () => {
     expect(events).toContainEqual(expect.objectContaining({ kind: 'error', message: 'Unknown command' }))
   })
 
+  it('classifies failed switch_session responses as session_lost', async () => {
+    const runner = new FakeProcessRunner()
+    const events: RuntimeEvent[] = []
+    const adapter = new PiRuntimeAdapter(runner)
+    const session = {
+      ...task,
+      runtime: 'pi' as const,
+      sessionId: 'pi-session-1',
+      sessionFile: '/tmp/missing-pi-session.jsonl',
+      isStreaming: false,
+      queueLength: 0,
+      pendingInputs: [],
+    }
+
+    await adapter.resume(session, (event) => events.push(event))
+    runner.spawns[0]?.process.emitStdout('{"type":"response","command":"switch_session","success":false,"error":"Session not found"}\n')
+
+    expect(events).toContainEqual({
+      kind: 'error',
+      taskId: task.taskId,
+      message: 'Session not found',
+      errorCode: 'session_lost',
+    })
+  })
+
   it('cancels its managed process for a session', async () => {
     const runner = new FakeProcessRunner()
     const adapter = new PiRuntimeAdapter(runner, '/tmp/sinapsis-data')

@@ -141,6 +141,48 @@ describe('ConversationSessionService', () => {
     })
   })
 
+  it('self-heals a lost native Runtime Session reported after resumed input is sent', async () => {
+    const fixture = await createFixture()
+    const key = `${fixture.channelId}:timeline:${fixture.agent.id}`
+    fixture.repositories.upsertConversationSession({
+      key,
+      channelId: fixture.channelId,
+      threadRootMessageId: null,
+      agentId: fixture.agent.id,
+      runtime: fixture.agent.runtime,
+      runtimeSessionId: 'lost-native-session',
+      runtimeSessionFile: null,
+      status: 'ready',
+      lastMessageId: null,
+    })
+    const persistedStatuses: string[] = []
+    const upsert = fixture.repositories.upsertConversationSession.bind(fixture.repositories)
+    vi.spyOn(fixture.repositories, 'upsertConversationSession').mockImplementation((input) => {
+      persistedStatuses.push(`${input.status}:${input.runtimeSessionId ?? 'none'}`)
+      return upsert(input)
+    })
+    fixture.runtime.sessionLostOnSend = true
+    fixture.runtime.sessionIdOnStart = 'fresh-native-session'
+
+    const input = fixture.invocation('recover after native loss')
+    const result = await fixture.service.invoke(input)
+
+    expect(result.text).toBe('reply:recover after native loss')
+    expect(fixture.runtime.order).toEqual([
+      'resume:lost-native-session',
+      'send:recover after native loss',
+      'start:recover after native loss',
+    ])
+    expect(fixture.runtime.starts).toHaveLength(1)
+    expect(persistedStatuses).toContain('stale:lost-native-session')
+    expect(persistedStatuses).toContain('active:fresh-native-session')
+    expect(fixture.repositories.getConversationSession(key)).toMatchObject({
+      runtimeSessionId: 'fresh-native-session',
+      status: 'ready',
+      lastMessageId: input.currentMessageId,
+    })
+  })
+
   it('returns the strict parsed protocol result with the displayable text', async () => {
     const fixture = await createFixture()
     fixture.runtime.responseFor = () => JSON.stringify({ reply: 'public answer', handoffTo: [] })
@@ -560,6 +602,7 @@ class RecordingRuntime implements RuntimeAdapter {
   sendError: Error | undefined
   cancelError: Error | undefined
   errorOnStart: Error | undefined
+  sessionLostOnSend = false
   cancelEvent: 'settled' | 'error' | undefined
   startGate: Promise<void> | undefined
   resumeGate: Promise<void> | undefined
@@ -603,6 +646,11 @@ class RecordingRuntime implements RuntimeAdapter {
   sendInput(session: RuntimeSession, input: string, sink: RuntimeEventSink): void {
     this.order.push(`send:${input}`)
     if (this.sendError) throw this.sendError
+    if (this.sessionLostOnSend) {
+      this.sessionLostOnSend = false
+      sink({ kind: 'error', taskId: session.taskId, message: 'native session not found', errorCode: 'session_lost' })
+      return
+    }
     if (this.autoSettle) queueMicrotask(() => this.settle(session.taskId, input, sink))
   }
 

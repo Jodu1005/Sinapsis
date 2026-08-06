@@ -418,6 +418,16 @@ export function createApp(options: CreateAppOptions = {}): Express {
     response.json(sanitizeAgent(await agentService.refreshAvailability(requiredParam(request.params.agentId, 'agentId'))))
   }))
 
+  app.put('/api/agents/:agentId/identity', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['identity'])
+    const agent = repositories.updateAgentIdentity(
+      requiredParam(request.params.agentId, 'agentId'),
+      requiredString(body, 'identity'),
+    )
+    response.json(sanitizeAgent(agent))
+  }))
+
   app.put('/api/agents/:agentId/responsibilities', asyncRoute((request, response) => {
     const body = objectBody(request.body)
     assertOnlyKeys(body, ['responsibilities'])

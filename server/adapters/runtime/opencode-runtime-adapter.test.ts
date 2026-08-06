@@ -137,7 +137,7 @@ describe('OpenCodeRuntimeAdapter', () => {
       vi.advanceTimersByTime(90_000)
 
       expect(kill).toHaveBeenCalledOnce()
-      expect(events).toContainEqual({ kind: 'error', taskId: session.taskId, message: 'OpenCode 在 90 秒内没有返回回复。' })
+      expect(events).toContainEqual({ kind: 'error', taskId: session.taskId, message: 'OpenCode 在 90 秒内没有返回回复。', errorCode: 'timeout' })
     } finally {
       vi.useRealTimers()
     }
@@ -240,6 +240,23 @@ describe('OpenCodeRuntimeAdapter', () => {
       message: 'OpenCode exited with 1.',
     })
     expect(events.filter((event) => event.kind === 'settled')).toEqual([])
+  })
+
+  it('classifies stale native sessions from stderr as session_lost', async () => {
+    const runner = new FakeProcessRunner()
+    const events: RuntimeEvent[] = []
+    const adapter = new OpenCodeRuntimeAdapter(runner)
+
+    await adapter.start(task, (event) => events.push(event))
+    runner.spawns[0]?.process.emitStderr('Error: Session not found\n')
+    runner.spawns[0]?.process.exit(1)
+
+    expect(events).toContainEqual({
+      kind: 'error',
+      taskId: task.taskId,
+      message: 'OpenCode session not found.',
+      errorCode: 'session_lost',
+    })
   })
 
   it('cancels its managed process for a session', async () => {

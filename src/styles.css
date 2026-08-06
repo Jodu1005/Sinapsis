@@ -306,7 +306,7 @@ ol.turn-detail-list { padding-left: 18px; list-style: decimal; }
 .agent-config-dialog dl { display: grid; gap: 11px; margin: 0; padding: 18px; }
 .agent-create-form { display: grid; gap: 7px; padding: 16px 18px 18px; }
 .agent-create-form label { margin-top: 4px; color: #405048; font-size: 12px; font-weight: 700; }
-.agent-create-form input, .agent-create-form select, .agent-create-form textarea, .agent-responsibility-form textarea { width: 100%; border: 1px solid #c9d3cd; border-radius: 4px; padding: 7px 9px; color: var(--ink); background: #fff; }
+.agent-create-form input, .agent-create-form select, .agent-create-form textarea, .agent-responsibility-form input, .agent-responsibility-form textarea { width: 100%; border: 1px solid #c9d3cd; border-radius: 4px; padding: 7px 9px; color: var(--ink); background: #fff; }
 .agent-create-form textarea, .agent-responsibility-form textarea { min-height: 72px; resize: vertical; font: inherit; }
 .agent-create-form footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .agent-create-form .primary-action { min-width: 92px; margin: 0; }

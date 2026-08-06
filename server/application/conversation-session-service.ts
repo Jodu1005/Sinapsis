@@ -71,6 +71,7 @@ interface SessionState {
   phase: SessionPhase
   cancellationRequested: boolean
   runtimeCancellationCompleted: boolean
+  sessionRecoveryAttempted: boolean
   deferredInputs: DeferredRuntimeInput[]
   preparing: Promise<void>
 }
@@ -135,6 +136,7 @@ export class ConversationSessionService {
         phase: 'ready',
         cancellationRequested: false,
         runtimeCancellationCompleted: false,
+        sessionRecoveryAttempted: false,
         deferredInputs: [],
         preparing: Promise.resolve(),
       }
@@ -150,6 +152,7 @@ export class ConversationSessionService {
     state.phase = 'preparing'
     state.cancellationRequested = false
     state.runtimeCancellationCompleted = false
+    state.sessionRecoveryAttempted = false
     state.deferredInputs = []
     state.active = {
       input,
@@ -304,6 +307,13 @@ export class ConversationSessionService {
           this.settle(state)
           return
         case 'error':
+          if (event.errorCode === 'session_lost' && this.canRecoverRuntimeSession(state)) {
+            void this.recoverRuntimeSession(state).catch((error: unknown) => {
+              if (state.cancellationRequested || !state.active) return
+              this.fail(state, asError(error))
+            })
+            return
+          }
           this.fail(state, new Error(event.message))
           return
         case 'artifact':
@@ -332,6 +342,28 @@ export class ConversationSessionService {
     } catch (error) {
       this.rejectInvocation(active, asError(error))
     }
+  }
+
+  private canRecoverRuntimeSession(state: SessionState): boolean {
+    return state.phase === 'active'
+      && !state.sessionRecoveryAttempted
+      && state.session !== null
+      && state.runtimeSessionId !== null
+      && state.active !== null
+      && state.active.pendingText.length === 0
+  }
+
+  private async recoverRuntimeSession(state: SessionState): Promise<void> {
+    const active = state.active
+    if (!active) return
+    state.sessionRecoveryAttempted = true
+    state.phase = 'preparing'
+    this.persist(state, 'stale', active.lastMessageId)
+    state.session = null
+    state.runtimeSessionId = null
+    state.runtimeSessionFile = null
+    active.pendingText = []
+    await this.startColdSession(state, active.input)
   }
 
   private fail(state: SessionState, error: Error): void {

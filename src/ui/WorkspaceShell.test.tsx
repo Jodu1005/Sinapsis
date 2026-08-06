@@ -58,6 +58,7 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     addRepository: vi.fn(),
     createAgent: vi.fn(),
     refreshAgentRuntime: vi.fn(),
+    updateAgentIdentity: vi.fn().mockResolvedValue(snapshot.agents[0]!),
     updateAgentResponsibilities: vi.fn().mockResolvedValue(snapshot.agents[0]!),
     postMessage: vi.fn().mockResolvedValue(undefined),
     getChannelMessage: vi.fn(),
@@ -976,6 +977,28 @@ describe('WorkspaceShell', () => {
 
     expect(screen.getByText('Claude Code CLI 受管运行')).toBeInTheDocument()
     expect(screen.getByText('使用 Claude Code 默认值')).toBeInTheDocument()
+  })
+
+  it('renames an existing Agent and refreshes every visible Agent label', async () => {
+    const renamedSnapshot = structuredClone(snapshot)
+    renamedSnapshot.agents[0].identity = '前端专家'
+    const updateAgentIdentity = vi.fn().mockResolvedValue(renamedSnapshot.agents[0])
+    const api = makeApi({
+      getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockResolvedValue(renamedSnapshot),
+      updateAgentIdentity,
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await user.click(await screen.findByRole('button', { name: '查看 实现 Agent 配置' }))
+    const dialog = screen.getByRole('dialog', { name: '实现 Agent' })
+    await user.clear(within(dialog).getByLabelText('名称'))
+    await user.type(within(dialog).getByLabelText('名称'), '前端专家')
+    await user.click(within(dialog).getByRole('button', { name: '保存名称' }))
+
+    expect(updateAgentIdentity).toHaveBeenCalledWith('agent-1', '前端专家')
+    expect(await screen.findByRole('dialog', { name: '前端专家' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看 前端专家 配置' })).toBeInTheDocument()
   })
 
   it('rechecks an agent runtime from the config dialog and refreshes bootstrap afterwards', async () => {
