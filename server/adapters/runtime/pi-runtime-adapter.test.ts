@@ -83,7 +83,7 @@ describe('PiRuntimeAdapter', () => {
 
     expect(JSON.parse(process?.stdin[1] ?? '{}')).toMatchObject({
       type: 'prompt',
-      message: expect.stringContaining('If you make changes, stage and commit the completed work on the task branch before you finish.'),
+      message: expect.stringContaining('Do not create a branch or commit unless the task explicitly asks for one.'),
     })
     expect(session).toMatchObject({ sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session.jsonl' })
   })
@@ -135,6 +135,20 @@ describe('PiRuntimeAdapter', () => {
     ]))
     expect(session.isStreaming).toBe(false)
     expect(session).toMatchObject({ sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session.jsonl' })
+  })
+
+  it('does not expose Pi thinking updates as assistant text', async () => {
+    const runner = new FakeProcessRunner()
+    const events: RuntimeEvent[] = []
+    const adapter = new PiRuntimeAdapter(runner)
+
+    await adapter.start(task, (event) => events.push(event))
+    const process = runner.spawns[0]?.process
+    process?.emitStdout('{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"private reasoning"}}\n')
+    process?.emitStdout('{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"public reply"}}\n')
+
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'text', text: 'public reply' }))
+    expect(events).not.toContainEqual(expect.objectContaining({ kind: 'text', text: 'private reasoning' }))
   })
 
   it('surfaces failed Pi RPC responses instead of leaving the task marked as running', async () => {

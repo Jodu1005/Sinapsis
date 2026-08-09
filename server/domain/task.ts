@@ -1,9 +1,11 @@
 export const taskStatuses = [
+  'backlog',
   'queued',
   'claimed',
   'running',
   'waiting_input',
   'in_review',
+  'completed',
   'accepted',
   'returned',
   'needs_human',
@@ -26,6 +28,7 @@ export interface Task {
   channelId: string
   threadRootMessageId?: string | null
   directAgentId: string | null
+  lastAgentId?: string | null
   title: string
   description: string
   acceptanceCriteria: string
@@ -52,6 +55,7 @@ export interface CreateTaskInput {
   description: string
   acceptanceCriteria: string
   labels?: string[]
+  status?: Extract<TaskStatus, 'backlog' | 'queued'>
   maxRetries?: number
   timeoutMs?: number
   leaseTtlMs?: number
@@ -112,17 +116,20 @@ export interface TaskDetails {
   sessions: TaskSession[]
   leases: TaskLease[]
   inputs: TaskInput[]
+  comments?: import('./message').Message[]
   decisions: ReviewDecision[]
   artifacts: TaskArtifact[]
   events: TaskEventRecord[]
 }
 
 const allowedTransitions: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
+  backlog: ['queued', 'cancelled'],
   queued: ['claimed', 'cancelled'],
   claimed: ['running', 'queued', 'needs_human', 'cancelled'],
-  running: ['waiting_input', 'in_review', 'returned', 'needs_human', 'cancelled'],
+  running: ['waiting_input', 'in_review', 'completed', 'returned', 'needs_human', 'cancelled'],
   waiting_input: ['running', 'needs_human', 'cancelled'],
-  in_review: ['accepted', 'returned', 'needs_human', 'cancelled'],
+  in_review: ['accepted', 'queued', 'returned', 'needs_human', 'cancelled'],
+  completed: [],
   accepted: ['merged'],
   returned: ['queued', 'claimed', 'needs_human', 'cancelled'],
   needs_human: ['queued', 'cancelled'],

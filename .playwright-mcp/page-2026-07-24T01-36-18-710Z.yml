@@ -1,0 +1,104 @@
+- main [ref=f2e3]:
+  - heading "控制室" [level=1] [ref=f2e4]
+  - complementary "项目与 Agent 席位" [ref=f2e5]:
+    - generic [ref=f2e6]:
+      - generic [ref=f2e7]:
+        - heading "Sinapsis" [level=2] [ref=f2e8]
+        - paragraph [ref=f2e9]: prototype-zero-control-room
+      - list "Agent 席位" [ref=f2e10]:
+        - listitem [ref=f2e11]:
+          - generic [ref=f2e12]:
+            - strong [ref=f2e13]: 实现者
+            - generic [ref=f2e14]: 功能实现
+          - generic [ref=f2e15]: Codex
+          - generic [ref=f2e16]: 进行中
+        - listitem [ref=f2e17]:
+          - generic [ref=f2e18]:
+            - strong [ref=f2e19]: 测试者
+            - generic [ref=f2e20]: 质量验证
+          - generic [ref=f2e21]: Claude
+          - generic [ref=f2e22]: 等待中
+        - listitem [ref=f2e23]:
+          - generic [ref=f2e24]:
+            - strong [ref=f2e25]: 审查者
+            - generic [ref=f2e26]: 改动审查
+          - generic [ref=f2e27]: Claude
+          - generic [ref=f2e28]: 审查中
+      - region [ref=f2e29]:
+        - heading "近期活动" [level=3] [ref=f2e30]
+        - paragraph [ref=f2e31]: 尚无活动
+  - region "任务看板" [ref=f2e32]:
+    - generic [ref=f2e33]:
+      - region [ref=f2e34]:
+        - heading "待开始" [level=2] [ref=f2e35]
+        - button "补充队列可观测性" [ref=f2e37] [cursor=pointer]:
+          - generic [ref=f2e39]: 队列指标尚未开始补充。
+          - generic [ref=f2e40]:
+            - generic [ref=f2e41]: 负责人 实现者
+            - time [ref=f2e42]: 更新于 7月23日 00:00
+          - generic [ref=f2e43]: 待开始
+      - region [ref=f2e44]:
+        - heading "执行中" [level=2] [ref=f2e45]
+        - button "重构身份验证中间件" [ref=f2e47] [cursor=pointer]:
+          - generic [ref=f2e49]: 正在简化身份验证边界。
+          - generic [ref=f2e50]:
+            - generic [ref=f2e51]: 负责人 实现者
+            - time [ref=f2e52]: 更新于 7月23日 00:00
+          - generic [ref=f2e53]: 执行中
+      - region [ref=f2e54]:
+        - heading "等待输入" [level=2] [ref=f2e55]
+        - button "验证旧版登录分支" [ref=f2e57] [cursor=pointer]:
+          - generic [ref=f2e59]: 等待确认旧版登录覆盖范围。
+          - generic [ref=f2e60]:
+            - generic [ref=f2e61]: 负责人 测试者
+            - time [ref=f2e62]: 更新于 7月23日 00:00
+          - generic [ref=f2e63]: 等待输入
+      - region [ref=f2e64]:
+        - heading "审查中" [level=2] [ref=f2e65]
+        - button "审查速率限制改动" [pressed] [ref=f2e67] [cursor=pointer]:
+          - generic [ref=f2e69]: 速率限制改动已准备审查。
+          - generic [ref=f2e70]:
+            - generic [ref=f2e71]: 负责人 审查者
+            - time [ref=f2e72]: 更新于 7月23日 00:07
+          - generic [ref=f2e73]: 审查中
+      - region [ref=f2e74]:
+        - heading "已完成" [level=2] [ref=f2e75]
+  - complementary "任务详情与审查" [ref=f2e77]:
+    - generic [ref=f2e78]:
+      - generic [ref=f2e79]:
+        - heading "审查速率限制改动" [level=2] [ref=f2e80]
+        - paragraph [ref=f2e81]: 审查中
+        - paragraph [ref=f2e82]: 速率限制改动已准备审查。
+      - region "改动文件" [ref=f2e83]:
+        - heading "改动文件" [level=3] [ref=f2e84]
+        - list [ref=f2e85]:
+          - listitem [ref=f2e86]: src/api/rate-limit.ts
+      - region "差异摘要" [ref=f2e87]:
+        - heading "差异摘要" [level=3] [ref=f2e88]
+        - paragraph [ref=f2e89]: 速率限制新增按调用方隔离的计数边界，并保留原有回退路径。
+      - region "测试输出" [ref=f2e90]:
+        - heading "测试输出" [level=3] [ref=f2e91]
+        - generic [ref=f2e92]: 12 项速率限制测试通过
+      - region [ref=f2e93]:
+        - heading "活动时间轨" [level=3] [ref=f2e94]
+        - list "任务活动" [ref=f2e95]:
+          - listitem [ref=f2e96]:
+            - time [ref=f2e97]: 2026-07-23T00:05:00.000Z
+            - generic [ref=f2e98]: 审查者已完成速率限制边界检查
+          - listitem [ref=f2e99]:
+            - time [ref=f2e100]: 2026-07-23T00:06:00.000Z
+            - generic [ref=f2e101]: 已生成速率限制改动差异摘要
+          - listitem [ref=f2e102]:
+            - time [ref=f2e103]: 2026-07-23T00:07:00.000Z
+            - generic [ref=f2e104]: 测试全部通过，等待人工审查决定
+      - region "控制操作" [ref=f2e105]:
+        - generic [ref=f2e106]:
+          - button "请求总结" [disabled] [ref=f2e107] [cursor=pointer]
+          - button "需要决策" [disabled] [ref=f2e111] [cursor=pointer]
+        - generic [ref=f2e115]:
+          - generic [ref=f2e116]: 发送给 Agent 的反馈
+          - textbox "发送给 Agent 的反馈" [ref=f2e117]
+        - button "发送反馈" [disabled] [ref=f2e118] [cursor=pointer]
+        - generic [ref=f2e122]:
+          - button "接受改动" [ref=f2e123] [cursor=pointer]
+          - button "驳回改动" [ref=f2e126] [cursor=pointer]

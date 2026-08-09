@@ -1,5 +1,6 @@
 export type AgentStatus = 'offline' | 'idle' | 'busy' | 'error'
-export type TaskStatus = 'queued' | 'claimed' | 'running' | 'waiting_input' | 'in_review' | 'accepted' | 'returned' | 'needs_human' | 'merged' | 'cancelled'
+export type TaskStatus = 'backlog' | 'queued' | 'claimed' | 'running' | 'waiting_input' | 'in_review' | 'completed' | 'accepted' | 'returned' | 'needs_human' | 'merged' | 'cancelled'
+export type TaskBoardLane = 'backlog' | 'todo' | 'doing' | 'review' | 'done'
 
 export interface WorkspaceSnapshot {
   agents: AgentView[]
@@ -11,6 +12,7 @@ export interface WorkspaceSnapshot {
   pendingMemoryCandidateCount: number
   typingAgentIdsByChannel?: Record<string, string[]>
   activeTurnsByChannel?: Record<string, TurnActivityView[]>
+  recentTurnResultsByChannel?: Record<string, TurnResultSummaryView[]>
 }
 
 export type MemoryCandidateStatus = 'pending' | 'accepted' | 'ignored' | 'superseded'
@@ -104,7 +106,7 @@ export interface AgentView {
   id: string
   identity: string
   mentionName: string
-  runtime: 'opencode' | 'pi' | 'claude-code'
+  runtime: 'opencode' | 'opencode-acp' | 'pi' | 'claude-code'
   status: AgentStatus
   capabilityTags: string[]
   responsibilities?: string[]
@@ -124,6 +126,7 @@ export interface TaskView {
   channelId: string
   threadRootMessageId?: string | null
   directAgentId: string | null
+  lastAgentId?: string | null
   title: string
   description: string
   acceptanceCriteria: string
@@ -159,6 +162,7 @@ export interface TaskDetailView {
   sessions: TaskSessionView[]
   leases: TaskLeaseView[]
   inputs: TaskInputView[]
+  comments?: ChannelMessage[]
   decisions: ReviewDecisionView[]
   artifacts: TaskArtifactView[]
   events: TaskEventView[]
@@ -169,6 +173,7 @@ export interface TaskLeaseView { id: string; taskId: string; agentId: string; ex
 export interface TaskInputView { id: string; taskId: string; body: string; createdAt: string; consumedAt: string | null }
 export interface ReviewDecisionView { id: string; taskId: string; decision: string; reason: string; createdAt: string }
 export interface TaskArtifactView { id: string; taskId: string; kind: string; createdAt: string }
+export interface TaskOutputFileView { path: string; status: 'added' | 'modified' | 'renamed' }
 export interface TaskEventView { id: string; taskId: string; type: string; payload: Record<string, unknown>; createdAt: string }
 
 export interface TurnActivityView {
@@ -176,6 +181,17 @@ export interface TurnActivityView {
   agentId: string | null
   phase: 'screening' | 'judging' | 'queued' | 'preparing' | 'handoff'
   queuePosition: number | null
+}
+
+export interface TurnResultSummaryView {
+  turnId: string
+  triggerMessageId: string
+  status: ConversationTurnView['status']
+  participants: Array<{
+    agentId: string
+    decision: TurnParticipantView['decision']
+    status: TurnParticipantView['status']
+  }>
 }
 
 export interface ConversationTurnDetailView {
@@ -269,8 +285,8 @@ export function distinctAgentsByIdentity(agents: AgentView[]): AgentView[] {
 
 export function taskStatusLabel(status: TaskStatus): string {
   return {
-    queued: '排队中', claimed: '已领取', running: '执行中', waiting_input: '等待输入', in_review: '等待验收',
-    accepted: '已验收', returned: '已退回', needs_human: '需要人工处理', merged: '已合并', cancelled: '已取消',
+    backlog: '积压中', queued: '待办中', claimed: '已领取', running: '执行中', waiting_input: '等待输入', in_review: '等待验收',
+    completed: '已完成', accepted: '已验收', returned: '已退回', needs_human: '需要人工处理', merged: '已合并', cancelled: '已取消',
   }[status]
 }
 

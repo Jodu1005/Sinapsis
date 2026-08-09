@@ -11,7 +11,7 @@ interface TaskCanceller {
   cancelTask(taskId: string, reason: string): Promise<Task>
 }
 
-const terminalTaskStatuses = new Set(['accepted', 'merged', 'cancelled'])
+const terminalTaskStatuses = new Set(['completed', 'accepted', 'merged', 'cancelled'])
 
 export class ChannelContextResetService {
   constructor(

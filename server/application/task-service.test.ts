@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { createApp } from '../app'
 import { startHttpTestServer } from '../test/http-test-server'
 import { TaskService } from './task-service'
@@ -53,7 +56,7 @@ describe('task API', () => {
     const task = await response.json() as { id: string }
     expect(task).toMatchObject({
       repositoryId: repository.id,
-      status: 'queued',
+      status: 'backlog',
       labels: ['frontend', 'test'],
     })
     const detailResponse = await fetch(`${server.baseUrl}/api/tasks/${task.id}`)
@@ -151,11 +154,31 @@ describe('task API', () => {
       }),
     })
     const task = await createResponse.json() as { id: string }
+    repositories.transitionTask(task.id, 'queued', '人工移入待办')
     repositories.transitionTask(task.id, 'claimed', 'Agent 已领取')
     repositories.transitionTask(task.id, 'running', 'Runtime 已启动')
     repositories.transitionTask(task.id, 'needs_human', '任务分支没有提交')
 
     const response = await fetch(`${server.baseUrl}/api/tasks/${task.id}/requeue`, { method: 'POST' })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ id: task.id, status: 'queued' })
+  })
+
+  it('moves a backlog task into todo through the board move API', async () => {
+    const { server, repositoryId, channelId } = await createRepositoryServer()
+    const createResponse = await fetch(`${server.baseUrl}/api/repositories/${repositoryId}/tasks`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        channelId, title: '整理任务队列', description: '进入待办后由 Agent 处理。', acceptanceCriteria: '状态进入 queued。',
+      }),
+    })
+    const task = await createResponse.json() as { id: string }
+
+    const response = await fetch(`${server.baseUrl}/api/tasks/${task.id}/move`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ lane: 'todo' }),
+    })
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({ id: task.id, status: 'queued' })
@@ -218,12 +241,33 @@ describe('TaskService human input queue', () => {
     expect(repositories.createdInputs).toHaveLength(1)
   })
 
-  it.each<TaskStatus>(['queued', 'in_review', 'accepted', 'returned', 'needs_human', 'merged', 'cancelled'])('rejects input for a non-active %s task', (status) => {
+  it.each<TaskStatus>(['backlog', 'queued', 'in_review', 'accepted', 'returned', 'needs_human', 'merged', 'cancelled'])('rejects input for a non-active %s task', (status) => {
     const repositories = new TaskInputRepositories(status)
 
     expect(() => new TaskService(repositories as unknown as WorkspaceRepositories).queueHumanInput('task-1', 'Proceed with SQLite.'))
       .toThrow(new DomainError('Task input can only be queued while an agent is active.'))
     expect(repositories.createdInputs).toEqual([])
+  })
+})
+
+describe('TaskService output files', () => {
+  it('lists and reads only Git-reported files inside the task worktree', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'sinapsis-task-output-'))
+    try {
+      await mkdir(path.join(directory, 'docs'))
+      await writeFile(path.join(directory, 'docs', 'guide.md'), '# Guide\n')
+      const repositories = new TaskInputRepositories('completed', directory)
+      const service = new TaskService(repositories as unknown as WorkspaceRepositories, undefined, {
+        inspectRepository: async () => ({ rootPath: directory, currentBranch: 'main', defaultBranch: 'main', isClean: false }),
+        listChangedFiles: async () => [{ path: 'docs/guide.md', status: 'added' }],
+      })
+
+      await expect(service.listOutputFiles('task-1')).resolves.toEqual([{ path: 'docs/guide.md', status: 'added' }])
+      await expect(service.readOutputFile('task-1', 'docs/guide.md')).resolves.toEqual({ path: 'docs/guide.md', content: '# Guide\n' })
+      await expect(service.readOutputFile('task-1', '../outside.md')).rejects.toThrow('Output file path must stay inside the task worktree.')
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 })
 
@@ -263,6 +307,55 @@ describe('TaskService channel ownership', () => {
       expect.objectContaining({ id: task.threadRootMessageId, channelId: build.id, threadRootMessageId: null, body: '任务「Build」已创建。' }),
     ]))
     expect(general.id).not.toBe(build.id)
+  })
+
+  it('keeps a new task in backlog and starts its analysis after persistence', () => {
+    const app = createApp()
+    closeDatabase = app.locals.closeDatabase as () => void
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'build' })
+    repositories.bindChannelWorkspace(channel.id, workspace.id, new Date())
+    const backlogAnalysisStarter = { start: vi.fn() }
+    const service = new TaskService(repositories, backlogAnalysisStarter)
+
+    const task = service.createTask({ workspaceId: workspace.id, channelId: channel.id, title: 'Plan', description: 'Plan', acceptanceCriteria: 'Reviewed' })
+
+    expect(task.status).toBe('backlog')
+    expect(backlogAnalysisStarter.start).toHaveBeenCalledWith(task)
+  })
+
+  it('uses a default completion definition when none is provided', () => {
+    const app = createApp()
+    closeDatabase = app.locals.closeDatabase as () => void
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'build' })
+    repositories.bindChannelWorkspace(channel.id, workspace.id, new Date())
+
+    const task = new TaskService(repositories).createTask({ workspaceId: workspace.id, channelId: channel.id, title: 'Plan', description: 'Plan' })
+
+    expect(task.acceptanceCriteria).toBe('未填写完成定义。请在执行前根据任务说明与讨论确认完成标准。')
+  })
+
+  it('derives a concise title from the task description when one is omitted', () => {
+    const app = createApp()
+    closeDatabase = app.locals.closeDatabase as () => void
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'build' })
+    repositories.bindChannelWorkspace(channel.id, workspace.id, new Date())
+
+    const task = new TaskService(repositories).createTask({
+      workspaceId: workspace.id,
+      channelId: channel.id,
+      description: '# 让任务输入更自然\n\n标题由正文自动提取。',
+    })
+
+    expect(task.title).toBe('让任务输入更自然')
   })
 
   it('rejects a task Workspace that is not bound to the Channel', () => {
@@ -311,14 +404,14 @@ describe('TaskService channel ownership', () => {
 class TaskInputRepositories {
   readonly createdInputs: Array<{ taskId: string; body: string }> = []
 
-  constructor(private readonly status: TaskStatus) {}
+  constructor(private readonly status: TaskStatus, private readonly worktreePath: string | null = null) {}
 
   getTaskDetails() {
     const task: Task = {
       id: 'task-1', workspaceId: 'workspace-1', repositoryId: 'repository-1', channelId: 'channel-1', directAgentId: null,
       title: 'Task', description: 'Description', acceptanceCriteria: 'Acceptance criteria', labels: [],
       status: this.status, queuedAt: '2026-07-25T00:00:00.000Z', attemptCount: 0, maxRetries: 2,
-      timeoutMs: 900000, leaseTtlMs: null, branchName: null, worktreePath: null,
+      timeoutMs: 900000, leaseTtlMs: null, branchName: this.worktreePath ? 'task/task-1' : null, worktreePath: this.worktreePath,
       createdAt: '2026-07-25T00:00:00.000Z', updatedAt: '2026-07-25T00:00:00.000Z',
     }
     return { task, sessions: [], leases: [], inputs: [], decisions: [], artifacts: [], events: [] }

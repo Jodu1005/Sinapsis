@@ -24,6 +24,7 @@ describe('ChannelAgentMembers', () => {
     const user = userEvent.setup()
     render(<ChannelAgentMembers channel={duplicateChannel} agents={[buildClawd, workcodeClawd]} api={api} onChanged={vi.fn().mockResolvedValue(undefined)} />)
 
+    expect(screen.getByRole('heading', { name: '当前频道 Agent' })).toBeInTheDocument()
     expect(screen.getByText(/@build/)).toBeInTheDocument()
     expect(screen.getByText(/@clawd-workcode/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '移除 clawd @build' }))

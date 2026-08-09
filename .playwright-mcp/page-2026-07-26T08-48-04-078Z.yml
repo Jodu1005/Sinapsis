@@ -1,0 +1,165 @@
+- generic [ref=e3]:
+  - navigation "工作空间" [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: 频道
+      - button "添加频道" [ref=e7] [cursor=pointer]
+    - generic [ref=e9]:
+      - button "# general" [ref=e10] [cursor=pointer]:
+        - generic [ref=e14]: general
+      - button "# channel1" [ref=e15] [cursor=pointer]:
+        - generic [ref=e19]: channel1
+      - button "# channel2" [ref=e20] [cursor=pointer]:
+        - generic [ref=e24]: channel2
+    - generic [ref=e25]:
+      - generic [ref=e26]: 工作空间
+      - button "添加工作空间" [ref=e28] [cursor=pointer]
+    - generic [ref=e30]:
+      - button "Sinapsis" [ref=e31] [cursor=pointer]:
+        - generic [ref=e32]: S
+      - button "workcode" [ref=e34] [cursor=pointer]:
+        - generic [ref=e35]: w
+    - generic [ref=e37]: 任务
+    - generic [ref=e38]:
+      - generic [ref=e39]:
+        - generic [ref=e42]: Sinapsis
+        - button "新建 Sinapsis 任务" [ref=e43] [cursor=pointer]
+      - button "验证任务详情面板" [pressed] [ref=e45] [cursor=pointer]
+      - button "test1" [ref=e50] [cursor=pointer]
+      - button "test1" [ref=e55] [cursor=pointer]
+      - button "test2" [ref=e60] [cursor=pointer]
+    - region "Agent 状态" [ref=e65]:
+      - generic [ref=e66]:
+        - generic [ref=e67]: 运行中的 Agent
+        - button "添加 Agent" [ref=e68] [cursor=pointer]
+      - button "查看 前端 Agent 配置" [ref=e70] [cursor=pointer]:
+        - generic [ref=e75]:
+          - strong [ref=e76]: 前端 Agent
+          - generic [ref=e77]: "@前端 Agent · opencode"
+        - generic [ref=e78]: 空闲
+      - button "查看 clawd 配置" [ref=e79] [cursor=pointer]:
+        - generic [ref=e84]:
+          - strong [ref=e85]: clawd
+          - generic [ref=e86]: "@clawd · claude-code"
+        - generic [ref=e87]: 空闲
+      - button "查看 newton 配置" [ref=e88] [cursor=pointer]:
+        - generic [ref=e93]:
+          - strong [ref=e94]: newton
+          - generic [ref=e95]: "@newton · pi"
+        - generic [ref=e96]: 空闲
+  - main [ref=e97]:
+    - generic [ref=e98]:
+      - generic [ref=e99]:
+        - heading "# general" [level=1] [ref=e100]
+        - paragraph [ref=e101]: 全局频道
+      - generic [ref=e102]:
+        - generic [ref=e103]: 已连接
+        - button "打开上下文" [ref=e104] [cursor=pointer]
+    - region "频道消息" [ref=e108]:
+      - article [ref=e109]:
+        - generic [ref=e110]: "Y"
+        - generic [ref=e111]:
+          - generic [ref=e112]:
+            - strong [ref=e113]: 你
+            - time [ref=e114]: 02:47
+          - paragraph [ref=e115]: 频道工作台已接入本机服务。
+          - button "回复 你 的消息" [active] [ref=e116] [cursor=pointer]
+      - article [ref=e119]:
+        - generic [ref=e124]:
+          - generic [ref=e125]:
+            - strong [ref=e126]: 系统
+            - time [ref=e127]: 10:53
+          - paragraph [ref=e128]: "@dev 开始执行任务。"
+          - button "回复 系统 的消息" [ref=e129] [cursor=pointer]
+      - article [ref=e132]:
+        - generic [ref=e137]:
+          - generic [ref=e138]:
+            - strong [ref=e139]: 系统
+            - time [ref=e140]: 11:25
+          - paragraph [ref=e141]: "@dev 开始执行任务。"
+          - button "回复 系统 的消息" [ref=e142] [cursor=pointer]
+      - article [ref=e145]:
+        - generic [ref=e150]:
+          - generic [ref=e151]:
+            - strong [ref=e152]: 系统
+            - time [ref=e153]: 11:26
+          - paragraph [ref=e154]: 任务需要人工处理：Runtime 已完成，但任务分支没有可供评审的提交。
+          - button "回复 系统 的消息" [ref=e155] [cursor=pointer]
+      - article [ref=e158]:
+        - generic [ref=e159]: "Y"
+        - generic [ref=e160]:
+          - generic [ref=e161]:
+            - strong [ref=e162]: 你
+            - time [ref=e163]: 11:28
+          - paragraph [ref=e164]: "@dev test2验证没问题"
+          - button "回复 你 的消息" [ref=e165] [cursor=pointer]
+    - generic [ref=e168]:
+      - generic [ref=e169]: 发送消息
+      - textbox "发送消息" [ref=e170]:
+        - /placeholder: "发送消息到 # general"
+      - button "发送消息" [disabled] [ref=e171]
+  - complementary "任务与上下文" [ref=e174]:
+    - strong [ref=e176]: 上下文
+    - region "Thread" [ref=e232]:
+      - generic [ref=e233]:
+        - strong [ref=e234]: Thread
+        - button "关闭 Thread" [ref=e235] [cursor=pointer]
+      - article [ref=e240]:
+        - generic [ref=e241]: 你
+        - generic [ref=e242]:
+          - strong [ref=e243]: 你
+          - paragraph [ref=e244]: 频道工作台已接入本机服务。
+      - generic [ref=e245]:
+        - generic [ref=e246]: 发送消息
+        - textbox "发送消息" [ref=e247]:
+          - /placeholder: "发送消息到 # Thread"
+        - button "发送消息" [disabled] [ref=e248]
+    - generic [ref=e177]:
+      - generic [ref=e178]:
+        - heading "Sinapsis 任务" [level=2] [ref=e179]
+        - button "新建当前上下文任务" [ref=e180] [cursor=pointer]: +
+      - generic [ref=e181]:
+        - tablist "任务筛选" [ref=e182]:
+          - tab "等待" [selected] [ref=e183] [cursor=pointer]
+          - tab "执行中" [ref=e184] [cursor=pointer]
+          - tab "等待输入" [ref=e185] [cursor=pointer]
+          - tab "待人工验收" [ref=e186] [cursor=pointer]
+          - tab "已结束" [ref=e187] [cursor=pointer]
+        - generic [ref=e188]:
+          - button "验证任务详情面板 排队中" [pressed] [ref=e189] [cursor=pointer]:
+            - generic [ref=e190]: 验证任务详情面板
+            - generic [ref=e191]: 排队中
+          - button "test1 排队中" [ref=e192] [cursor=pointer]:
+            - generic [ref=e193]: test1
+            - generic [ref=e194]: 排队中
+    - region "任务详情" [ref=e203]:
+      - generic [ref=e204]:
+        - heading "概览" [level=3] [ref=e205]
+        - strong [ref=e206]: 验证任务详情面板
+        - paragraph [ref=e207]: 通过本机工作台创建一个排队任务。
+        - generic [ref=e208]:
+          - generic [ref=e209]:
+            - term [ref=e210]: 状态
+            - definition [ref=e211]: 排队中
+          - generic [ref=e212]:
+            - term [ref=e213]: 验收标准
+            - definition [ref=e214]: 任务可在右栏查看详情。
+          - generic [ref=e215]:
+            - term [ref=e216]: 标签
+            - definition [ref=e217]: frontend, qa
+      - generic [ref=e218]:
+        - heading "输入队列" [level=3] [ref=e219]
+        - paragraph [ref=e220]: 没有待发送输入
+      - generic [ref=e221]:
+        - heading "证据" [level=3] [ref=e222]
+        - paragraph [ref=e223]: Commit、改动文件、受控进程 stderr 和 diff 摘要保留在任务内，不刷进频道。
+        - paragraph [ref=e224]: 运行尚未留下证据
+      - generic [ref=e225]:
+        - heading "审查" [level=3] [ref=e226]
+        - paragraph [ref=e227]: 验收与合并分离；内置 API 不会自动 push 或 merge。
+        - paragraph [ref=e228]: 此版本没有 OS 级沙箱。运行未经信任的本地 CLI 前，请先确认信任它。工作树隔离是约定而非权限边界。
+        - generic [ref=e229]:
+          - button "退回修改" [disabled] [ref=e230]
+          - button "接受验收" [disabled] [ref=e231]
+    - generic [ref=e197]:
+      - heading "频道操作" [level=2] [ref=e198]
+      - button "收起上下文" [ref=e199] [cursor=pointer]

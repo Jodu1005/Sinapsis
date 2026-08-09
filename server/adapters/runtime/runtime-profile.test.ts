@@ -6,6 +6,8 @@ describe('CommandRuntimeAvailabilityDetector', () => {
   it('treats manual arguments as additions to the fixed runtime protocol', () => {
     expect(resolveRuntimeProfile('opencode', { args: ['--model', 'anthropic/claude-sonnet-4'] }).args)
       .toEqual(['run', '--model', 'anthropic/claude-sonnet-4'])
+    expect(resolveRuntimeProfile('opencode-acp', { args: ['--model', 'anthropic/claude-sonnet-4'] }).args)
+      .toEqual(['acp', '--model', 'anthropic/claude-sonnet-4'])
     expect(resolveRuntimeProfile('pi', { args: ['--no-session'] }).args)
       .toEqual(['--mode', 'rpc', '--no-session'])
   })

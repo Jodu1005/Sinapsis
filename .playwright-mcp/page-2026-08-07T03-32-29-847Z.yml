@@ -1,0 +1,159 @@
+- generic [ref=e5]:
+  - navigation "工作空间" [ref=e6]:
+    - generic [ref=e7]:
+      - generic [ref=e8]: 频道
+      - button "添加频道" [ref=e9] [cursor=pointer]
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - button "# summit" [ref=e13] [cursor=pointer]:
+          - generic [ref=e17]: summit
+        - 'button "归档 # summit" [ref=e18] [cursor=pointer]'
+      - generic [ref=e22]:
+        - button "# channel1" [ref=e23] [cursor=pointer]:
+          - generic [ref=e27]: channel1
+        - 'button "归档 # channel1" [ref=e28] [cursor=pointer]'
+      - generic [ref=e32]:
+        - button "# channel2" [ref=e33] [cursor=pointer]:
+          - generic [ref=e37]: channel2
+        - 'button "归档 # channel2" [ref=e38] [cursor=pointer]'
+      - generic [ref=e42]:
+        - button "# channel4" [ref=e43] [cursor=pointer]:
+          - generic [ref=e47]: channel4
+        - 'button "归档 # channel4" [ref=e48] [cursor=pointer]'
+      - generic [ref=e52]:
+        - button "# channel5" [active] [ref=e53] [cursor=pointer]:
+          - generic [ref=e57]: channel5
+        - 'button "归档 # channel5" [ref=e58] [cursor=pointer]'
+    - region "已归档频道" [ref=e62]:
+      - button "已归档频道（3）" [ref=e63] [cursor=pointer]:
+        - generic [ref=e66]: 已归档频道
+        - generic [ref=e67]: "3"
+    - button "任务看板" [ref=e68] [cursor=pointer]:
+      - generic [ref=e73]: "4"
+    - button "Dream（4 个待确认）" [ref=e74] [cursor=pointer]:
+      - generic [ref=e87]: Dream
+      - generic [ref=e88]: "4"
+    - generic [ref=e89]:
+      - generic [ref=e90]: 工作空间
+      - button "添加工作空间" [ref=e92] [cursor=pointer]
+    - group "channel5 的工作空间" [ref=e1013]:
+      - paragraph [ref=e1014]: 未绑定工作空间
+    - generic [ref=e98]: 任务
+    - paragraph [ref=e1015]: 请先为频道绑定工作空间
+    - region "全局 Agent" [ref=e111]:
+      - generic [ref=e112]:
+        - generic [ref=e113]: 全局 Agent
+        - button "添加 Agent" [ref=e114] [cursor=pointer]
+      - button "查看 opencoddy 配置" [ref=e116] [cursor=pointer]:
+        - generic [ref=e121]:
+          - strong [ref=e122]: opencoddy
+          - generic [ref=e123]: "@opencoddy · opencode"
+        - generic [ref=e124]: 空闲
+      - button "查看 newton 配置" [ref=e125] [cursor=pointer]:
+        - generic [ref=e130]:
+          - strong [ref=e131]: newton
+          - generic [ref=e132]: "@newton · pi"
+        - generic [ref=e133]: 空闲
+      - button "查看 clawd 配置" [ref=e134] [cursor=pointer]:
+        - generic [ref=e139]:
+          - strong [ref=e140]: clawd
+          - generic [ref=e141]: "@clawd · claude-code"
+        - generic [ref=e142]: 空闲
+  - main [ref=e143]:
+    - generic [ref=e144]:
+      - generic [ref=e145]:
+        - heading "# channel5" [level=1] [ref=e1016]
+        - paragraph [ref=e147]: 全局频道
+      - generic [ref=e148]:
+        - generic [ref=e149]: 已连接
+        - button "打开上下文" [ref=e150] [cursor=pointer]
+    - region "频道消息" [ref=e154]:
+      - article [ref=e1017]:
+        - generic [ref=e1018]: "Y"
+        - generic [ref=e1019]:
+          - generic [ref=e1020]:
+            - strong [ref=e1021]: 你
+            - time [ref=e1022]: 11:08
+          - paragraph [ref=e1023]: 在这个channel里我想开发一个高考选校的软件，你们有什么想法
+          - button "回复 你 的消息" [ref=e1024] [cursor=pointer]
+      - article [ref=e1027]:
+        - generic [ref=e1028]: "Y"
+        - generic [ref=e1029]:
+          - generic [ref=e1030]:
+            - strong [ref=e1031]: 你
+            - time [ref=e1032]: 11:08
+          - paragraph [ref=e1033]: 在这个channel里我想开发一个高考选校的软件，你们有什么想法
+          - button "回复 你 的消息" [ref=e1034] [cursor=pointer]
+          - generic "Turn e341a359-0612-4c2d-b753-aa84c0a3eed5 参与结果" [ref=e1037]:
+            - button "Turn 结果" [ref=e1038] [cursor=pointer]
+            - generic [ref=e1039]:
+              - generic [ref=e1040]:
+                - strong [ref=e1043]: opencoddy
+                - text: 已回复
+              - generic [ref=e1044]:
+                - strong [ref=e1046]: newton
+                - text: 已选中
+              - generic [ref=e1047]:
+                - strong [ref=e1049]: clawd
+                - text: 未参与
+      - article [ref=e1050]:
+        - generic [ref=e1055]:
+          - generic [ref=e1056]:
+            - strong [ref=e1057]: opencoddy
+            - time [ref=e1058]: 11:09
+          - generic [ref=e1059]:
+            - paragraph [ref=e1060]: 作为开发视角，我有几个思路可以帮这个软件落地：
+            - paragraph [ref=e1061]:
+              - strong [ref=e1062]: 核心难点（先想清楚这些）
+            - list [ref=e1063]:
+              - listitem [ref=e1064]:
+                - strong [ref=e1065]: 数据是命脉
+                - text: ：权威的录取分数/位次、招生计划数据需要合规获取（阳光高考、各省考试院、院校官网），数据清洗和更新机制是最大工程，不是算法。
+              - listitem [ref=e1066]:
+                - strong [ref=e1067]: 规则建模
+                - text: ：平行志愿"分数优先、遵循志愿、一轮投档"的录取逻辑要建规则引擎，别用魔法数字硬编码。
+              - listitem [ref=e1068]:
+                - strong [ref=e1069]: 推荐算法
+                - text: ：建议先做
+                - strong [ref=e1070]: 位次等效分
+                - text: 方案（把历届分数换算成今年等效位次），比单纯用分数靠谱；"冲-稳-保"三档梯度是标配，后续可叠加机器学习排序。
+            - paragraph [ref=e1071]:
+              - strong [ref=e1072]: 建议的 MVP 路径
+            - list [ref=e1073]:
+              - listitem [ref=e1074]: 第一期：只做"位次等效分 + 冲稳保梯度筛选"的规则引擎，覆盖分数换算、志愿填报风险评估。
+              - listitem [ref=e1075]: 第二期：加院校/专业库、历年数据可视化趋势图。
+              - listitem [ref=e1076]: 第三期：再做基于偏好（城市/专业/就业）的智能排序。
+            - paragraph [ref=e1077]:
+              - strong [ref=e1078]: 技术栈建议
+            - list [ref=e1079]:
+              - listitem [ref=e1080]: Web 全栈（Next.js + 数据库）或微信小程序，小程序对考生群体触达更好；数据层用 Postgres 存结构化招生数据。
+              - listitem [ref=e1081]: 前端以查询+筛选交互为主，复杂度不高，重点投入在数据管线和规则引擎。
+            - paragraph [ref=e1082]: 要不要我先整理一份数据模型和推荐算法的技术方案初稿？或者你更想先讨论产品形态和用户场景？
+          - button "回复 opencoddy 的消息" [ref=e1083] [cursor=pointer]
+    - generic [ref=e964]:
+      - generic [ref=e965]: 发送消息
+      - textbox "发送消息" [ref=e966]:
+        - /placeholder: "发送消息到 # channel5"
+      - button "发送消息" [disabled] [ref=e967]
+  - complementary "任务与上下文" [ref=e970]:
+    - strong [ref=e972]: 上下文
+    - generic [ref=e973]:
+      - generic [ref=e974]:
+        - heading "当前频道 Agent" [level=2] [ref=e975]
+        - button "添加 Agent" [ref=e976] [cursor=pointer]
+      - list [ref=e980]:
+        - listitem [ref=e981]:
+          - generic [ref=e982]:
+            - strong [ref=e983]: opencoddy
+            - generic [ref=e984]: "@frontend · 空闲 · Runtime: OpenCode CLI"
+          - button "移除 opencoddy" [ref=e985] [cursor=pointer]
+        - listitem [ref=e989]:
+          - generic [ref=e990]:
+            - strong [ref=e991]: newton
+            - generic [ref=e992]: "@newton · 空闲 · Runtime: Pi"
+          - button "移除 newton" [ref=e993] [cursor=pointer]
+        - listitem [ref=e997]:
+          - generic [ref=e998]:
+            - strong [ref=e999]: clawd
+            - generic [ref=e1000]: "@build · 空闲 · Runtime: Claude Code"
+          - button "移除 clawd" [ref=e1086] [cursor=pointer]

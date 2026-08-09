@@ -88,7 +88,7 @@ describe('getServiceConfig', () => {
 
   it('rejects an unsupported Dream Runtime', () => {
     expect(() => getServiceConfig({ SINAPSIS_DREAM_RUNTIME: 'unknown' }))
-      .toThrow('SINAPSIS_DREAM_RUNTIME must be one of: opencode, pi, claude-code.')
+      .toThrow('SINAPSIS_DREAM_RUNTIME must be one of: opencode, opencode-acp, pi, claude-code.')
   })
 
   it('requires Dream timeout to be a positive integer', () => {

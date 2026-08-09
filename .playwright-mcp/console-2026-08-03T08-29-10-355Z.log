@@ -1,0 +1,16 @@
+[    3556ms] [ERROR] Failed to load resource: net::ERR_FAILED @ chrome://favicon2/?size=16&scaleFactor=1x&pageUrl=http%3A%2F%2Flocalhost%3A5173%2F&allowGoogleServerFallback=0&forceLightMode=true&forceEmptyDefaultFavicon=1:0
+[    3638ms] [ERROR] Failed to load resource: net::ERR_FAILED @ chrome://favicon2/?size=16&scaleFactor=1x&pageUrl=http%3A%2F%2F127.0.0.1%3A5174%2F&allowGoogleServerFallback=0&forceLightMode=true&forceEmptyDefaultFavicon=1:0
+[    3638ms] [ERROR] Failed to load resource: net::ERR_FAILED @ chrome://favicon2/?size=16&scaleFactor=1x&pageUrl=http%3A%2F%2Flocalhost%3A5173%2F&allowGoogleServerFallback=0&forceLightMode=true&forceEmptyDefaultFavicon=1:0
+[    3638ms] [ERROR] Failed to load resource: net::ERR_FAILED @ chrome://favicon2/?size=16&scaleFactor=1x&pageUrl=http%3A%2F%2F127.0.0.1%3A5173%2F&allowGoogleServerFallback=0&forceLightMode=true&forceEmptyDefaultFavicon=1:0
+[   42158ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://corp.hwp.huawei.com/hwpinternet/scripts/ocs/collector/service/hwp-cs.js:0
+[   48927ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://career.huawei.com/-/media/plugin/e2bc41fa73c1840d900aed60c04570d0/jquery.min.js:1
+[   49920ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://hwa.his.huawei.com/dist/uem_f.js?_2026-08-03:0
+[   50127ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/common/config/pub/lookup/list?lookupType=appraise_bad_reason&language=zh_CN&X-HW-ID=app_000000035886:0
+[   50127ms] r
+[   50144ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recommend/pub/privacy/data/zh_CN?language=zh_CN&X-HW-ID=app_000000035886:0
+[   50144ms] r
+[   50364ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recommend/pub/getRecommendLicense?recruitSubScenario=NEW_CAMPUS&licenseCode=&X-HW-ID=app_000000035886:0
+[   50365ms] r
+[   51002ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recommend/pub/getRecommendLicense?recruitSubScenario=NEW_INTERNS&licenseCode=&X-HW-ID=app_000000035886:0
+[   52132ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recommend/pub/getRecommendLicense?recruitSubScenario=RECRUITMENT_ASSISTANT&licenseCode=&X-HW-ID=app_000000035886:0
+[   52133ms] r

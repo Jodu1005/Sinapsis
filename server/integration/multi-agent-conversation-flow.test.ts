@@ -36,7 +36,7 @@ describe('multi-agent conversation flow', () => {
     const firstTurn = repositories.listActiveConversationTurns(fixture.channelId)
     expect(firstTurn).toEqual([])
     expect(runtime.calls.map((call) => call?.kind)).toEqual([
-      'participation', 'participation', 'response', 'duplicate_check', 'response', 'handoff_response',
+      'participation', 'participation', 'participation', 'response', 'duplicate_check', 'response', 'handoff_response',
     ])
     expect(agentBodies(repositories, fixture.channelId)).toEqual(expect.arrayContaining([
       'Alpha public answer', 'Beta independent answer', 'Gamma handoff answer',
@@ -66,9 +66,9 @@ describe('multi-agent conversation flow', () => {
 
     const inputsBeforeResume = runtime.inputs.length
     await postMessage(resumedServer.baseUrl, fixture.channelId, '@Alpha second incident update')
-    expect(runtime.resumes).toHaveLength(1)
+    expect(runtime.resumes).toHaveLength(2)
     expect(runtime.resumes[0]?.sessionId).toBe(persistedTimelineSession?.runtimeSessionId)
-    expect(runtime.inputs).toHaveLength(inputsBeforeResume + 1)
+    expect(runtime.inputs).toHaveLength(inputsBeforeResume + 2)
     expect(agentBodies(resumedRepositories, fixture.channelId).length).toBeGreaterThan(3)
     expect(runtime.calls).toContainEqual(expect.objectContaining({ kind: 'response' }))
 
@@ -96,7 +96,7 @@ describe('multi-agent conversation flow', () => {
 
     await postMessage(coldServer.baseUrl, fixture.channelId, '@Alpha second thread update', threadRoot.id)
     await waitFor(() => coldStarted.locals.repositories.listActiveConversationTurns(fixture.channelId).length === 0)
-    expect(runtime.resumes.at(-1)?.sessionId).toBe(persistedThreadSession?.runtimeSessionId)
+    expect(runtime.resumes.some((session) => session.sessionId === persistedThreadSession?.runtimeSessionId)).toBe(true)
     expect(runtime.requests.at(-1)?.description).toContain('Thread-only root context')
     expect(runtime.requests.at(-1)?.description).toContain('Alpha public answer')
     expect(runtime.requests.at(-1)?.description).not.toContain('Alpha resumed answer')

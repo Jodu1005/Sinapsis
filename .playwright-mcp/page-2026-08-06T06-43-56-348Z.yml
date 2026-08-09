@@ -1,0 +1,157 @@
+- generic [ref=e3]:
+  - navigation "工作空间" [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: 频道
+      - button "添加频道" [ref=e7] [cursor=pointer]
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - button "# summit" [ref=e11] [cursor=pointer]:
+          - generic [ref=e15]: summit
+        - 'button "归档 # summit" [ref=e16] [cursor=pointer]'
+      - generic [ref=e20]:
+        - button "# channel1" [ref=e21] [cursor=pointer]:
+          - generic [ref=e25]: channel1
+        - 'button "归档 # channel1" [ref=e26] [cursor=pointer]'
+      - generic [ref=e30]:
+        - button "# channel2" [ref=e31] [cursor=pointer]:
+          - generic [ref=e35]: channel2
+        - 'button "归档 # channel2" [ref=e36] [cursor=pointer]'
+      - generic [ref=e40]:
+        - button "# channel4" [ref=e41] [cursor=pointer]:
+          - generic [ref=e45]: channel4
+        - 'button "归档 # channel4" [ref=e46] [cursor=pointer]'
+    - region "已归档频道" [ref=e50]:
+      - button "已归档频道（3）" [ref=e51] [cursor=pointer]:
+        - generic [ref=e54]: 已归档频道
+        - generic [ref=e55]: "3"
+    - button "任务看板" [ref=e56] [cursor=pointer]:
+      - generic [ref=e61]: "0"
+    - button "Dream（0 个待确认）" [ref=e62] [cursor=pointer]:
+      - generic [ref=e75]: Dream
+      - generic [ref=e76]: "0"
+    - generic [ref=e77]:
+      - generic [ref=e78]: 工作空间
+      - button "添加工作空间" [ref=e80] [cursor=pointer]
+    - group "channel4 的工作空间" [ref=e82]:
+      - paragraph [ref=e83]: 未绑定工作空间
+    - generic [ref=e84]: 任务
+    - paragraph [ref=e85]: 请先为频道绑定工作空间
+    - region "Agent 状态" [ref=e86]:
+      - generic [ref=e87]:
+        - generic [ref=e88]: 运行中的 Agent
+        - button "添加 Agent" [ref=e89] [cursor=pointer]
+      - button "查看 clawd 配置" [ref=e91] [cursor=pointer]:
+        - generic [ref=e96]:
+          - strong [ref=e97]: clawd
+          - generic [ref=e98]: "@clawd · claude-code"
+        - generic [ref=e99]: 空闲
+      - button "查看 newton 配置" [ref=e100] [cursor=pointer]:
+        - generic [ref=e105]:
+          - strong [ref=e106]: newton
+          - generic [ref=e107]: "@newton · pi"
+        - generic [ref=e108]: 空闲
+      - button "查看 前端 Agent 配置" [ref=e109] [cursor=pointer]:
+        - generic [ref=e114]:
+          - strong [ref=e115]: 前端 Agent
+          - generic [ref=e116]: "@前端 Agent · opencode"
+        - generic [ref=e117]: 空闲
+  - main [ref=e118]:
+    - generic [ref=e119]:
+      - generic [ref=e120]:
+        - heading "# channel4" [level=1] [ref=e121]
+        - paragraph [ref=e122]: 全局频道
+      - generic [ref=e123]:
+        - generic [ref=e124]: 已连接
+        - button "打开上下文" [ref=e125] [cursor=pointer]
+    - region "频道消息" [ref=e129]:
+      - article [ref=e130]:
+        - generic [ref=e131]: "Y"
+        - generic [ref=e132]:
+          - generic [ref=e133]:
+            - strong [ref=e134]: 你
+            - time [ref=e135]: 11:43
+          - paragraph [ref=e136]: hello@all
+          - button "回复 你 的消息" [ref=e137] [cursor=pointer]
+      - article [ref=e140]:
+        - generic [ref=e141]: "Y"
+        - generic [ref=e142]:
+          - generic [ref=e143]:
+            - strong [ref=e144]: 你
+            - time [ref=e145]: 12:36
+          - paragraph [ref=e146]: hello@newton
+          - button "回复 你 的消息" [ref=e147] [cursor=pointer]
+      - article [ref=e150]:
+        - generic [ref=e155]:
+          - generic [ref=e156]:
+            - strong [ref=e157]: newton
+            - time [ref=e158]: 12:36
+          - paragraph [ref=e159]: The human message is "hello@newton" - they're directly mentioning me (newton). My role is not set, but I only handle messages directly mentioning me. The message says "hello@newton" which is a direct mention. I should reply concisely and clearly to the human message. Simple greeting response.Hello! I'm newton. I see you've pinged me directly. What can I help you with today?
+          - button "回复 newton 的消息" [ref=e160] [cursor=pointer]
+      - article [ref=e163]:
+        - generic [ref=e164]: "Y"
+        - generic [ref=e165]:
+          - generic [ref=e166]:
+            - strong [ref=e167]: 你
+            - time [ref=e168]: 12:40
+          - paragraph [ref=e169]: 无艾特回复测试：请只回复收到。
+          - button "回复 你 的消息" [ref=e170] [cursor=pointer]
+      - article [ref=e173]:
+        - generic [ref=e178]:
+          - generic [ref=e179]:
+            - strong [ref=e180]: 前端 Agent
+            - time [ref=e181]: 12:40
+          - paragraph [ref=e182]: 收到。
+          - button "回复 前端 Agent 的消息" [ref=e183] [cursor=pointer]
+      - article [ref=e186]:
+        - generic [ref=e187]: "Y"
+        - generic [ref=e188]:
+          - generic [ref=e189]:
+            - strong [ref=e190]: 你
+            - time [ref=e191]: 12:41
+          - paragraph [ref=e192]: hello
+          - button "回复 你 的消息" [ref=e193] [cursor=pointer]
+      - article [ref=e196]:
+        - generic [ref=e201]:
+          - generic [ref=e202]:
+            - strong [ref=e203]: clawd
+            - time [ref=e204]: 12:41
+          - paragraph [ref=e205]: Hello! I'm clawd. What can I help you with?
+          - button "回复 clawd 的消息" [ref=e206] [cursor=pointer]
+    - generic [ref=e209]:
+      - generic [ref=e210]: 发送消息
+      - textbox "发送消息" [ref=e211]:
+        - /placeholder: "发送消息到 # channel4"
+      - button "发送消息" [disabled] [ref=e212]
+  - complementary "任务与上下文" [ref=e215]:
+    - strong [ref=e217]: 上下文
+    - generic [ref=e218]:
+      - generic [ref=e219]:
+        - heading "频道 Agent" [level=2] [ref=e220]
+        - button "添加 Agent" [ref=e221] [cursor=pointer]
+      - list [ref=e225]:
+        - listitem [ref=e226]:
+          - generic [ref=e227]:
+            - strong [ref=e228]: 前端 Agent
+            - generic [ref=e229]: "@frontend · 空闲 · Runtime: OpenCode"
+          - button "移除 前端 Agent" [ref=e230] [cursor=pointer]
+        - listitem [ref=e234]:
+          - generic [ref=e235]:
+            - strong [ref=e236]: newton
+            - generic [ref=e237]: "@newton · 空闲 · Runtime: Pi"
+          - button "移除 newton" [ref=e238] [cursor=pointer]
+        - listitem [ref=e242]:
+          - generic [ref=e243]:
+            - strong [ref=e244]: clawd
+            - generic [ref=e245]: "@build · 空闲 · Runtime: Claude Code"
+          - button "移除 clawd" [ref=e246] [cursor=pointer]
+    - generic [ref=e250]:
+      - generic [ref=e251]:
+        - heading "频道工作空间 0/5" [level=2] [ref=e252]:
+          - text: 频道工作空间
+          - generic [ref=e253]: 0/5
+        - button "添加工作空间" [ref=e254] [cursor=pointer]
+      - list
+      - paragraph [ref=e258]: 尚未绑定工作空间。
+    - generic [ref=e259]:
+      - heading "频道操作" [level=2] [ref=e260]
+      - button "收起上下文" [ref=e261] [cursor=pointer]

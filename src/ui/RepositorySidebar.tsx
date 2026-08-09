@@ -25,12 +25,14 @@ interface RepositorySidebarProps {
   pendingMemoryCandidateCount: number
   dreamSelected: boolean
   onSelectDream(): void
+  tasksSelected: boolean
+  onSelectTasks(): void
   mobileOpen: boolean
   mobileHidden: boolean
   onClose(): void
 }
 
-export function RepositorySidebar({ workspaces, agents, channels, tasks, selectedChannelId, selectedWorkspaceId, selectedTaskId, onSelectChannel, onSelectWorkspace, onSelectTask, onCreateTask, onCreateChannel, onArchiveChannel, onRestoreChannel, channelReadOnly, onCreateWorkspace, onSelectAgent, onCreateAgent, pendingMemoryCandidateCount, dreamSelected, onSelectDream, mobileOpen, mobileHidden, onClose }: RepositorySidebarProps) {
+export function RepositorySidebar({ workspaces, agents, channels, tasks, selectedChannelId, selectedWorkspaceId, selectedTaskId, onSelectChannel, onSelectWorkspace, onSelectTask, onCreateTask, onCreateChannel, onArchiveChannel, onRestoreChannel, channelReadOnly, onCreateWorkspace, onSelectAgent, onCreateAgent, pendingMemoryCandidateCount, dreamSelected, onSelectDream, tasksSelected, onSelectTasks, mobileOpen, mobileHidden, onClose }: RepositorySidebarProps) {
   const [archivedOpen, setArchivedOpen] = useState(false)
   const selectedChannel = channels.find((channel) => channel.id === selectedChannelId) ?? channels[0]
   const boundWorkspaces = selectedChannel
@@ -50,6 +52,7 @@ export function RepositorySidebar({ workspaces, agents, channels, tasks, selecte
     <div className="sidebar-channel-heading"><span>频道</span><button type="button" className="icon-button channel-create" aria-label="添加频道" data-tooltip="添加频道" onClick={onCreateChannel}><Plus size={15} /></button></div>
     <div className="channel-list">{activeChannels.map((channel) => <ChannelEntry key={channel.id} channel={channel} selected={selectedChannelId === channel.id} onSelect={onSelectChannel} onToggleArchive={onArchiveChannel} />)}</div>
     {archivedChannels.length > 0 && <section className="archived-channel-folder" aria-label="已归档频道"><button type="button" className="archived-folder-toggle" aria-expanded={archivedOpen} aria-label={`已归档频道（${archivedChannels.length}）`} onClick={() => setArchivedOpen((open) => !open)}>{archivedOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}<span>已归档频道</span><small>{archivedChannels.length}</small></button>{archivedOpen && <div className="channel-list archived-channel-list">{archivedChannels.map((channel) => <ChannelEntry key={channel.id} channel={channel} selected={selectedChannelId === channel.id} onSelect={onSelectChannel} onToggleArchive={onRestoreChannel} />)}</div>}</section>}
+    <button type="button" className="dream-entry" aria-current={tasksSelected ? 'page' : undefined} aria-label="任务看板" onClick={onSelectTasks}><ListTodo size={16} /><span>任务看板</span><small>{tasks.length}</small></button>
     <button type="button" className="dream-entry" aria-current={dreamSelected ? 'page' : undefined} aria-label={`Dream（${pendingMemoryCandidateCount} 个待确认）`} onClick={onSelectDream}><BrainCircuit size={16} /><span>Dream</span><small>{pendingMemoryCandidateCount}</small></button>
     <div className="sidebar-topline">
       <span className="workspace-label">工作空间</span>

@@ -132,8 +132,8 @@ export function DreamCenter({
       } else {
         setActiveRunIds(runs.map((run) => run.id))
       }
-    } catch {
-      reportDreamFailure('Dream 启动失败，请稍后重试。')
+    } catch (error) {
+      reportDreamFailure(dreamStartFailureLabel(error))
     } finally {
       setStarting(false)
     }
@@ -161,6 +161,13 @@ function dreamFailureLabel(category: DreamRunView['errorCategory']): string {
   if (category === 'cancelled') return 'Dream 运行已取消。'
   if (category === 'service_restarted') return 'Dream 运行失败：服务已重启，请重新运行。'
   return 'Dream 运行失败：运行环境执行失败。'
+}
+
+function dreamStartFailureLabel(error: unknown): string {
+  if (error instanceof Error && error.message === 'A local human capability is required.') {
+    return 'Dream 需要本地人工授权。请通过 Sinapsis 人工界面重新打开。'
+  }
+  return 'Dream 启动失败，请稍后重试。'
 }
 function displayContent(candidate: MemoryCandidateView): string { return candidate.status === 'pending' ? candidate.proposedContent : candidate.reviewedContent ?? candidate.proposedContent }
 function displayScope(candidate: MemoryCandidateView): MemoryCandidateView['proposedScope'] { return candidate.status === 'pending' ? candidate.proposedScope : candidate.reviewedScope ?? candidate.proposedScope }

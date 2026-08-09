@@ -26,6 +26,18 @@ describe('local service API', () => {
     await expect(response.json()).resolves.toEqual({ status: 'ok' })
   })
 
+  it('opens the native directory picker only when the task form asks for it', async () => {
+    const directoryPicker = { pickDirectory: vi.fn().mockResolvedValue('/Users/jodu/Projects/sinapsis') }
+    const server = await startHttpTestServer(createApp({ directoryPicker }))
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/directories/pick`, { method: 'POST' })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ directory: '/Users/jodu/Projects/sinapsis' })
+    expect(directoryPicker.pickDirectory).toHaveBeenCalledOnce()
+  })
+
   it('requires a server-issued human capability for Memory review routes', async () => {
     const humanCapability = 'test-human-capability-that-agents-do-not-receive'
     const app = createApp({ humanCapability })
@@ -605,6 +617,30 @@ describe('local service API', () => {
       repositoryId: repository.id,
       channelId: channel.id,
     })
+  })
+
+  it('restarts analysis for a backlog task without moving it', async () => {
+    const backlogAnalysisStarter = { start: vi.fn() }
+    const app = createApp({ backlogAnalysisStarter })
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    const workspace = repositories.createWorkspace({ name: 'Sinapsis' })
+    const repository = repositories.createRepository({ workspaceId: workspace.id, name: 'app', path: '/projects/app' })
+    const channel = repositories.createChannel({ name: 'build' })
+    repositories.bindChannelWorkspace(channel.id, workspace.id, new Date())
+    const task = repositories.createTask({
+      workspaceId: workspace.id, repositoryId: repository.id, channelId: channel.id, title: 'Plan', description: 'Plan',
+      acceptanceCriteria: 'Reviewed', labels: [], status: 'backlog',
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const response = await fetch(`${server.baseUrl}/api/tasks/${task.id}/analyze`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}),
+    })
+
+    expect(response.status).toBe(202)
+    expect(backlogAnalysisStarter.start).toHaveBeenCalledWith(expect.objectContaining({ id: task.id, status: 'backlog' }))
+    expect(repositories.getTask(task.id)?.status).toBe('backlog')
   })
 
   it('requires a Workspace for Channel task creation and rejects unbound legacy task channels', async () => {

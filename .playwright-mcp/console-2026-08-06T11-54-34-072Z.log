@@ -1,0 +1,53 @@
+[   10484ms] [INFO] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: https://static.nowcoder.com/lib/element-ui-fonts/sparta/element-icons.woff @ https://www.nowcoder.com/:0
+[   10656ms] [LOG] production @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/page/home/unLogin/main.entry.js:0
+[   10819ms] [LOG] [pathname] / @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   10819ms] [LOG] this.isLogin false @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   11152ms] [LOG] 需登录 @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   11160ms] [LOG] https://mnowpick.nowcoder.com/m/download?fromPut=mobileB&enterType=11 share @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   11167ms] [ERROR] {msg: 用户未登录, code: 999} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   13839ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   16917ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   20017ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   22751ms] [ERROR] {msg: 验证码不正确, code: 1125} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   22894ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   26074ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   28894ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   32101ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   34914ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   37907ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   40889ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   43535ms] [ERROR] Failed to load resource: net::ERR_TIMED_OUT @ https://arms-retcode.aliyuncs.com/r.png?t=pv&times=1&page=www.nowcoder.com&tag=&release=1.0.488&environment=prod&begin=1786017287599&uid=undefined&dt=%E7%89%9B%E5%AE%A2%E7%BD%91%20-%20%E6%89%BE%E5%B7%A5%E4%BD%9C%E7%A5%9E%E5%99%A8%7C%E7%AC%94%E8%AF%95%E9%A2%98%E5%BA%93%7C%E9%9D%A2%E8%AF%95%E7%BB%8F%E9%AA%8C%7C%E5%AE%9E%E4%B9%A0%E6%8B%9B%E8%81%98%E5%86%85%E6%8E%A8%EF%BC%8C%E6%B1%82%E8%81%8C%E5%B0%B1%E4%B8%9A%E4%B8%80%E7%AB%99%E8%A7%A3%E5%86%B3_%E7%89%9B%E5%AE%A2%E7%BD%91&dr=https%3A%2F%2Fwww.google.com%2F&dpr=1.00&de=utf-8&ul=zh&sr=2560x1440&vp=1200x1284&ct=3g&sid=kvm8gs48hn4gv1k5wupLyF37dwOO&pid=j78mgac4op%404aa6f06f11d5907&_v=1.8.30&pv_id=9tm5UsbnhCXgwvkFssn6pgX5Cpm3&sampling=1&dl=https%3A%2F%2Fwww.nowcoder.com%2F&z=mshgksow:0
+[   43845ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://arms-retcode.aliyuncs.com/r.png?t=resourceError&times=1&page=www.nowcoder.com&tag=&release=1.0.488&environment=prod&begin=1786017299233&src=https%3A%2F%2Fwww.nowcoder.com%2F&node_name=audio&xpath=div.yidun_bgimg%20%3E%20div.yidun_voice%20%3E%20div.yidun_voice__inner%20%3E%20div.yidun_audio%20%3E%20audio.yidun_audio__source&sr=2560x1440&vp=1200x1284&ct=3g&uid=undefined&sid=kvm8gs48hn4gv1k5wupLyF37dwOO&pid=j78mgac4op%404aa6f06f11d5907&_v=1.8.30&pv_id=9tm5UsbnhCXgwvkFssn6pgX5Cpm3&sampling=1&z=mshgksoy:0
+[   43884ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   47051ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   50022ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   52989ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   55168ms] [ERROR] Failed to load resource: net::ERR_TIMED_OUT @ https://arms-retcode.aliyuncs.com/r.png?t=behavior&times=1&page=www.nowcoder.com&tag=&release=1.0.488&environment=prod&begin=1786017299234&sr=2560x1440&vp=1200x1284&ct=3g&uid=undefined&sid=kvm8gs48hn4gv1k5wupLyF37dwOO&pid=j78mgac4op%404aa6f06f11d5907&_v=1.8.30&pv_id=9tm5UsbnhCXgwvkFssn6pgX5Cpm3&sampling=1&z=mshgksoz&post_res=:0
+[   55823ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   59020ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   62205ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   64873ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   67859ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   71013ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   73949ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   76889ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   79897ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   82993ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   85966ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   88926ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   91918ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   95024ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[   97911ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[  101016ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[  104379ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[  106948ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[  109970ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[  113000ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[  115973ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[  119265ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[  121943ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[  124925ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[  127996ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[  130619ms] [ERROR] Failed to load resource: net::ERR_TIMED_OUT @ https://arms-retcode.aliyuncs.com/r.png?t=behavior&times=1&page=www.nowcoder.com&tag=&release=1.0.488&environment=prod&begin=1786017374682&sr=2560x1440&vp=1200x1284&ct=3g&uid=undefined&sid=kvm8gs48hn4gv1k5wupLyF37dwOO&pid=j78mgac4op%404aa6f06f11d5907&_v=1.8.30&pv_id=9tm5UsbnhCXgwvkFssn6pgX5Cpm3&sampling=1&z=mshgksp0&post_res=:0
+[  130936ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0
+[  133950ms] [ERROR] {success: false, code: -1, msg: 二维码未被扫描, data: null} @ https://static.nowcoder.com/fe/file/site/www-web/prod/1.0.488/lib/common.js:0

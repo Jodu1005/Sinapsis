@@ -91,6 +91,8 @@ describe('RepositorySidebar', () => {
       pendingMemoryCandidateCount: 0,
       dreamSelected: false,
       onSelectDream: vi.fn(),
+      tasksSelected: false,
+      onSelectTasks: vi.fn(),
       mobileOpen: false,
       mobileHidden: false,
       onClose: vi.fn(),
@@ -138,6 +140,8 @@ describe('RepositorySidebar', () => {
       pendingMemoryCandidateCount={3}
       dreamSelected={false}
       onSelectDream={onSelectDream}
+      tasksSelected={false}
+      onSelectTasks={vi.fn()}
       mobileOpen={false}
       mobileHidden={false}
       onClose={vi.fn()}

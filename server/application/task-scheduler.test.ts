@@ -45,6 +45,7 @@ describe('TaskScheduler', () => {
     const claim = scheduler.claimNext(agents.frontend.id, at(2))
 
     expect(claim?.task.id).toBe(older.id)
+    expect(repositories.getTask(older.id)?.directAgentId).toBe(agents.frontend.id)
     expect(repositories.getTask(newer.id)?.status).toBe('queued')
   })
 

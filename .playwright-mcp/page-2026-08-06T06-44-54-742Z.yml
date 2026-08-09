@@ -1,0 +1,1279 @@
+- generic [ref=e5]:
+  - navigation "工作空间" [ref=e6]:
+    - generic [ref=e7]:
+      - generic [ref=e8]: 频道
+      - button "添加频道" [ref=e9] [cursor=pointer]
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - button "# summit" [ref=e13] [cursor=pointer]:
+          - generic [ref=e17]: summit
+        - 'button "归档 # summit" [ref=e18] [cursor=pointer]'
+      - generic [ref=e22]:
+        - button "# channel1" [ref=e23] [cursor=pointer]:
+          - generic [ref=e27]: channel1
+        - 'button "归档 # channel1" [ref=e28] [cursor=pointer]'
+      - generic [ref=e32]:
+        - button "# channel2" [ref=e33] [cursor=pointer]:
+          - generic [ref=e37]: channel2
+        - 'button "归档 # channel2" [ref=e38] [cursor=pointer]'
+      - generic [ref=e42]:
+        - button "# channel4" [ref=e43] [cursor=pointer]:
+          - generic [ref=e47]: channel4
+        - 'button "归档 # channel4" [ref=e48] [cursor=pointer]'
+    - region "已归档频道" [ref=e52]:
+      - button "已归档频道（3）" [ref=e53] [cursor=pointer]:
+        - generic [ref=e56]: 已归档频道
+        - generic [ref=e57]: "3"
+    - button "任务看板" [ref=e58] [cursor=pointer]:
+      - generic [ref=e63]: "0"
+    - button "Dream（0 个待确认）" [ref=e64] [cursor=pointer]:
+      - generic [ref=e77]: Dream
+      - generic [ref=e78]: "0"
+    - generic [ref=e79]:
+      - generic [ref=e80]: 工作空间
+      - button "添加工作空间" [ref=e82] [cursor=pointer]
+    - group "channel4 的工作空间" [ref=e84]:
+      - paragraph [ref=e85]: 未绑定工作空间
+    - generic [ref=e86]: 任务
+    - paragraph [ref=e87]: 请先为频道绑定工作空间
+    - region "Agent 状态" [ref=e88]:
+      - generic [ref=e89]:
+        - generic [ref=e90]: 运行中的 Agent
+        - button "添加 Agent" [ref=e91] [cursor=pointer]
+      - button "查看 clawd 配置" [ref=e93] [cursor=pointer]:
+        - generic [ref=e98]:
+          - strong [ref=e99]: clawd
+          - generic [ref=e100]: "@clawd · claude-code"
+        - generic [ref=e101]: 空闲
+      - button "查看 newton 配置" [ref=e102] [cursor=pointer]:
+        - generic [ref=e107]:
+          - strong [ref=e108]: newton
+          - generic [ref=e109]: "@newton · pi"
+        - generic [ref=e110]: 空闲
+      - button "查看 前端 Agent 配置" [ref=e111] [cursor=pointer]:
+        - generic [ref=e116]:
+          - strong [ref=e117]: 前端 Agent
+          - generic [ref=e118]: "@前端 Agent · opencode"
+        - generic [ref=e119]: 空闲
+  - main [ref=e120]:
+    - generic [ref=e121]:
+      - generic [ref=e122]:
+        - heading "任务看板" [level=1] [ref=e267]
+        - paragraph [ref=e124]: 按频道管理任务
+      - generic [ref=e268]:
+        - text: 频道
+        - combobox "看板频道" [ref=e269]:
+          - option "summit"
+          - option "channel1" [selected]
+          - option "channel2"
+          - option "channel4"
+          - option "general"
+          - option "channel2"
+          - option "channel3"
+      - button "新建任务" [ref=e270] [cursor=pointer]
+    - region "任务看板" [ref=e271]:
+      - generic [ref=e272]:
+        - region "积压任务" [ref=e273]:
+          - generic [ref=e274]:
+            - generic [ref=e275]: 积压任务
+            - generic [ref=e279]: "1"
+          - button "调研pi agent的实现和扩展 需要人工处理" [pressed] [ref=e317] [cursor=pointer]:
+            - generic [ref=e318]: 调研pi agent的实现和扩展
+            - generic [ref=e319]: 需要人工处理
+        - region "待办任务" [ref=e282]:
+          - generic [ref=e283]:
+            - generic [ref=e284]: 待办任务
+            - generic [ref=e288]: "0"
+          - paragraph [ref=e290]: 暂无任务
+        - region "处理中任务" [ref=e291]:
+          - generic [ref=e292]:
+            - generic [ref=e293]: 处理中任务
+            - generic [ref=e296]: "0"
+          - paragraph [ref=e298]: 暂无任务
+        - region "审核任务" [ref=e299]:
+          - generic [ref=e300]:
+            - generic [ref=e301]: 审核任务
+            - generic [ref=e305]: "0"
+          - paragraph [ref=e307]: 暂无任务
+        - region "已完成任务" [ref=e308]:
+          - generic [ref=e309]:
+            - generic [ref=e310]: 已完成任务
+            - generic [ref=e314]: "0"
+          - paragraph [ref=e316]: 暂无任务
+  - complementary "任务与上下文" [ref=e217]:
+    - strong [ref=e219]: 上下文
+    - generic [ref=e220]:
+      - generic [ref=e221]:
+        - heading "频道 Agent" [level=2] [ref=e222]
+        - button "添加 Agent" [ref=e223] [cursor=pointer]
+      - list [ref=e227]:
+        - listitem [ref=e228]:
+          - generic [ref=e229]:
+            - strong [ref=e230]: 前端 Agent
+            - generic [ref=e231]: "@frontend · 空闲 · Runtime: OpenCode"
+          - button "移除 前端 Agent" [ref=e232] [cursor=pointer]
+        - listitem [ref=e236]:
+          - generic [ref=e237]:
+            - strong [ref=e238]: newton
+            - generic [ref=e239]: "@newton · 空闲 · Runtime: Pi"
+          - button "移除 newton" [ref=e240] [cursor=pointer]
+        - listitem [ref=e244]:
+          - generic [ref=e245]:
+            - strong [ref=e246]: clawd
+            - generic [ref=e247]: "@build · 空闲 · Runtime: Claude Code"
+          - button "移除 clawd" [ref=e248] [cursor=pointer]
+    - generic [ref=e252]:
+      - generic [ref=e253]:
+        - heading "频道工作空间 0/5" [level=2] [ref=e254]:
+          - text: 频道工作空间
+          - generic [ref=e255]: 0/5
+        - button "添加工作空间" [ref=e256] [cursor=pointer]
+      - list
+      - paragraph [ref=e260]: 尚未绑定工作空间。
+    - generic [ref=e261]:
+      - heading "频道操作" [level=2] [ref=e262]
+      - button "收起上下文" [ref=e263] [cursor=pointer]
+  - dialog [ref=e320]:
+    - banner [ref=e321]:
+      - generic [ref=e322]:
+        - paragraph [ref=e323]: 任务处理详情
+        - heading "调研pi agent的实现和扩展" [level=2] [ref=e324]
+      - button "关闭任务详情" [active] [ref=e325] [cursor=pointer]
+    - region "任务详情" [ref=e330]:
+      - generic [ref=e331]:
+        - heading "概览" [level=3] [ref=e332]
+        - strong [ref=e333]: 调研pi agent的实现和扩展
+        - paragraph [ref=e334]: 调研pi agent的实现和扩展
+        - generic [ref=e335]:
+          - generic [ref=e336]:
+            - term [ref=e337]: 状态
+            - definition [ref=e338]: 需要人工处理
+          - generic [ref=e339]:
+            - term [ref=e340]: 验收标准
+            - definition [ref=e341]: 输出一份报告
+          - generic [ref=e342]:
+            - term [ref=e343]: 标签
+            - definition [ref=e344]: 未设置
+      - generic [ref=e345]:
+        - heading "执行状态" [level=3] [ref=e346]
+        - generic [ref=e347]:
+          - generic [ref=e348]:
+            - term [ref=e349]: 执行会话
+            - definition [ref=e350]: failed · 0976f72e-71df-42bb-ab51-5222ceb38c57
+          - generic [ref=e351]:
+            - term [ref=e352]: 任务租约
+            - definition [ref=e353]: 无
+          - generic [ref=e354]:
+            - term [ref=e355]: 人工决定
+            - definition [ref=e356]: 无
+      - generic [ref=e357]:
+        - heading "输入队列" [level=3] [ref=e358]
+        - paragraph [ref=e359]: 没有待发送输入
+      - generic [ref=e360]:
+        - heading "恢复执行" [level=3] [ref=e361]
+        - paragraph [ref=e362]: 任务未能正常结束。重新执行会保留任务工作树里的现有改动。
+        - button "重新执行" [ref=e363] [cursor=pointer]
+      - generic [ref=e364]:
+        - heading "处理记录" [level=3] [ref=e365]
+        - paragraph [ref=e366]: 运行输出、工具调用和产物保留在任务内，不刷进频道。
+        - group [ref=e367]:
+          - generic "运行日志" [ref=e368] [cursor=pointer]
+          - generic [ref=e369]:
+            - heading "全部 Agent 输出" [level=4] [ref=e370]
+            - generic "Agent 实时输出" [ref=e371]: "The \"pi agent\" appears to be a Runtime adapter in this project. Let me explore the runtime adapter structure and the pi adapter specifically.The task is to research the Pi agent's implementation and extension in this codebase, and output a report. Let me dig into the runtime adapter, its ports, profiles, and tests.The `pi` binary is the `@earendil-works/pi-coding-agent` npm package. Let me inspect it and research the upstream project.Local reads outside the worktree are blocked. I'll research the pi-coding-agent upstream project via the web instead.Web access isn't available in this session, so I'll base the report on the codebase itself — which contains the full integration. Let me read the remaining wiring: the plan docs, process-runner port, and how the coordinator consumes the runtime.Now let me examine how the coordinator drives Pi sessions (persistence, recovery, conversation turns) and the schema.I now have a complete picture. Let me write the report.The report is written. Let me verify the claims by running the Pi adapter tests, then commit.Tests require approval to run — I'll skip execution; the report's claims are all directly verified against the source. Let me commit the report.Git operations require approval in this session, so the report stays as an uncommitted file in the worktree — the deliverable itself is complete.调研完成，报告已输出到 **`docs/pi-agent-report.md`**（在任务 worktree 内，测试与提交因权限被跳过）。 ## 核心发现 **Pi Agent 是什么**：Sinapsis 三种受管 Runtime 之一（`opencode` / `pi` / `claude-code`）。`pi` 是本机安装的 `@earendil-works/pi-coding-agent` CLI（`/opt/homebrew/bin/pi`）。 **实现方式**（`server/adapters/runtime/pi-runtime-adapter.ts`，260 行，零第三方依赖）： - **持久 RPC 进程模型** — 与其他两种 Runtime（短生命周期逐轮进程）不同，Pi 以 `pi --mode rpc` 启动常驻子进程，通过 LF 分隔 JSONL 通信。这是三种 Runtime 中唯一的长连接会话模型 - **RPC 协议**：`get_state`（获取 sessionId/sessionFile）→ `prompt`（空闲投递）/ `steer`（流式中追加）；恢复时 `switch_session` + 缓冲输入；`agent_settled` 是完成边界 - **事件翻译**：`message_update`→text、`tool_execution_start/end`→工具事件、`queue_update`→队列长度；未知事件静默留作 artifact（协议演进的缓冲） - **执行策略**：`read-only-no-tools` 会把参数整体替换为 `--no-tools --no-extensions --no-skills ... --no-approve`，用于频道只读对话 - **两条使用路径**：任务流（worktree + `task_sessions`）和对话流（`conversation_sessions` 持久化 + `switch_session` 恢复 + `session_lost` 冷启动兜底） **扩展点**（报告第 3 节，含优先级建议）： 1. **协议层**：`recordJson` 是唯一翻译点，新命令/事件在此扩展；端口已预留 `needs_input` 事件和 `timeout` 错误码但尚未使用 2. **执行策略**：在 `launch()` 的 args 分支加新枚举 → 新参数集 3. **新 Runtime 模板**：claude-code 的接入计划（`docs/superpowers/plans/2026-07-25-claude-code-runtime.md`）是完整工作示例 4. **最值得做的一步**：`task_sessions` 目前只存 `runtime_session_id` 不存 `sessionFile`，导致 Pi 任务在服务重启后无法 `switch_session` 恢复——补上即可与对话流对齐调研完成，报告已输出到 **`docs/pi-agent-report.md`**（在任务 worktree 内，测试与提交因权限被跳过）。 ## 核心发现 **Pi Agent 是什么**：Sinapsis 三种受管 Runtime 之一（`opencode` / `pi` / `claude-code`）。`pi` 是本机安装的 `@earendil-works/pi-coding-agent` CLI（`/opt/homebrew/bin/pi`）。 **实现方式**（`server/adapters/runtime/pi-runtime-adapter.ts`，260 行，零第三方依赖）： - **持久 RPC 进程模型** — 与其他两种 Runtime（短生命周期逐轮进程）不同，Pi 以 `pi --mode rpc` 启动常驻子进程，通过 LF 分隔 JSONL 通信。这是三种 Runtime 中唯一的长连接会话模型 - **RPC 协议**：`get_state`（获取 sessionId/sessionFile）→ `prompt`（空闲投递）/ `steer`（流式中追加）；恢复时 `switch_session` + 缓冲输入；`agent_settled` 是完成边界 - **事件翻译**：`message_update`→text、`tool_execution_start/end`→工具事件、`queue_update`→队列长度；未知事件静默留作 artifact（协议演进的缓冲） - **执行策略**：`read-only-no-tools` 会把参数整体替换为 `--no-tools --no-extensions --no-skills ... --no-approve`，用于频道只读对话 - **两条使用路径**：任务流（worktree + `task_sessions`）和对话流（`conversation_sessions` 持久化 + `switch_session` 恢复 + `session_lost` 冷启动兜底） **扩展点**（报告第 3 节，含优先级建议）： 1. **协议层**：`recordJson` 是唯一翻译点，新命令/事件在此扩展；端口已预留 `needs_input` 事件和 `timeout` 错误码但尚未使用 2. **执行策略**：在 `launch()` 的 args 分支加新枚举 → 新参数集 3. **新 Runtime 模板**：claude-code 的接入计划（`docs/superpowers/plans/2026-07-25-claude-code-runtime.md`）是完整工作示例 4. **最值得做的一步**：`task_sessions` 目前只存 `runtime_session_id` 不存 `sessionFile`，导致 Pi 任务在服务重启后无法 `switch_session` 恢复——补上即可与对话流对齐"
+          - generic [ref=e372]:
+            - heading "全部处理事件" [level=4] [ref=e373]
+            - list "任务处理事件" [ref=e374]:
+              - listitem [ref=e375]:
+                - time [ref=e376]: 2026/8/6 14:21:47
+                - strong [ref=e377]: labels_inferred
+                - generic [ref=e378]: "{\"inferredLabels\":[\"general\"],\"labelsWereOverridden\":true,\"savedLabels\":[]}"
+              - listitem [ref=e379]:
+                - time [ref=e380]: 2026/8/6 14:21:51
+                - strong [ref=e381]: task.status_changed
+                - generic [ref=e382]: 人工将任务移入待办队列
+              - listitem [ref=e383]:
+                - time [ref=e384]: 2026/8/6 14:21:51
+                - strong [ref=e385]: task.claimed
+                - generic [ref=e386]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:22:21.689Z\"}"
+              - listitem [ref=e387]:
+                - time [ref=e388]: 2026/8/6 14:21:51
+                - strong [ref=e389]: task.worktree_allocated
+                - generic [ref=e390]: "{\"branchName\":\"sinapsis/task-4b41ce1c-0741-4ed3-9d62-d1c1e8f223bb\",\"worktreePath\":\"/Users/jodu/.sinapsis/worktrees/aa5b4edd-e401-4804-a6f7-5b9d8c7f9683/4b41ce1c-0741-4ed3-9d62-d1c1e8f223bb\"}"
+              - listitem [ref=e391]:
+                - time [ref=e392]: 2026/8/6 14:21:51
+                - strong [ref=e393]: task.session_created
+                - generic [ref=e394]: "{\"sessionId\":\"468022e6-ced0-4c9f-b324-feaeab0911f1\",\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\"}"
+              - listitem [ref=e395]:
+                - time [ref=e396]: 2026/8/6 14:21:51
+                - strong [ref=e397]: task.status_changed
+                - generic [ref=e398]: Runtime 已在任务工作树中启动
+              - listitem [ref=e399]:
+                - time [ref=e400]: 2026/8/6 14:21:51
+                - strong [ref=e401]: task.session_updated
+                - generic [ref=e402]: running
+              - listitem [ref=e403]:
+                - time [ref=e404]: 2026/8/6 14:21:55
+                - strong [ref=e405]: task.session_updated
+                - generic [ref=e406]: running
+              - listitem [ref=e407]:
+                - time [ref=e408]: 2026/8/6 14:21:56
+                - strong [ref=e409]: task.lease_renewed
+                - generic [ref=e410]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:22:26.090Z\"}"
+              - listitem [ref=e411]:
+                - time [ref=e412]: 2026/8/6 14:21:58
+                - strong [ref=e413]: runtime.tool_start
+                - generic [ref=e414]: Bash
+              - listitem [ref=e415]:
+                - time [ref=e416]: 2026/8/6 14:21:59
+                - strong [ref=e417]: runtime.tool_end
+                - generic [ref=e418]: Bash
+              - listitem [ref=e419]:
+                - time [ref=e420]: 2026/8/6 14:21:59
+                - strong [ref=e421]: runtime.tool_start
+                - generic [ref=e422]: Bash
+              - listitem [ref=e423]:
+                - time [ref=e424]: 2026/8/6 14:21:59
+                - strong [ref=e425]: runtime.tool_end
+                - generic [ref=e426]: Bash
+              - listitem [ref=e427]:
+                - time [ref=e428]: 2026/8/6 14:22:01
+                - strong [ref=e429]: runtime.tool_start
+                - generic [ref=e430]: Read
+              - listitem [ref=e431]:
+                - time [ref=e432]: 2026/8/6 14:22:01
+                - strong [ref=e433]: runtime.tool_end
+                - generic [ref=e434]: Read
+              - listitem [ref=e435]:
+                - time [ref=e436]: 2026/8/6 14:22:02
+                - strong [ref=e437]: runtime.tool_start
+                - generic [ref=e438]: Bash
+              - listitem [ref=e439]:
+                - time [ref=e440]: 2026/8/6 14:22:02
+                - strong [ref=e441]: runtime.tool_end
+                - generic [ref=e442]: Bash
+              - listitem [ref=e443]:
+                - time [ref=e444]: 2026/8/6 14:22:04
+                - strong [ref=e445]: runtime.text
+                - generic [ref=e446]: The "pi agent" appears to be a Runtime adapter in this project. Let me explore the runtime adapter structure and the pi adapter specifically.
+              - listitem [ref=e447]:
+                - time [ref=e448]: 2026/8/6 14:22:05
+                - strong [ref=e449]: runtime.tool_start
+                - generic [ref=e450]: Bash
+              - listitem [ref=e451]:
+                - time [ref=e452]: 2026/8/6 14:22:05
+                - strong [ref=e453]: runtime.tool_end
+                - generic [ref=e454]: Bash
+              - listitem [ref=e455]:
+                - time [ref=e456]: 2026/8/6 14:22:05
+                - strong [ref=e457]: runtime.tool_start
+                - generic [ref=e458]: Read
+              - listitem [ref=e459]:
+                - time [ref=e460]: 2026/8/6 14:22:05
+                - strong [ref=e461]: runtime.tool_end
+                - generic [ref=e462]: Read
+              - listitem [ref=e463]:
+                - time [ref=e464]: 2026/8/6 14:22:06
+                - strong [ref=e465]: task.lease_renewed
+                - generic [ref=e466]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:22:36.091Z\"}"
+              - listitem [ref=e467]:
+                - time [ref=e468]: 2026/8/6 14:22:16
+                - strong [ref=e469]: task.lease_renewed
+                - generic [ref=e470]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:22:46.091Z\"}"
+              - listitem [ref=e471]:
+                - time [ref=e472]: 2026/8/6 14:22:16
+                - strong [ref=e473]: runtime.text
+                - generic [ref=e474]: The task is to research the Pi agent's implementation and extension in this codebase, and output a report. Let me dig into the runtime adapter, its ports, profiles, and tests.
+              - listitem [ref=e475]:
+                - time [ref=e476]: 2026/8/6 14:22:17
+                - strong [ref=e477]: runtime.tool_start
+                - generic [ref=e478]: Read
+              - listitem [ref=e479]:
+                - time [ref=e480]: 2026/8/6 14:22:17
+                - strong [ref=e481]: runtime.tool_end
+                - generic [ref=e482]: Read
+              - listitem [ref=e483]:
+                - time [ref=e484]: 2026/8/6 14:22:17
+                - strong [ref=e485]: runtime.tool_start
+                - generic [ref=e486]: Read
+              - listitem [ref=e487]:
+                - time [ref=e488]: 2026/8/6 14:22:17
+                - strong [ref=e489]: runtime.tool_end
+                - generic [ref=e490]: Read
+              - listitem [ref=e491]:
+                - time [ref=e492]: 2026/8/6 14:22:17
+                - strong [ref=e493]: runtime.tool_start
+                - generic [ref=e494]: Read
+              - listitem [ref=e495]:
+                - time [ref=e496]: 2026/8/6 14:22:18
+                - strong [ref=e497]: runtime.tool_end
+                - generic [ref=e498]: Read
+              - listitem [ref=e499]:
+                - time [ref=e500]: 2026/8/6 14:22:22
+                - strong [ref=e501]: runtime.tool_start
+                - generic [ref=e502]: TaskCreate
+              - listitem [ref=e503]:
+                - time [ref=e504]: 2026/8/6 14:22:22
+                - strong [ref=e505]: runtime.tool_end
+                - generic [ref=e506]: TaskCreate
+              - listitem [ref=e507]:
+                - time [ref=e508]: 2026/8/6 14:22:23
+                - strong [ref=e509]: runtime.tool_start
+                - generic [ref=e510]: TaskCreate
+              - listitem [ref=e511]:
+                - time [ref=e512]: 2026/8/6 14:22:23
+                - strong [ref=e513]: runtime.tool_end
+                - generic [ref=e514]: TaskCreate
+              - listitem [ref=e515]:
+                - time [ref=e516]: 2026/8/6 14:22:24
+                - strong [ref=e517]: runtime.tool_start
+                - generic [ref=e518]: TaskCreate
+              - listitem [ref=e519]:
+                - time [ref=e520]: 2026/8/6 14:22:24
+                - strong [ref=e521]: runtime.tool_end
+                - generic [ref=e522]: TaskCreate
+              - listitem [ref=e523]:
+                - time [ref=e524]: 2026/8/6 14:22:24
+                - strong [ref=e525]: runtime.tool_start
+                - generic [ref=e526]: TaskCreate
+              - listitem [ref=e527]:
+                - time [ref=e528]: 2026/8/6 14:22:24
+                - strong [ref=e529]: runtime.tool_end
+                - generic [ref=e530]: TaskCreate
+              - listitem [ref=e531]:
+                - time [ref=e532]: 2026/8/6 14:22:25
+                - strong [ref=e533]: runtime.tool_start
+                - generic [ref=e534]: TaskUpdate
+              - listitem [ref=e535]:
+                - time [ref=e536]: 2026/8/6 14:22:25
+                - strong [ref=e537]: runtime.tool_end
+                - generic [ref=e538]: TaskUpdate
+              - listitem [ref=e539]:
+                - time [ref=e540]: 2026/8/6 14:22:26
+                - strong [ref=e541]: task.lease_renewed
+                - generic [ref=e542]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:22:56.093Z\"}"
+              - listitem [ref=e543]:
+                - time [ref=e544]: 2026/8/6 14:22:26
+                - strong [ref=e545]: runtime.tool_start
+                - generic [ref=e546]: Bash
+              - listitem [ref=e547]:
+                - time [ref=e548]: 2026/8/6 14:22:26
+                - strong [ref=e549]: runtime.tool_end
+                - generic [ref=e550]: Bash
+              - listitem [ref=e551]:
+                - time [ref=e552]: 2026/8/6 14:22:26
+                - strong [ref=e553]: runtime.tool_start
+                - generic [ref=e554]: Read
+              - listitem [ref=e555]:
+                - time [ref=e556]: 2026/8/6 14:22:26
+                - strong [ref=e557]: runtime.tool_end
+                - generic [ref=e558]: Read
+              - listitem [ref=e559]:
+                - time [ref=e560]: 2026/8/6 14:22:27
+                - strong [ref=e561]: runtime.tool_start
+                - generic [ref=e562]: Read
+              - listitem [ref=e563]:
+                - time [ref=e564]: 2026/8/6 14:22:27
+                - strong [ref=e565]: runtime.tool_end
+                - generic [ref=e566]: Read
+              - listitem [ref=e567]:
+                - time [ref=e568]: 2026/8/6 14:22:29
+                - strong [ref=e569]: runtime.tool_start
+                - generic [ref=e570]: Bash
+              - listitem [ref=e571]:
+                - time [ref=e572]: 2026/8/6 14:22:29
+                - strong [ref=e573]: runtime.tool_end
+                - generic [ref=e574]: Bash
+              - listitem [ref=e575]:
+                - time [ref=e576]: 2026/8/6 14:22:29
+                - strong [ref=e577]: runtime.tool_start
+                - generic [ref=e578]: Bash
+              - listitem [ref=e579]:
+                - time [ref=e580]: 2026/8/6 14:22:29
+                - strong [ref=e581]: runtime.tool_end
+                - generic [ref=e582]: Bash
+              - listitem [ref=e583]:
+                - time [ref=e584]: 2026/8/6 14:22:31
+                - strong [ref=e585]: runtime.tool_start
+                - generic [ref=e586]: Bash
+              - listitem [ref=e587]:
+                - time [ref=e588]: 2026/8/6 14:22:31
+                - strong [ref=e589]: runtime.tool_end
+                - generic [ref=e590]: Bash
+              - listitem [ref=e591]:
+                - time [ref=e592]: 2026/8/6 14:22:32
+                - strong [ref=e593]: runtime.tool_start
+                - generic [ref=e594]: Bash
+              - listitem [ref=e595]:
+                - time [ref=e596]: 2026/8/6 14:22:32
+                - strong [ref=e597]: runtime.tool_end
+                - generic [ref=e598]: Bash
+              - listitem [ref=e599]:
+                - time [ref=e600]: 2026/8/6 14:22:33
+                - strong [ref=e601]: runtime.tool_start
+                - generic [ref=e602]: Bash
+              - listitem [ref=e603]:
+                - time [ref=e604]: 2026/8/6 14:22:33
+                - strong [ref=e605]: runtime.tool_end
+                - generic [ref=e606]: Bash
+              - listitem [ref=e607]:
+                - time [ref=e608]: 2026/8/6 14:22:35
+                - strong [ref=e609]: runtime.text
+                - generic [ref=e610]: "The `pi` binary is the `@earendil-works/pi-coding-agent` npm package. Let me inspect it and research the upstream project."
+              - listitem [ref=e611]:
+                - time [ref=e612]: 2026/8/6 14:22:35
+                - strong [ref=e613]: runtime.tool_start
+                - generic [ref=e614]: Bash
+              - listitem [ref=e615]:
+                - time [ref=e616]: 2026/8/6 14:22:35
+                - strong [ref=e617]: runtime.tool_end
+                - generic [ref=e618]: Bash
+              - listitem [ref=e619]:
+                - time [ref=e620]: 2026/8/6 14:22:36
+                - strong [ref=e621]: task.lease_renewed
+                - generic [ref=e622]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:23:06.093Z\"}"
+              - listitem [ref=e623]:
+                - time [ref=e624]: 2026/8/6 14:22:36
+                - strong [ref=e625]: runtime.tool_start
+                - generic [ref=e626]: Bash
+              - listitem [ref=e627]:
+                - time [ref=e628]: 2026/8/6 14:22:36
+                - strong [ref=e629]: runtime.tool_end
+                - generic [ref=e630]: Bash
+              - listitem [ref=e631]:
+                - time [ref=e632]: 2026/8/6 14:22:38
+                - strong [ref=e633]: runtime.tool_start
+                - generic [ref=e634]: TaskUpdate
+              - listitem [ref=e635]:
+                - time [ref=e636]: 2026/8/6 14:22:38
+                - strong [ref=e637]: runtime.tool_end
+                - generic [ref=e638]: TaskUpdate
+              - listitem [ref=e639]:
+                - time [ref=e640]: 2026/8/6 14:22:38
+                - strong [ref=e641]: runtime.text
+                - generic [ref=e642]: Local reads outside the worktree are blocked. I'll research the pi-coding-agent upstream project via the web instead.
+              - listitem [ref=e643]:
+                - time [ref=e644]: 2026/8/6 14:22:38
+                - strong [ref=e645]: runtime.tool_start
+                - generic [ref=e646]: TaskUpdate
+              - listitem [ref=e647]:
+                - time [ref=e648]: 2026/8/6 14:22:38
+                - strong [ref=e649]: runtime.tool_end
+                - generic [ref=e650]: TaskUpdate
+              - listitem [ref=e651]:
+                - time [ref=e652]: 2026/8/6 14:22:39
+                - strong [ref=e653]: runtime.tool_start
+                - generic [ref=e654]: WebSearch
+              - listitem [ref=e655]:
+                - time [ref=e656]: 2026/8/6 14:22:39
+                - strong [ref=e657]: runtime.tool_end
+                - generic [ref=e658]: WebSearch
+              - listitem [ref=e659]:
+                - time [ref=e660]: 2026/8/6 14:22:41
+                - strong [ref=e661]: runtime.tool_start
+                - generic [ref=e662]: WebFetch
+              - listitem [ref=e663]:
+                - time [ref=e664]: 2026/8/6 14:22:41
+                - strong [ref=e665]: runtime.tool_end
+                - generic [ref=e666]: WebFetch
+              - listitem [ref=e667]:
+                - time [ref=e668]: 2026/8/6 14:22:45
+                - strong [ref=e669]: runtime.text
+                - generic [ref=e670]: "Web access isn't available in this session, so I'll base the report on the codebase itself — which contains the full integration. Let me read the remaining wiring: the plan docs, process-runner port, and how the coordinator consumes the runtime."
+              - listitem [ref=e671]:
+                - time [ref=e672]: 2026/8/6 14:22:45
+                - strong [ref=e673]: runtime.tool_start
+                - generic [ref=e674]: Read
+              - listitem [ref=e675]:
+                - time [ref=e676]: 2026/8/6 14:22:45
+                - strong [ref=e677]: runtime.tool_end
+                - generic [ref=e678]: Read
+              - listitem [ref=e679]:
+                - time [ref=e680]: 2026/8/6 14:22:46
+                - strong [ref=e681]: task.lease_renewed
+                - generic [ref=e682]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:23:16.095Z\"}"
+              - listitem [ref=e683]:
+                - time [ref=e684]: 2026/8/6 14:22:46
+                - strong [ref=e685]: runtime.tool_start
+                - generic [ref=e686]: Bash
+              - listitem [ref=e687]:
+                - time [ref=e688]: 2026/8/6 14:22:46
+                - strong [ref=e689]: runtime.tool_end
+                - generic [ref=e690]: Bash
+              - listitem [ref=e691]:
+                - time [ref=e692]: 2026/8/6 14:22:48
+                - strong [ref=e693]: runtime.tool_start
+                - generic [ref=e694]: Bash
+              - listitem [ref=e695]:
+                - time [ref=e696]: 2026/8/6 14:22:48
+                - strong [ref=e697]: runtime.tool_end
+                - generic [ref=e698]: Bash
+              - listitem [ref=e699]:
+                - time [ref=e700]: 2026/8/6 14:22:48
+                - strong [ref=e701]: runtime.tool_start
+                - generic [ref=e702]: Bash
+              - listitem [ref=e703]:
+                - time [ref=e704]: 2026/8/6 14:22:48
+                - strong [ref=e705]: runtime.tool_end
+                - generic [ref=e706]: Bash
+              - listitem [ref=e707]:
+                - time [ref=e708]: 2026/8/6 14:22:51
+                - strong [ref=e709]: runtime.tool_start
+                - generic [ref=e710]: Bash
+              - listitem [ref=e711]:
+                - time [ref=e712]: 2026/8/6 14:22:51
+                - strong [ref=e713]: runtime.tool_end
+                - generic [ref=e714]: Bash
+              - listitem [ref=e715]:
+                - time [ref=e716]: 2026/8/6 14:22:52
+                - strong [ref=e717]: runtime.tool_start
+                - generic [ref=e718]: Bash
+              - listitem [ref=e719]:
+                - time [ref=e720]: 2026/8/6 14:22:52
+                - strong [ref=e721]: runtime.tool_end
+                - generic [ref=e722]: Bash
+              - listitem [ref=e723]:
+                - time [ref=e724]: 2026/8/6 14:22:53
+                - strong [ref=e725]: runtime.tool_start
+                - generic [ref=e726]: Read
+              - listitem [ref=e727]:
+                - time [ref=e728]: 2026/8/6 14:22:53
+                - strong [ref=e729]: runtime.tool_end
+                - generic [ref=e730]: Read
+              - listitem [ref=e731]:
+                - time [ref=e732]: 2026/8/6 14:22:54
+                - strong [ref=e733]: runtime.tool_start
+                - generic [ref=e734]: Read
+              - listitem [ref=e735]:
+                - time [ref=e736]: 2026/8/6 14:22:54
+                - strong [ref=e737]: runtime.tool_end
+                - generic [ref=e738]: Read
+              - listitem [ref=e739]:
+                - time [ref=e740]: 2026/8/6 14:22:56
+                - strong [ref=e741]: task.lease_renewed
+                - generic [ref=e742]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:23:26.095Z\"}"
+              - listitem [ref=e743]:
+                - time [ref=e744]: 2026/8/6 14:22:58
+                - strong [ref=e745]: runtime.tool_start
+                - generic [ref=e746]: Bash
+              - listitem [ref=e747]:
+                - time [ref=e748]: 2026/8/6 14:22:58
+                - strong [ref=e749]: runtime.tool_end
+                - generic [ref=e750]: Bash
+              - listitem [ref=e751]:
+                - time [ref=e752]: 2026/8/6 14:22:59
+                - strong [ref=e753]: runtime.tool_start
+                - generic [ref=e754]: Bash
+              - listitem [ref=e755]:
+                - time [ref=e756]: 2026/8/6 14:22:59
+                - strong [ref=e757]: runtime.tool_end
+                - generic [ref=e758]: Bash
+              - listitem [ref=e759]:
+                - time [ref=e760]: 2026/8/6 14:23:01
+                - strong [ref=e761]: runtime.tool_start
+                - generic [ref=e762]: Bash
+              - listitem [ref=e763]:
+                - time [ref=e764]: 2026/8/6 14:23:01
+                - strong [ref=e765]: runtime.tool_end
+                - generic [ref=e766]: Bash
+              - listitem [ref=e767]:
+                - time [ref=e768]: 2026/8/6 14:23:03
+                - strong [ref=e769]: runtime.tool_start
+                - generic [ref=e770]: Bash
+              - listitem [ref=e771]:
+                - time [ref=e772]: 2026/8/6 14:23:03
+                - strong [ref=e773]: runtime.tool_end
+                - generic [ref=e774]: Bash
+              - listitem [ref=e775]:
+                - time [ref=e776]: 2026/8/6 14:23:06
+                - strong [ref=e777]: runtime.text
+                - generic [ref=e778]: Now let me examine how the coordinator drives Pi sessions (persistence, recovery, conversation turns) and the schema.
+              - listitem [ref=e779]:
+                - time [ref=e780]: 2026/8/6 14:23:06
+                - strong [ref=e781]: task.lease_renewed
+                - generic [ref=e782]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:23:36.095Z\"}"
+              - listitem [ref=e783]:
+                - time [ref=e784]: 2026/8/6 14:23:06
+                - strong [ref=e785]: runtime.tool_start
+                - generic [ref=e786]: Bash
+              - listitem [ref=e787]:
+                - time [ref=e788]: 2026/8/6 14:23:06
+                - strong [ref=e789]: runtime.tool_end
+                - generic [ref=e790]: Bash
+              - listitem [ref=e791]:
+                - time [ref=e792]: 2026/8/6 14:23:07
+                - strong [ref=e793]: runtime.tool_start
+                - generic [ref=e794]: Bash
+              - listitem [ref=e795]:
+                - time [ref=e796]: 2026/8/6 14:23:07
+                - strong [ref=e797]: runtime.tool_end
+                - generic [ref=e798]: Bash
+              - listitem [ref=e799]:
+                - time [ref=e800]: 2026/8/6 14:23:07
+                - strong [ref=e801]: runtime.tool_start
+                - generic [ref=e802]: Bash
+              - listitem [ref=e803]:
+                - time [ref=e804]: 2026/8/6 14:23:07
+                - strong [ref=e805]: runtime.tool_end
+                - generic [ref=e806]: Bash
+              - listitem [ref=e807]:
+                - time [ref=e808]: 2026/8/6 14:23:09
+                - strong [ref=e809]: runtime.tool_start
+                - generic [ref=e810]: Read
+              - listitem [ref=e811]:
+                - time [ref=e812]: 2026/8/6 14:23:09
+                - strong [ref=e813]: runtime.tool_end
+                - generic [ref=e814]: Read
+              - listitem [ref=e815]:
+                - time [ref=e816]: 2026/8/6 14:23:10
+                - strong [ref=e817]: runtime.tool_start
+                - generic [ref=e818]: Read
+              - listitem [ref=e819]:
+                - time [ref=e820]: 2026/8/6 14:23:10
+                - strong [ref=e821]: runtime.tool_end
+                - generic [ref=e822]: Read
+              - listitem [ref=e823]:
+                - time [ref=e824]: 2026/8/6 14:23:14
+                - strong [ref=e825]: runtime.tool_start
+                - generic [ref=e826]: TaskUpdate
+              - listitem [ref=e827]:
+                - time [ref=e828]: 2026/8/6 14:23:14
+                - strong [ref=e829]: runtime.tool_end
+                - generic [ref=e830]: TaskUpdate
+              - listitem [ref=e831]:
+                - time [ref=e832]: 2026/8/6 14:23:15
+                - strong [ref=e833]: runtime.tool_start
+                - generic [ref=e834]: TaskUpdate
+              - listitem [ref=e835]:
+                - time [ref=e836]: 2026/8/6 14:23:15
+                - strong [ref=e837]: runtime.tool_end
+                - generic [ref=e838]: TaskUpdate
+              - listitem [ref=e839]:
+                - time [ref=e840]: 2026/8/6 14:23:15
+                - strong [ref=e841]: runtime.tool_start
+                - generic [ref=e842]: Bash
+              - listitem [ref=e843]:
+                - time [ref=e844]: 2026/8/6 14:23:15
+                - strong [ref=e845]: runtime.tool_end
+                - generic [ref=e846]: Bash
+              - listitem [ref=e847]:
+                - time [ref=e848]: 2026/8/6 14:23:16
+                - strong [ref=e849]: task.lease_renewed
+                - generic [ref=e850]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:23:46.096Z\"}"
+              - listitem [ref=e851]:
+                - time [ref=e852]: 2026/8/6 14:23:17
+                - strong [ref=e853]: runtime.tool_start
+                - generic [ref=e854]: Bash
+              - listitem [ref=e855]:
+                - time [ref=e856]: 2026/8/6 14:23:17
+                - strong [ref=e857]: runtime.tool_end
+                - generic [ref=e858]: Bash
+              - listitem [ref=e859]:
+                - time [ref=e860]: 2026/8/6 14:23:18
+                - strong [ref=e861]: runtime.tool_start
+                - generic [ref=e862]: Bash
+              - listitem [ref=e863]:
+                - time [ref=e864]: 2026/8/6 14:23:18
+                - strong [ref=e865]: runtime.tool_end
+                - generic [ref=e866]: Bash
+              - listitem [ref=e867]:
+                - time [ref=e868]: 2026/8/6 14:23:21
+                - strong [ref=e869]: runtime.tool_start
+                - generic [ref=e870]: Bash
+              - listitem [ref=e871]:
+                - time [ref=e872]: 2026/8/6 14:23:21
+                - strong [ref=e873]: runtime.tool_end
+                - generic [ref=e874]: Bash
+              - listitem [ref=e875]:
+                - time [ref=e876]: 2026/8/6 14:23:21
+                - strong [ref=e877]: runtime.tool_start
+                - generic [ref=e878]: Bash
+              - listitem [ref=e879]:
+                - time [ref=e880]: 2026/8/6 14:23:22
+                - strong [ref=e881]: runtime.tool_end
+                - generic [ref=e882]: Bash
+              - listitem [ref=e883]:
+                - time [ref=e884]: 2026/8/6 14:23:26
+                - strong [ref=e885]: task.lease_renewed
+                - generic [ref=e886]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:23:56.098Z\"}"
+              - listitem [ref=e887]:
+                - time [ref=e888]: 2026/8/6 14:23:26
+                - strong [ref=e889]: runtime.tool_start
+                - generic [ref=e890]: Bash
+              - listitem [ref=e891]:
+                - time [ref=e892]: 2026/8/6 14:23:26
+                - strong [ref=e893]: runtime.tool_end
+                - generic [ref=e894]: Bash
+              - listitem [ref=e895]:
+                - time [ref=e896]: 2026/8/6 14:23:26
+                - strong [ref=e897]: runtime.tool_start
+                - generic [ref=e898]: Bash
+              - listitem [ref=e899]:
+                - time [ref=e900]: 2026/8/6 14:23:26
+                - strong [ref=e901]: runtime.tool_end
+                - generic [ref=e902]: Bash
+              - listitem [ref=e903]:
+                - time [ref=e904]: 2026/8/6 14:23:27
+                - strong [ref=e905]: runtime.tool_start
+                - generic [ref=e906]: Bash
+              - listitem [ref=e907]:
+                - time [ref=e908]: 2026/8/6 14:23:27
+                - strong [ref=e909]: runtime.tool_end
+                - generic [ref=e910]: Bash
+              - listitem [ref=e911]:
+                - time [ref=e912]: 2026/8/6 14:23:31
+                - strong [ref=e913]: runtime.tool_start
+                - generic [ref=e914]: Bash
+              - listitem [ref=e915]:
+                - time [ref=e916]: 2026/8/6 14:23:31
+                - strong [ref=e917]: runtime.tool_end
+                - generic [ref=e918]: Bash
+              - listitem [ref=e919]:
+                - time [ref=e920]: 2026/8/6 14:23:32
+                - strong [ref=e921]: runtime.tool_start
+                - generic [ref=e922]: Bash
+              - listitem [ref=e923]:
+                - time [ref=e924]: 2026/8/6 14:23:32
+                - strong [ref=e925]: runtime.tool_end
+                - generic [ref=e926]: Bash
+              - listitem [ref=e927]:
+                - time [ref=e928]: 2026/8/6 14:23:36
+                - strong [ref=e929]: task.lease_renewed
+                - generic [ref=e930]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:24:06.100Z\"}"
+              - listitem [ref=e931]:
+                - time [ref=e932]: 2026/8/6 14:23:46
+                - strong [ref=e933]: task.lease_renewed
+                - generic [ref=e934]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:24:16.101Z\"}"
+              - listitem [ref=e935]:
+                - time [ref=e936]: 2026/8/6 14:23:56
+                - strong [ref=e937]: task.lease_renewed
+                - generic [ref=e938]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:24:26.101Z\"}"
+              - listitem [ref=e939]:
+                - time [ref=e940]: 2026/8/6 14:23:59
+                - strong [ref=e941]: runtime.tool_start
+                - generic [ref=e942]: TaskUpdate
+              - listitem [ref=e943]:
+                - time [ref=e944]: 2026/8/6 14:23:59
+                - strong [ref=e945]: runtime.text
+                - generic [ref=e946]: I now have a complete picture. Let me write the report.
+              - listitem [ref=e947]:
+                - time [ref=e948]: 2026/8/6 14:23:59
+                - strong [ref=e949]: runtime.tool_end
+                - generic [ref=e950]: TaskUpdate
+              - listitem [ref=e951]:
+                - time [ref=e952]: 2026/8/6 14:23:59
+                - strong [ref=e953]: runtime.tool_start
+                - generic [ref=e954]: TaskUpdate
+              - listitem [ref=e955]:
+                - time [ref=e956]: 2026/8/6 14:23:59
+                - strong [ref=e957]: runtime.tool_end
+                - generic [ref=e958]: TaskUpdate
+              - listitem [ref=e959]:
+                - time [ref=e960]: 2026/8/6 14:24:06
+                - strong [ref=e961]: task.lease_renewed
+                - generic [ref=e962]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:24:36.103Z\"}"
+              - listitem [ref=e963]:
+                - time [ref=e964]: 2026/8/6 14:24:16
+                - strong [ref=e965]: task.lease_renewed
+                - generic [ref=e966]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:24:46.104Z\"}"
+              - listitem [ref=e967]:
+                - time [ref=e968]: 2026/8/6 14:24:26
+                - strong [ref=e969]: task.lease_renewed
+                - generic [ref=e970]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:24:56.104Z\"}"
+              - listitem [ref=e971]:
+                - time [ref=e972]: 2026/8/6 14:24:31
+                - strong [ref=e973]: runtime.tool_start
+                - generic [ref=e974]: Write
+              - listitem [ref=e975]:
+                - time [ref=e976]: 2026/8/6 14:24:31
+                - strong [ref=e977]: runtime.tool_end
+                - generic [ref=e978]: Write
+              - listitem [ref=e979]:
+                - time [ref=e980]: 2026/8/6 14:24:34
+                - strong [ref=e981]: runtime.text
+                - generic [ref=e982]: The report is written. Let me verify the claims by running the Pi adapter tests, then commit.
+              - listitem [ref=e983]:
+                - time [ref=e984]: 2026/8/6 14:24:34
+                - strong [ref=e985]: runtime.tool_start
+                - generic [ref=e986]: Bash
+              - listitem [ref=e987]:
+                - time [ref=e988]: 2026/8/6 14:24:34
+                - strong [ref=e989]: runtime.tool_end
+                - generic [ref=e990]: Bash
+              - listitem [ref=e991]:
+                - time [ref=e992]: 2026/8/6 14:24:36
+                - strong [ref=e993]: task.lease_renewed
+                - generic [ref=e994]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:25:06.106Z\"}"
+              - listitem [ref=e995]:
+                - time [ref=e996]: 2026/8/6 14:24:36
+                - strong [ref=e997]: runtime.tool_start
+                - generic [ref=e998]: Bash
+              - listitem [ref=e999]:
+                - time [ref=e1000]: 2026/8/6 14:24:36
+                - strong [ref=e1001]: runtime.tool_end
+                - generic [ref=e1002]: Bash
+              - listitem [ref=e1003]:
+                - time [ref=e1004]: 2026/8/6 14:24:38
+                - strong [ref=e1005]: runtime.text
+                - generic [ref=e1006]: Tests require approval to run — I'll skip execution; the report's claims are all directly verified against the source. Let me commit the report.
+              - listitem [ref=e1007]:
+                - time [ref=e1008]: 2026/8/6 14:24:38
+                - strong [ref=e1009]: runtime.tool_start
+                - generic [ref=e1010]: Bash
+              - listitem [ref=e1011]:
+                - time [ref=e1012]: 2026/8/6 14:24:38
+                - strong [ref=e1013]: runtime.tool_end
+                - generic [ref=e1014]: Bash
+              - listitem [ref=e1015]:
+                - time [ref=e1016]: 2026/8/6 14:24:39
+                - strong [ref=e1017]: runtime.tool_start
+                - generic [ref=e1018]: Bash
+              - listitem [ref=e1019]:
+                - time [ref=e1020]: 2026/8/6 14:24:40
+                - strong [ref=e1021]: runtime.tool_end
+                - generic [ref=e1022]: Bash
+              - listitem [ref=e1023]:
+                - time [ref=e1024]: 2026/8/6 14:24:42
+                - strong [ref=e1025]: runtime.tool_start
+                - generic [ref=e1026]: TaskUpdate
+              - listitem [ref=e1027]:
+                - time [ref=e1028]: 2026/8/6 14:24:42
+                - strong [ref=e1029]: runtime.tool_end
+                - generic [ref=e1030]: TaskUpdate
+              - listitem [ref=e1031]:
+                - time [ref=e1032]: 2026/8/6 14:24:42
+                - strong [ref=e1033]: runtime.text
+                - generic [ref=e1034]: Git operations require approval in this session, so the report stays as an uncommitted file in the worktree — the deliverable itself is complete.
+              - listitem [ref=e1035]:
+                - time [ref=e1036]: 2026/8/6 14:24:46
+                - strong [ref=e1037]: task.lease_renewed
+                - generic [ref=e1038]: "{\"agentId\":\"8a9433fb-afe8-46e5-bc40-82e6a119a282\",\"leaseId\":\"0724c65c-d3e7-467a-9078-543975421980\",\"expiresAt\":\"2026-08-06T06:25:16.106Z\"}"
+              - listitem [ref=e1039]:
+                - time [ref=e1040]: 2026/8/6 14:24:47
+                - strong [ref=e1041]: runtime.text
+                - generic [ref=e1042]: "调研完成，报告已输出到 **`docs/pi-agent-report.md`**（在任务 worktree 内，测试与提交因权限被跳过）。 ## 核心发现 **Pi Agent 是什么**：Sinapsis 三种受管 Runtime 之一（`opencode` / `pi` / `claude-code`）。`pi` 是本机安装的 `@earendil-works/pi-coding-agent` CLI（`/opt/homebrew/bin/pi`）。 **实现方式**（`server/adapters/runtime/pi-runtime-adapter.ts`，260 行，零第三方依赖）： - **持久 RPC 进程模型** — 与其他两种 Runtime（短生命周期逐轮进程）不同，Pi 以 `pi --mode rpc` 启动常驻子进程，通过 LF 分隔 JSONL 通信。这是三种 Runtime 中唯一的长连接会话模型 - **RPC 协议**：`get_state`（获取 sessionId/sessionFile）→ `prompt`（空闲投递）/ `steer`（流式中追加）；恢复时 `switch_session` + 缓冲输入；`agent_settled` 是完成边界 - **事件翻译**：`message_update`→text、`tool_execution_start/end`→工具事件、`queue_update`→队列长度；未知事件静默留作 artifact（协议演进的缓冲） - **执行策略**：`read-only-no-tools` 会把参数整体替换为 `--no-tools --no-extensions --no-skills ... --no-approve`，用于频道只读对话 - **两条使用路径**：任务流（worktree + `task_sessions`）和对话流（`conversation_sessions` 持久化 + `switch_session` 恢复 + `session_lost` 冷启动兜底） **扩展点**（报告第 3 节，含优先级建议）： 1. **协议层**：`recordJson` 是唯一翻译点，新命令/事件在此扩展；端口已预留 `needs_input` 事件和 `timeout` 错误码但尚未使用 2. **执行策略**：在 `launch()` 的 args 分支加新枚举 → 新参数集 3. **新 Runtime 模板**：claude-code 的接入计划（`docs/superpowers/plans/2026-07-25-claude-code-runtime.md`）是完整工作示例 4. **最值得做的一步**：`task_sessions` 目前只存 `runtime_session_id` 不存 `sessionFile`，导致 Pi 任务在服务重启后无法 `switch_session` 恢复——补上即可与对话流对齐调研完成，报告已输出到 **`docs/pi-agent-report.md`**（在任务 worktree 内，测试与提交因权限被跳过）。 ## 核心发现 **Pi Agent 是什么**：Sinapsis 三种受管 Runtime 之一（`opencode` / `pi` / `claude-code`）。`pi` 是本机安装的 `@earendil-works/pi-coding-agent` CLI（`/opt/homebrew/bin/pi`）。 **实现方式**（`server/adapters/runtime/pi-runtime-adapter.ts`，260 行，零第三方依赖）： - **持久 RPC 进程模型** — 与其他两种 Runtime（短生命周期逐轮进程）不同，Pi 以 `pi --mode rpc` 启动常驻子进程，通过 LF 分隔 JSONL 通信。这是三种 Runtime 中唯一的长连接会话模型 - **RPC 协议**：`get_state`（获取 sessionId/sessionFile）→ `prompt`（空闲投递）/ `steer`（流式中追加）；恢复时 `switch_session` + 缓冲输入；`agent_settled` 是完成边界 - **事件翻译**：`message_update`→text、`tool_execution_start/end`→工具事件、`queue_update`→队列长度；未知事件静默留作 artifact（协议演进的缓冲） - **执行策略**：`read-only-no-tools` 会把参数整体替换为 `--no-tools --no-extensions --no-skills ... --no-approve`，用于频道只读对话 - **两条使用路径**：任务流（worktree + `task_sessions`）和对话流（`conversation_sessions` 持久化 + `switch_session` 恢复 + `session_lost` 冷启动兜底） **扩展点**（报告第 3 节，含优先级建议）： 1. **协议层**：`recordJson` 是唯一翻译点，新命令/事件在此扩展；端口已预留 `needs_input` 事件和 `timeout` 错误码但尚未使用 2. **执行策略**：在 `launch()` 的 args 分支加新枚举 → 新参数集 3. **新 Runtime 模板**：claude-code 的接入计划（`docs/superpowers/plans/2026-07-25-claude-code-runtime.md`）是完整工作示例 4. **最值得做的一步**：`task_sessions` 目前只存 `runtime_session_id` 不存 `sessionFile`，导致 Pi 任务在服务重启后无法 `switch_session` 恢复——补上即可与对话流对齐"
+              - listitem [ref=e1043]:
+                - time [ref=e1044]: 2026/8/6 14:24:47
+                - strong [ref=e1045]: task.execution_failed
+                - generic [ref=e1046]: Runtime 已完成，但任务分支没有可供评审的提交。
+              - listitem [ref=e1047]:
+                - time [ref=e1048]: 2026/8/6 14:24:47
+                - strong [ref=e1049]: task.status_changed
+                - generic [ref=e1050]: Runtime 已完成，但任务分支没有可供评审的提交。
+              - listitem [ref=e1051]:
+                - time [ref=e1052]: 2026/8/6 14:24:47
+                - strong [ref=e1053]: task.session_updated
+                - generic [ref=e1054]: failed
+          - generic [ref=e1055]:
+            - button "runtime-stderr" [ref=e1056] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1063] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1070] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1077] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1084] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1091] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1098] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1105] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1112] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1119] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1126] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1133] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1140] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1147] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1154] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1161] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1168] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1175] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1182] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1189] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1196] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1203] [cursor=pointer]
+            - button "runtime-text" [ref=e1210] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1217] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1224] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1231] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1238] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1245] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1252] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1259] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1266] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1273] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1280] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1287] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1294] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1301] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1308] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1315] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1322] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1329] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1336] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1343] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1350] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1357] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1364] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1371] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1378] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1385] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1392] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1399] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1406] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1413] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1420] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1427] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1434] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1441] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1448] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1455] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1462] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1469] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1476] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1483] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1490] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1497] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1504] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1511] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1518] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1525] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1532] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1539] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1546] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1553] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1560] [cursor=pointer]
+            - button "runtime-text" [ref=e1567] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1574] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1581] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1588] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1595] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1602] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1609] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1616] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1623] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1630] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1637] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1644] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1651] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1658] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1665] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1672] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1679] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1686] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1693] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1700] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1707] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1714] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1721] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1728] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1735] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1742] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1749] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1756] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1763] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1770] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1777] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1784] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1791] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1798] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1805] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1812] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1819] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1826] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1833] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1840] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1847] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1854] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1861] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1868] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1875] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1882] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1889] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1896] [cursor=pointer]
+            - button "runtime-text" [ref=e1903] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1910] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1917] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1924] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1931] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1938] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1945] [cursor=pointer]
+            - button "runtime-text" [ref=e1952] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1959] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1966] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1973] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1980] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1987] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e1994] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2001] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2008] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2015] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2022] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2029] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2036] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2043] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2050] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2057] [cursor=pointer]
+            - button "runtime-text" [ref=e2064] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2071] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2078] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2085] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2092] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2099] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2106] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2113] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2120] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2127] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2134] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2141] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2148] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2155] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2162] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2169] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2176] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2183] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2190] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2197] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2204] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2211] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2218] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2225] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2232] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2239] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2246] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2253] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2260] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2267] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2274] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2281] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2288] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2295] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2302] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2309] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2316] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2323] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2330] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2337] [cursor=pointer]
+            - button "runtime-text" [ref=e2344] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2351] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2358] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2365] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2372] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2379] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2386] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2393] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2400] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2407] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2414] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2421] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2428] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2435] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2442] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2449] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2456] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2463] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2470] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2477] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2484] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2491] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2498] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2505] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2512] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2519] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2526] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2533] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2540] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2547] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2554] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2561] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2568] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2575] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2582] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2589] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2596] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2603] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2610] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2617] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2624] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2631] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2638] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2645] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2652] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2659] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2666] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2673] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2680] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2687] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2694] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2701] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2708] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2715] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2722] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2729] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2736] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2743] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2750] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2757] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2764] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2771] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2778] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2785] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2792] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2799] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2806] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2813] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2820] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2827] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2834] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2841] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2848] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2855] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2862] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2869] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2876] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2883] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2890] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2897] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2904] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2911] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2918] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2925] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2932] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2939] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2946] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2953] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2960] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2967] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2974] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2981] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2988] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e2995] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3002] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3009] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3016] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3023] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3030] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3037] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3044] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3051] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3058] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3065] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3072] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3079] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3086] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3093] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3100] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3107] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3114] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3121] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3128] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3135] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3142] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3149] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3156] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3163] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3170] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3177] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3184] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3191] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3198] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3205] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3212] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3219] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3226] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3233] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3240] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3247] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3254] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3261] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3268] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3275] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3282] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3289] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3296] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3303] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3310] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3317] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3324] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3331] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3338] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3345] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3352] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3359] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3366] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3373] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3380] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3387] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3394] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3401] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3408] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3415] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3422] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3429] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3436] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3443] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3450] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3457] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3464] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3471] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3478] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3485] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3492] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3499] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3506] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3513] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3520] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3527] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3534] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3541] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3548] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3555] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3562] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3569] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3576] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3583] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3590] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3597] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3604] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3611] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3618] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3625] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3632] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3639] [cursor=pointer]
+            - button "runtime-text" [ref=e3646] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3653] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3660] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3667] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3674] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3681] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3688] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3695] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3702] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3709] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3716] [cursor=pointer]
+            - button "runtime-text" [ref=e3723] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3730] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3737] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3744] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3751] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3758] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3765] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3772] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3779] [cursor=pointer]
+            - button "runtime-text" [ref=e3786] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3793] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3800] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3807] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3814] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3821] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3828] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3835] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3842] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3849] [cursor=pointer]
+            - button "runtime-text" [ref=e3856] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3863] [cursor=pointer]
+            - button "runtime-jsonl" [ref=e3870] [cursor=pointer]
+            - button "runtime-text" [ref=e3877] [cursor=pointer]
+            - button "runtime-exit" [ref=e3884] [cursor=pointer]
+      - generic [ref=e3891]:
+        - heading "审查" [level=3] [ref=e3892]
+        - paragraph [ref=e3893]: 验收与合并分离；内置 API 不会自动 push 或 merge。
+        - paragraph [ref=e3894]: 此版本没有 OS 级沙箱。运行未经信任的本地 CLI 前，请先确认信任它。工作树隔离是约定而非权限边界。
+        - generic [ref=e3895]:
+          - button "退回修改" [disabled] [ref=e3896]
+          - button "接受验收" [disabled] [ref=e3897]

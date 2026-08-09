@@ -1,0 +1,12 @@
+[    2976ms] [ERROR] Failed to load resource: net::ERR_FAILED @ chrome://favicon2/?size=16&scaleFactor=1x&pageUrl=chrome%3A%2F%2Fchrome-urls%2F&allowGoogleServerFallback=0&forceLightMode=true&forceEmptyDefaultFavicon=1:0
+[    3095ms] [ERROR] Failed to load resource: net::ERR_FAILED @ chrome://favicon2/?size=16&scaleFactor=1x&pageUrl=http%3A%2F%2Flocalhost%3A5173%2F&allowGoogleServerFallback=0&forceLightMode=true&forceEmptyDefaultFavicon=1:0
+[   14354ms] [WARNING] A speculation rule set was inserted into the document but will be ignored. This might happen, for example, if it was previously inserted into another document, or if it was created using the innerHTML setter. @ https://www.google.com/search?q=clawdai&oq=clawdai&gs_lcrp=EgZjaHJvbWUyBggAEEUYOTILCAEQABgKGAsYgAQyCggCEAAYgAQYogQyCggDEAAYgAQYogQyBwgEEAAY7wUyBwgFEAAY7wXSAQk5NDkxajBqMTWoAgCwAgE&sourceid=chrome&source=chrome.rb&ie=UTF-8&sei=zQZqarOLE6WO8L0P5-qw4A0:44
+[   40933ms] [ERROR] Failed to load resource: the server responded with a status of 503 () @ https://collector.github.com/github/collect:0
+[   42501ms] [ERROR] Failed to load resource: the server responded with a status of 503 () @ https://collector.github.com/github/collect:0
+[   51724ms] [ERROR] Failed to load resource: the server responded with a status of 503 () @ https://collector.github.com/github/collect:0
+[   52363ms] [ERROR] Failed to load resource: the server responded with a status of 503 () @ https://collector.github.com/github/collect:0
+[  118381ms] [ERROR] Failed to load resource: the server responded with a status of 503 () @ https://collector.github.com/github/collect:0
+[  127959ms] [ERROR] Failed to load resource: the server responded with a status of 503 () @ https://collector.github.com/github/collect:0
+[  244792ms] [ERROR] Failed to load resource: the server responded with a status of 503 () @ https://collector.github.com/github/collect:0
+[  246963ms] [ERROR] Failed to load resource: the server responded with a status of 503 () @ https://collector.github.com/github/collect:0
+[  255909ms] [ERROR] Failed to load resource: the server responded with a status of 503 () @ https://collector.github.com/github/collect:0

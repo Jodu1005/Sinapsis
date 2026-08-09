@@ -14,7 +14,7 @@ import { createHumanCapability } from './human-capability'
 const config = getServiceConfig()
 await ensureDataDirectory(config.dataDir)
 
-const humanCapability = createHumanCapability()
+const humanCapability = process.env.SINAPSIS_HUMAN_CAPABILITY?.trim() || createHumanCapability()
 const app = createApp({ databasePath: path.join(config.dataDir, 'sinapsis.sqlite'), humanCapability })
 const repositories = app.locals.repositories as WorkspaceRepositories
 repositories.recoverOrphanedAgents(new Date())

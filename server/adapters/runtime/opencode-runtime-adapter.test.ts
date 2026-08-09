@@ -83,6 +83,7 @@ describe('OpenCodeRuntimeAdapter', () => {
       doom_loop: 'deny',
     }
     expect(args[agentIndex + 1]).toBe('sinapsis-dream-maintenance')
+    expect(args[0]).toBe('run')
     expect(args).toContain('--pure')
     expect(args).not.toContain('build')
     expect(args).not.toContain('--auto')
@@ -156,6 +157,8 @@ describe('OpenCodeRuntimeAdapter', () => {
     ]))
     expect(runner.spawns[0]?.options.args.join(' ')).toContain('Implement the adapter')
     expect(runner.spawns[0]?.options.args.join(' ')).toContain(task.description)
+    expect(runner.spawns[0]?.options.args.join(' ')).toContain('Completion is determined by the task result, not Git activity.')
+    expect(runner.spawns[0]?.options.args.join(' ')).toContain('Do not create a branch or commit unless the task explicitly asks for one.')
     expect(runner.spawns[0]?.options.args.some((arg) => arg.includes('push') && arg.includes('merge'))).toBe(true)
 
     runner.spawns[0]?.process.emitStdout('{"type":"session","sessionID":"ses-123"}\n')

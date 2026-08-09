@@ -1,0 +1,55 @@
+- generic [ref=f1e3]:
+  - navigation "代码仓与频道" [ref=f1e4]:
+    - generic [ref=f1e6]:
+      - generic [ref=f1e7]: S
+      - strong [ref=f1e8]: Sinapsis
+    - generic [ref=f1e9]: 代码仓
+    - generic [ref=f1e11]:
+      - generic [ref=f1e12]:
+        - generic [ref=f1e18]: prototype-zero-control-room
+        - generic [ref=f1e19]: codex/prototype-zero-control-room
+        - button "新建 prototype-zero-control-room 任务" [ref=f1e20] [cursor=pointer]
+      - button "# general" [ref=f1e23] [cursor=pointer]:
+        - generic [ref=f1e27]: general
+      - button "任务 0" [ref=f1e28] [cursor=pointer]
+    - region "Agent 状态" [ref=f1e33]:
+      - generic [ref=f1e34]: 运行中的 Agent
+      - paragraph [ref=f1e35]: 尚未添加 Agent
+  - main [ref=f1e36]:
+    - generic [ref=f1e37]:
+      - generic [ref=f1e38]:
+        - heading "# general" [level=1] [ref=f1e39]
+        - paragraph [ref=f1e40]: prototype-zero-control-room · codex/prototype-zero-control-room
+      - generic [ref=f1e41]:
+        - generic [ref=f1e42]: 已连接
+        - button "打开上下文" [ref=f1e43] [cursor=pointer]
+    - region "频道消息" [ref=f1e47]:
+      - article [ref=f1e48]:
+        - generic [ref=f1e49]: "Y"
+        - generic [ref=f1e50]:
+          - generic [ref=f1e51]:
+            - strong [ref=f1e52]: 你
+            - time [ref=f1e53]: 02:47
+          - paragraph [ref=f1e54]: 频道工作台已接入本机服务。
+    - generic [ref=f1e55]:
+      - generic [ref=f1e56]: 发送消息
+      - textbox "发送消息" [ref=f1e57]:
+        - /placeholder: "发送消息到 # general"
+      - button "发送消息" [disabled] [ref=f1e58]
+  - complementary "任务与上下文" [ref=f1e61]:
+    - strong [ref=f1e63]: 上下文
+    - generic [ref=f1e64]:
+      - generic [ref=f1e65]:
+        - heading "本频道任务" [level=2] [ref=f1e66]
+        - button "新建当前上下文任务" [ref=f1e67] [cursor=pointer]: +
+      - generic [ref=f1e68]:
+        - tablist "任务筛选" [ref=f1e69]:
+          - tab "等待" [selected] [ref=f1e70] [cursor=pointer]
+          - tab "执行中" [ref=f1e71] [cursor=pointer]
+          - tab "等待输入" [ref=f1e72] [cursor=pointer]
+          - tab "待人工验收" [ref=f1e73] [cursor=pointer]
+          - tab "已结束" [ref=f1e74] [cursor=pointer]
+        - paragraph [ref=f1e75]: 此筛选下没有任务
+    - generic [ref=f1e76]:
+      - heading "频道操作" [level=2] [ref=f1e77]
+      - button "收起上下文" [ref=f1e78] [cursor=pointer]

@@ -1,0 +1,133 @@
+- generic [ref=e5]:
+  - navigation "工作空间" [ref=e6]:
+    - generic [ref=e7]:
+      - generic [ref=e8]: 频道
+      - button "添加频道" [ref=e9] [cursor=pointer]
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - button "# summit" [ref=e13] [cursor=pointer]:
+          - generic [ref=e17]: summit
+        - 'button "归档 # summit" [ref=e18] [cursor=pointer]'
+      - generic [ref=e22]:
+        - button "# channel1" [ref=e23] [cursor=pointer]:
+          - generic [ref=e27]: channel1
+        - 'button "归档 # channel1" [ref=e28] [cursor=pointer]'
+      - generic [ref=e32]:
+        - button "# channel2" [ref=e33] [cursor=pointer]:
+          - generic [ref=e37]: channel2
+        - 'button "归档 # channel2" [ref=e38] [cursor=pointer]'
+      - generic [ref=e42]:
+        - button "# channel4" [ref=e43] [cursor=pointer]:
+          - generic [ref=e47]: channel4
+        - 'button "归档 # channel4" [ref=e48] [cursor=pointer]'
+    - region "已归档频道" [ref=e52]:
+      - button "已归档频道（3）" [ref=e53] [cursor=pointer]:
+        - generic [ref=e56]: 已归档频道
+        - generic [ref=e57]: "3"
+    - button "任务看板" [active] [ref=e58] [cursor=pointer]:
+      - generic [ref=e63]: "0"
+    - button "Dream（0 个待确认）" [ref=e64] [cursor=pointer]:
+      - generic [ref=e77]: Dream
+      - generic [ref=e78]: "0"
+    - generic [ref=e79]:
+      - generic [ref=e80]: 工作空间
+      - button "添加工作空间" [ref=e82] [cursor=pointer]
+    - group "channel4 的工作空间" [ref=e84]:
+      - paragraph [ref=e85]: 未绑定工作空间
+    - generic [ref=e86]: 任务
+    - paragraph [ref=e87]: 请先为频道绑定工作空间
+    - region "Agent 状态" [ref=e88]:
+      - generic [ref=e89]:
+        - generic [ref=e90]: 运行中的 Agent
+        - button "添加 Agent" [ref=e91] [cursor=pointer]
+      - button "查看 clawd 配置" [ref=e93] [cursor=pointer]:
+        - generic [ref=e98]:
+          - strong [ref=e99]: clawd
+          - generic [ref=e100]: "@clawd · claude-code"
+        - generic [ref=e101]: 空闲
+      - button "查看 newton 配置" [ref=e102] [cursor=pointer]:
+        - generic [ref=e107]:
+          - strong [ref=e108]: newton
+          - generic [ref=e109]: "@newton · pi"
+        - generic [ref=e110]: 空闲
+      - button "查看 前端 Agent 配置" [ref=e111] [cursor=pointer]:
+        - generic [ref=e116]:
+          - strong [ref=e117]: 前端 Agent
+          - generic [ref=e118]: "@前端 Agent · opencode"
+        - generic [ref=e119]: 空闲
+  - main [ref=e120]:
+    - generic [ref=e121]:
+      - generic [ref=e122]:
+        - heading "任务看板" [level=1] [ref=e267]
+        - paragraph [ref=e124]: 按频道管理任务
+      - generic [ref=e268]:
+        - text: 频道
+        - combobox "看板频道" [ref=e269]:
+          - option "summit"
+          - option "channel1"
+          - option "channel2"
+          - option "channel4" [selected]
+          - option "general"
+          - option "channel2"
+          - option "channel3"
+      - button "新建任务" [ref=e270] [cursor=pointer]
+    - region "任务看板" [ref=e271]:
+      - generic [ref=e272]:
+        - region "积压任务" [ref=e273]:
+          - generic [ref=e274]:
+            - generic [ref=e275]: 积压任务
+            - generic [ref=e279]: "0"
+          - paragraph [ref=e281]: 暂无任务
+        - region "待办任务" [ref=e282]:
+          - generic [ref=e283]:
+            - generic [ref=e284]: 待办任务
+            - generic [ref=e288]: "0"
+          - paragraph [ref=e290]: 暂无任务
+        - region "处理中任务" [ref=e291]:
+          - generic [ref=e292]:
+            - generic [ref=e293]: 处理中任务
+            - generic [ref=e296]: "0"
+          - paragraph [ref=e298]: 暂无任务
+        - region "审核任务" [ref=e299]:
+          - generic [ref=e300]:
+            - generic [ref=e301]: 审核任务
+            - generic [ref=e305]: "0"
+          - paragraph [ref=e307]: 暂无任务
+        - region "已完成任务" [ref=e308]:
+          - generic [ref=e309]:
+            - generic [ref=e310]: 已完成任务
+            - generic [ref=e314]: "0"
+          - paragraph [ref=e316]: 暂无任务
+  - complementary "任务与上下文" [ref=e217]:
+    - strong [ref=e219]: 上下文
+    - generic [ref=e220]:
+      - generic [ref=e221]:
+        - heading "频道 Agent" [level=2] [ref=e222]
+        - button "添加 Agent" [ref=e223] [cursor=pointer]
+      - list [ref=e227]:
+        - listitem [ref=e228]:
+          - generic [ref=e229]:
+            - strong [ref=e230]: 前端 Agent
+            - generic [ref=e231]: "@frontend · 空闲 · Runtime: OpenCode"
+          - button "移除 前端 Agent" [ref=e232] [cursor=pointer]
+        - listitem [ref=e236]:
+          - generic [ref=e237]:
+            - strong [ref=e238]: newton
+            - generic [ref=e239]: "@newton · 空闲 · Runtime: Pi"
+          - button "移除 newton" [ref=e240] [cursor=pointer]
+        - listitem [ref=e244]:
+          - generic [ref=e245]:
+            - strong [ref=e246]: clawd
+            - generic [ref=e247]: "@build · 空闲 · Runtime: Claude Code"
+          - button "移除 clawd" [ref=e248] [cursor=pointer]
+    - generic [ref=e252]:
+      - generic [ref=e253]:
+        - heading "频道工作空间 0/5" [level=2] [ref=e254]:
+          - text: 频道工作空间
+          - generic [ref=e255]: 0/5
+        - button "添加工作空间" [ref=e256] [cursor=pointer]
+      - list
+      - paragraph [ref=e260]: 尚未绑定工作空间。
+    - generic [ref=e261]:
+      - heading "频道操作" [level=2] [ref=e262]
+      - button "收起上下文" [ref=e263] [cursor=pointer]

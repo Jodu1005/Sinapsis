@@ -70,7 +70,8 @@ function runtimeAvailability(status: AgentView['status']): string {
 
 function runtimePreset(runtime: AgentView['runtime']): string {
   return {
-    opencode: 'OpenCode 受管运行',
+    opencode: 'OpenCode CLI 受管运行',
+    'opencode-acp': 'OpenCode ACP 协议运行',
     pi: 'Pi RPC 受管运行',
     'claude-code': 'Claude Code CLI 受管运行',
   }[runtime]
@@ -78,7 +79,8 @@ function runtimePreset(runtime: AgentView['runtime']): string {
 
 function runtimeLabel(runtime: AgentView['runtime']): string {
   return {
-    opencode: 'OpenCode',
+    opencode: 'OpenCode CLI',
+    'opencode-acp': 'OpenCode ACP',
     pi: 'Pi',
     'claude-code': 'Claude Code',
   }[runtime]

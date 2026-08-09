@@ -66,6 +66,11 @@ export interface ConversationTurnDetails {
   handoffs: ConversationHandoff[]
 }
 
+export interface ConversationTurnParticipantSnapshot {
+  turn: ConversationTurn
+  participants: TurnParticipant[]
+}
+
 export interface ActiveConversationTurnProjection {
   turn: ConversationTurn
   invocations: AgentInvocation[]
@@ -175,7 +180,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   consumeTaskInput(inputId: string): TaskInput
   createTaskArtifact(taskId: string, kind: string, path: string): TaskArtifact
   createReviewDecision(taskId: string, decision: string, reason: string): void
-  finishTaskExecution(taskId: string, agentId: string, next: Extract<TaskStatus, 'in_review' | 'needs_human' | 'cancelled'>, reason: string): Task
+  finishTaskExecution(taskId: string, agentId: string, next: Extract<TaskStatus, 'completed' | 'in_review' | 'needs_human' | 'cancelled'>, reason: string): Task
   getActiveTaskForAgent(agentId: string): Task | undefined
   reclaimReturnedTask(taskId: string, agentId: string, occurredAt: Date): TaskClaim | undefined
   getTask(taskId: string): Task | undefined
@@ -217,6 +222,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   ): ConversationTurn
   getConversationTurn(turnId: string): ConversationTurn | undefined
   getConversationTurnDetails(turnId: string): ConversationTurnDetails | undefined
+  listRecentConversationTurnParticipants(channelId: string, limit?: number): ConversationTurnParticipantSnapshot[]
   listActiveConversationActivity(channelId?: string): ActiveConversationTurnProjection[]
   listActiveConversationTurns(channelId?: string): ConversationTurn[]
   claimRecoverableConversationTurns(ownerId: string, occurredAt: Date, staleBefore: Date): ActiveConversationTurnProjection[]

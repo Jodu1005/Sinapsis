@@ -56,6 +56,17 @@ describe('CommandGitClient', () => {
       currentBranch: 'feature/task-3', defaultBranch: 'feature/task-3',
     })
   })
+
+  it('lists modified and untracked files in a task worktree', async () => {
+    const checkout = await createFeatureCheckout('main')
+    await writeFile(path.join(checkout, 'README.md'), 'changed\n')
+    await writeFile(path.join(checkout, 'docs-output.md'), '# Deliverable\n')
+
+    await expect(new CommandGitClient().listChangedFiles(checkout)).resolves.toEqual([
+      { path: 'docs-output.md', status: 'added' },
+      { path: 'README.md', status: 'modified' },
+    ])
+  })
 })
 
 async function createFeatureCheckout(initialBranch: string): Promise<string> {

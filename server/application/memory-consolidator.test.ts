@@ -75,6 +75,8 @@ describe('MemoryConsolidator', () => {
       ],
       acceptedMemories: [{ scope: 'global', kind: 'preference', content: 'User prefers English.' }],
     })
+    expect(prompt.instruction).toContain('scope, kind, content, rationale, confidence, importance, sourceMessageIds')
+    expect(prompt.instruction).toContain('{"candidates":[]}')
     for (const forbidden of [
       'PRIVATE_CHANNEL', 'PRIVATE_MESSAGE_ARTIFACT', 'PRIVATE_TURN_ARTIFACT', 'PRIVATE_REASON',
       'PRIVATE_MEMORY_REASONING', 'PROFILE_ENV_SECRET', 'runtimeArtifact', 'privateReasoning',

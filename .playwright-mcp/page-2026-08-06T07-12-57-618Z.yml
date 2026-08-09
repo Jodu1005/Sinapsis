@@ -1,0 +1,102 @@
+- generic [ref=f2e394]:
+  - navigation "工作空间" [ref=f2e395]:
+    - generic [ref=f2e396]:
+      - generic [ref=f2e397]: 频道
+      - button "添加频道" [ref=f2e398] [cursor=pointer]
+    - generic [ref=f2e400]:
+      - generic [ref=f2e401]:
+        - button "# summit" [ref=f2e402] [cursor=pointer]:
+          - generic [ref=f2e406]: summit
+        - 'button "归档 # summit" [ref=f2e407] [cursor=pointer]'
+      - generic [ref=f2e411]:
+        - button "# channel1" [ref=f2e412] [cursor=pointer]:
+          - generic [ref=f2e416]: channel1
+        - 'button "归档 # channel1" [ref=f2e417] [cursor=pointer]'
+      - generic [ref=f2e421]:
+        - button "# channel2" [ref=f2e422] [cursor=pointer]:
+          - generic [ref=f2e426]: channel2
+        - 'button "归档 # channel2" [ref=f2e427] [cursor=pointer]'
+      - generic [ref=f2e431]:
+        - button "# channel4" [ref=f2e432] [cursor=pointer]:
+          - generic [ref=f2e436]: channel4
+        - 'button "归档 # channel4" [ref=f2e437] [cursor=pointer]'
+    - region "已归档频道" [ref=f2e441]:
+      - button "已归档频道（3）" [ref=f2e442] [cursor=pointer]:
+        - generic [ref=f2e445]: 已归档频道
+        - generic [ref=f2e446]: "3"
+    - button "任务看板" [active] [ref=f2e447] [cursor=pointer]:
+      - generic [ref=f2e452]: "0"
+    - button "Dream（0 个待确认）" [ref=f2e453] [cursor=pointer]:
+      - generic [ref=f2e466]: Dream
+      - generic [ref=f2e467]: "0"
+    - generic [ref=f2e468]:
+      - generic [ref=f2e469]: 工作空间
+      - button "添加工作空间" [ref=f2e471] [cursor=pointer]
+    - group "channel4 的工作空间" [ref=f2e473]:
+      - paragraph [ref=f2e474]: 未绑定工作空间
+    - generic [ref=f2e475]: 任务
+    - paragraph [ref=f2e476]: 请先为频道绑定工作空间
+    - region "Agent 状态" [ref=f2e477]:
+      - generic [ref=f2e478]:
+        - generic [ref=f2e479]: 运行中的 Agent
+        - button "添加 Agent" [ref=f2e480] [cursor=pointer]
+      - button "查看 clawd 配置" [ref=f2e482] [cursor=pointer]:
+        - generic [ref=f2e487]:
+          - strong [ref=f2e488]: clawd
+          - generic [ref=f2e489]: "@clawd · claude-code"
+        - generic [ref=f2e490]: 空闲
+      - button "查看 newton 配置" [ref=f2e491] [cursor=pointer]:
+        - generic [ref=f2e496]:
+          - strong [ref=f2e497]: newton
+          - generic [ref=f2e498]: "@newton · pi"
+        - generic [ref=f2e499]: 空闲
+  - main [ref=f2e500]:
+    - generic [ref=f2e501]:
+      - generic [ref=f2e502]:
+        - heading "任务看板" [level=1] [ref=f2e624]
+        - paragraph [ref=f2e504]: "# channel4"
+      - button "新建任务" [ref=f2e625] [cursor=pointer]
+    - region "任务看板" [ref=f2e626]:
+      - generic [ref=f2e627]:
+        - region "积压任务" [ref=f2e628]:
+          - generic [ref=f2e629]:
+            - generic [ref=f2e630]: 积压任务
+            - generic [ref=f2e634]: "0"
+          - paragraph [ref=f2e636]: 暂无任务
+        - region "待办任务" [ref=f2e637]:
+          - generic [ref=f2e638]:
+            - generic [ref=f2e639]: 待办任务
+            - generic [ref=f2e643]: "0"
+          - paragraph [ref=f2e645]: 暂无任务
+        - region "处理中任务" [ref=f2e646]:
+          - generic [ref=f2e647]:
+            - generic [ref=f2e648]: 处理中任务
+            - generic [ref=f2e651]: "0"
+          - paragraph [ref=f2e653]: 暂无任务
+        - region "审核任务" [ref=f2e654]:
+          - generic [ref=f2e655]:
+            - generic [ref=f2e656]: 审核任务
+            - generic [ref=f2e660]: "0"
+          - paragraph [ref=f2e662]: 暂无任务
+        - region "已完成任务" [ref=f2e663]:
+          - generic [ref=f2e664]:
+            - generic [ref=f2e665]: 已完成任务
+            - generic [ref=f2e669]: "0"
+          - paragraph [ref=f2e671]: 暂无任务
+  - complementary "任务与上下文" [ref=f2e597]:
+    - strong [ref=f2e599]: 上下文
+    - generic [ref=f2e600]:
+      - generic [ref=f2e601]:
+        - heading "频道 Agent" [level=2] [ref=f2e602]
+        - button "添加 Agent" [ref=f2e603] [cursor=pointer]
+      - list [ref=f2e607]:
+        - listitem [ref=f2e608]:
+          - generic [ref=f2e609]:
+            - strong [ref=f2e610]: newton
+            - generic [ref=f2e611]: "@newton · 空闲 · Runtime: Pi"
+          - button "移除 newton" [ref=f2e612] [cursor=pointer]
+        - listitem [ref=f2e616]:
+          - generic [ref=f2e617]:
+            - strong [ref=f2e618]: clawd
+            - generic [ref=f2e619]: "@build · 空闲 · Runtime: Claude Code"
+          - button "移除 clawd" [ref=f2e620] [cursor=pointer]

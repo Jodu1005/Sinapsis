@@ -1,0 +1,6 @@
+[     111ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/react-dom_client.js?v=16f2c55c:14335
+[   19837ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_TIMED_OUT @ http://localhost:5173/api/bootstrap:0
+[   20144ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_TIMED_OUT @ http://localhost:5173/api/bootstrap:0
+[   27656ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_TIMED_OUT @ http://localhost:5173/api/bootstrap:0
+[   35477ms] [ERROR] Failed to load resource: the server responded with a status of 502 (Bad Gateway) @ http://localhost:5173/events:0
+[   35478ms] [ERROR] Failed to load resource: the server responded with a status of 502 (Bad Gateway) @ http://localhost:5173/api/bootstrap:0
