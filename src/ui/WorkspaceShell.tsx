@@ -1,26 +1,23 @@
-import { PanelRightClose, PanelRightOpen, Trash2, X } from 'lucide-react'
+import { PanelRightOpen, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CreateAgentRequest, CreateTaskRequest, WorkspaceApi } from '../api/client'
+import type { CreateAgentRequest, WorkspaceApi } from '../api/client'
 import { ApiClient } from '../api/client'
 import { useWorkspaceEvents } from '../api/use-workspace-events'
-import { snapshotAgents, snapshotChannelMessages, type AgentView, type ChannelMessage, type ConversationTurnDetailView, type RepositoryView, type TaskDetailView, type TaskView, type TurnActivityView, type WorkspaceSnapshot, type WorkspaceView } from '../domain/workspace-view'
+import { snapshotAgents, snapshotChannelMessages, type AgentView, type ChannelMessage, type ConversationTurnDetailView, type TaskBoardLane, type TaskDetailView, type TaskView, type TurnActivityView, type WorkspaceSnapshot } from '../domain/workspace-view'
 import { parseMessageIntent } from '../domain/message-intent'
 import { AgentConfigDialog } from './AgentConfigDialog'
 import { AgentCreateDialog } from './AgentCreateDialog'
 import { ChannelTimeline } from './ChannelTimeline'
 import { MessageComposer } from './MessageComposer'
 import { NavigationToggle, RepositorySidebar } from './RepositorySidebar'
-import { TaskComposerPanel } from './TaskComposerPanel'
-import { TaskDetailPanel } from './TaskDetailPanel'
-import { TaskList } from './TaskList'
+import { TaskComposerPanel, type TaskComposerInput } from './TaskComposerPanel'
+import { TaskDetailDialog } from './TaskDetailDialog'
+import { TaskBoard } from './TaskBoard'
 import { WorkspaceSetup } from './WorkspaceSetup'
 import { WorkspaceCreateDialog } from './WorkspaceCreateDialog'
 import { ChannelCreateDialog } from './ChannelCreateDialog'
 import { ThreadPanel } from './ThreadPanel'
-import { ChannelContextResetDialog } from './ChannelContextResetDialog'
 import { ChannelAgentMembers } from './ChannelAgentMembers'
-import { ChannelWorkspaceBindings } from './ChannelWorkspaceBindings'
-import { canResetChannelContext } from '../../shared/channel-policy'
 import { ConversationTurnDetail } from './ConversationTurnDetail'
 import { DreamCenter } from './DreamCenter'
 
@@ -37,6 +34,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const [selectedTaskRepositoryId, setSelectedTaskRepositoryId] = useState<string | null>(null)
   const [taskDetails, setTaskDetails] = useState<TaskDetailView | null>(null)
   const [taskDetailsError, setTaskDetailsError] = useState<string | null>(null)
+  const [taskDetailDialogOpen, setTaskDetailDialogOpen] = useState(false)
   const [taskComposerDraft, setTaskComposerDraft] = useState<TaskComposerDraft | null>(null)
   const [selectedAgent, setSelectedAgent] = useState<AgentView | null>(null)
   const [creatingAgent, setCreatingAgent] = useState(false)
@@ -58,9 +56,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   const suppressedSnapshotTurnRefreshes = useRef(new WeakMap<WorkspaceSnapshot, string>())
   const selectedTurnRef = useRef<{ channelId: string; turnId: string } | null>(null)
   const previousSnapshotRef = useRef<WorkspaceSnapshot | null>(null)
-  const [contextResetDialogOpen, setContextResetDialogOpen] = useState(false)
-  const [resettingChannelContext, setResettingChannelContext] = useState(false)
-  const [mainView, setMainView] = useState<'channel' | 'dream'>('channel')
+  const [mainView, setMainView] = useState<'channel' | 'dream' | 'tasks'>('channel')
   const [pendingMessageFocusId, setPendingMessageFocusId] = useState<string | null>(null)
   const [pendingThreadFocusId, setPendingThreadFocusId] = useState<string | null>(null)
   const [sourceMessages, setSourceMessages] = useState<Map<string, ChannelMessage>>(() => new Map())
@@ -116,20 +112,26 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     })
     return () => cancelAnimationFrame(frame)
   }, [mainView, pendingThreadFocusId, selectedThreadRootId, snapshot])
-  const taskRepository = useMemo(() => findRepository(workspace, selectedTaskRepositoryId), [workspace, selectedTaskRepositoryId])
-  const taskScope = taskRepository ?? workspace?.repositories[0]
-  const taskScopeTasks = useMemo(() => snapshot?.tasks.filter((task) =>
-    task.workspaceId === workspace?.id
-    && task.repositoryId === taskScope?.id
-    && task.channelId === selection.channel?.id) ?? [], [snapshot, workspace, taskScope, selection.channel])
+  const taskBoardTasks = snapshot?.tasks ?? []
+  const taskSelectionChannel = mainView === 'tasks' ? undefined : selection.channel
+  const taskSelectionWorkspaceIds = mainView === 'tasks'
+    ? snapshot?.workspaces.map((workspace) => workspace.id) ?? []
+    : selection.channel?.boundWorkspaceIds ?? []
   const selectedTask = useMemo(
-    () => findTask(snapshot, selectedTaskId, selection.channel?.id, selection.channel?.boundWorkspaceIds ?? []),
-    [snapshot, selectedTaskId, selection.channel],
+    () => findTask(snapshot, selectedTaskId, taskSelectionChannel?.id, taskSelectionWorkspaceIds),
+    [snapshot, selectedTaskId, taskSelectionChannel, taskSelectionWorkspaceIds],
   )
+  const readSelectedTaskArtifact = useCallback(async (artifactId: string) => {
+    if (!selectedTask) throw new Error('任务已关闭。')
+    return api.readArtifact(selectedTask.id, artifactId)
+  }, [api, selectedTask?.id])
+  const listTaskOutputFiles = useCallback((taskId: string) => api.listTaskOutputFiles(taskId), [api])
+  const readTaskOutputFile = useCallback((taskId: string, filePath: string) => api.readTaskOutputFile(taskId, filePath), [api])
   useEffect(() => {
     if (!snapshot || !selectedTaskId || selectedTask) return
     setSelectedTaskId(null)
     setSelectedTaskRepositoryId(null)
+    setTaskDetailDialogOpen(false)
   }, [snapshot, selectedTaskId, selectedTask])
   const messages = useMemo(() => {
     if (!selection.channel) return []
@@ -137,11 +139,12 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     for (const message of sourceMessages.values()) if (message.channelId === selection.channel.id) merged.set(message.id, message)
     return [...merged.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
   }, [snapshot, selection.channel, sourceMessages])
-  const agents = useMemo(() => {
-    const allAgents = snapshot ? snapshotAgents(snapshot) : []
-    return selection.channel ? allAgents.filter((agent) => selection.channel!.memberAgentIds.includes(agent.id)) : allAgents
-  }, [snapshot, selection.channel])
+  const allAgents = useMemo(() => snapshot ? snapshotAgents(snapshot) : [], [snapshot])
+  const channelAgents = useMemo(() => selection.channel
+    ? allAgents.filter((agent) => selection.channel!.memberAgentIds.includes(agent.id))
+    : allAgents, [allAgents, selection.channel])
   const turnActivities: TurnActivityView[] = useMemo(() => selection.channel ? snapshot?.activeTurnsByChannel?.[selection.channel.id] ?? [] : [], [selection.channel, snapshot])
+  const turnResults = useMemo(() => selection.channel ? snapshot?.recentTurnResultsByChannel?.[selection.channel.id] ?? [] : [], [selection.channel, snapshot])
   const threadRoot = useMemo(() => selectedThreadRootId ? messages.find((message) => message.id === selectedThreadRootId && !message.threadRootMessageId) : undefined, [messages, selectedThreadRootId])
   const threadReplies = useMemo(() => threadRoot ? messages.filter((message) => message.threadRootMessageId === threadRoot.id) : [], [messages, threadRoot])
   const selectedTurnChannelId = selection.channel?.id ?? null
@@ -215,7 +218,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
   useEffect(() => {
     if (!selectedTask) { setTaskDetails(null); setTaskDetailsError(null); return undefined }
     let active = true
-    setTaskDetails(null)
+    setTaskDetails((current) => current?.task.id === selectedTask.id ? current : null)
     setTaskDetailsError(null)
     void api.getTaskDetails(selectedTask.id).then(
       (details) => { if (active) setTaskDetails(details) },
@@ -223,6 +226,14 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     )
     return () => { active = false }
   }, [api, selectedTask?.id, snapshot])
+  useEffect(() => {
+    if (!selectedTask || selectedTask.status !== 'backlog' || !taskDetails?.comments?.some((comment) => comment.senderType === 'system' && comment.body.startsWith('积压分析暂未完成：'))) return
+    let active = true
+    void api.getTaskDetails(selectedTask.id).then((details) => {
+      if (active) setTaskDetails(details)
+    })
+    return () => { active = false }
+  }, [api, selectedTask?.id, selectedTask?.status, taskDetails?.comments?.length])
   useEffect(() => {
     if (!selectedTurnChannelId || !selectedTurnId) {
       pendingTurnDetailsRefresh.current.clear()
@@ -250,7 +261,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
 
   const sendMessage = async (body: string) => {
     if (selection.channel?.archivedAt) throw new Error('此频道已归档，只能查看历史记录。')
-    const intent = parseMessageIntent(body, agents)
+    const intent = parseMessageIntent(body, channelAgents)
     if (intent.kind === 'error') throw new Error(intent.message)
     if (intent.kind === 'message') {
       await api.postMessage(selection.channel!.id, { body: intent.body })
@@ -308,19 +319,71 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     setSelectedWorkspaceId(workspaceId)
     setSelectedTaskId(null)
     setSelectedTaskRepositoryId(null)
+    setTaskDetailDialogOpen(false)
   }
-  const selectTask = (repositoryId: string, taskId: string) => { setSelectedTaskRepositoryId(repositoryId); setSelectedTaskId(taskId); setContextOpen(true); setNavOpen(false) }
-  const createTask = async (input: CreateTaskRequest) => {
-    if (selection.channel?.archivedAt) throw new Error('此频道已归档，不能创建任务。')
-    const taskWorkspace = selection.boundWorkspaces.find((candidate) => candidate.id === input.workspaceId)
+  const selectTask = (repositoryId: string, taskId: string) => { setSelectedTaskRepositoryId(repositoryId); setSelectedTaskId(taskId); setTaskDetailDialogOpen(true); setContextOpen(true); setNavOpen(false) }
+  const openBoardTask = (taskId: string) => {
+    const task = taskBoardTasks.find((candidate) => candidate.id === taskId)
+    if (!task) return
+    setSelectedWorkspaceId(task.workspaceId)
+    setSelectedTaskRepositoryId(task.repositoryId)
+    setSelectedTaskId(task.id)
+    setTaskDetailDialogOpen(true)
+    setContextOpen(true)
+  }
+  const addTaskComment = async (task: TaskView, body: string) => {
+    await api.postMessage(task.channelId, { body, taskId: task.id, threadRootMessageId: task.threadRootMessageId ?? undefined })
+    const details = await api.getTaskDetails(task.id)
+    setTaskDetails(details)
+    await refresh()
+  }
+  const retryTaskAnalysis = async (task: TaskView) => {
+    const knownCommentIds = new Set(taskDetails?.task.id === task.id ? (taskDetails.comments ?? []).map((comment) => comment.id) : [])
+    await api.retryTaskAnalysis(task.id)
+    void watchTaskAnalysis(task.id, knownCommentIds)
+    await refresh()
+  }
+  const watchTaskAnalysis = async (taskId: string, knownCommentIds: Set<string>) => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      await delay(1_000)
+      try {
+        const details = await api.getTaskDetails(taskId)
+        setTaskDetails((current) => current?.task.id === taskId ? details : current)
+        if ((details.comments ?? []).some((comment) => !knownCommentIds.has(comment.id) && (comment.senderType === 'agent' || comment.senderType === 'system'))) {
+          await refresh()
+          return
+        }
+      } catch {
+        return
+      }
+    }
+  }
+  const createTask = async (input: TaskComposerInput, channelId: string) => {
+    const taskChannel = snapshot.channels.find((candidate) => candidate.id === channelId)
+    if (!taskChannel) throw new Error('请选择频道。')
+    if (taskChannel.archivedAt) throw new Error('此频道已归档，不能创建任务。')
+    let taskWorkspace = input.workspaceId ? snapshot.workspaces.find((candidate) => candidate.id === input.workspaceId) : undefined
+    if (!taskWorkspace && input.directory) {
+      taskWorkspace = snapshot.workspaces.find((candidate) => candidate.repositories.some((repository) => repository.path === input.directory))
+      if (!taskWorkspace) {
+        const createdWorkspace = await api.createWorkspace({ name: workspaceNameFromDirectory(input.directory) })
+        const createdRepository = await api.addRepository(createdWorkspace.id, { directory: input.directory })
+        taskWorkspace = { ...createdWorkspace, repositories: [createdRepository] }
+      }
+    }
     const repository = taskWorkspace?.repositories[0]
     if (!taskWorkspace || !repository) throw new Error('没有可用的工作目录。')
-    const task = await api.createTask(selection.channel!.id, input)
+    if (!taskChannel.boundWorkspaceIds.includes(taskWorkspace.id)) {
+      await api.bindChannelWorkspace(taskChannel.id, taskWorkspace.id)
+    }
+    const { directory: _directory, workspaceId: _workspaceId, ...taskInput } = input
+    const task = await api.createTask(taskChannel.id, { ...taskInput, workspaceId: taskWorkspace.id })
     await refresh()
     setTaskComposerDraft(null)
     setSelectedWorkspaceId(taskWorkspace.id)
     setSelectedTaskRepositoryId(repository.id)
     setSelectedTaskId(task.id)
+    setTaskDetailDialogOpen(true)
     setSelectedThreadRootId(task.threadRootMessageId ?? null)
     setContextOpen(true)
     return task
@@ -329,8 +392,15 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     const queued = await api.queueTaskInput(taskId, body)
     setTaskDetails((details) => details?.task.id === taskId ? { ...details, inputs: [...details.inputs, queued] } : details)
   }
-  const reviewTask = async (taskId: string, action: 'accept' | 'return') => {
-    const task = await api.reviewTask(taskId, action, action === 'accept' ? '验收已通过。' : '请根据任务证据继续修改。')
+  const reviewTask = async (taskId: string, action: 'accept' | 'return', message: string) => {
+    const task = await api.reviewTask(taskId, action, message)
+    setTaskDetails((details) => details?.task.id === taskId ? { ...details, task } : details)
+    await refresh()
+  }
+  const moveTask = async (taskId: string, lane: TaskBoardLane, message?: string) => {
+    const task = await api.moveTask(taskId, lane, message)
+    setSelectedTaskRepositoryId(task.repositoryId)
+    setSelectedTaskId(task.id)
     setTaskDetails((details) => details?.task.id === taskId ? { ...details, task } : details)
     await refresh()
   }
@@ -374,27 +444,6 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
       await refresh()
     } catch (cause) {
       setChannelActionError(cause instanceof Error ? cause.message : '无法恢复频道。')
-    }
-  }
-  const resetChannelContext = async () => {
-    if (!selection.channel || resettingChannelContext) return
-    setResettingChannelContext(true)
-    setChannelActionError(null)
-    try {
-      await api.resetChannelContext(selection.channel.id)
-      setSelectedTaskId(null)
-      setSelectedTaskRepositoryId(null)
-      setTaskDetails(null)
-      setSelectedThreadRootId(null)
-      setSelectedTurnId(null)
-      await refresh()
-      setContextResetDialogOpen(false)
-      setResettingChannelContext(false)
-    } catch (cause) {
-      setResettingChannelContext(false)
-      const resetError = cause instanceof Error ? cause : new Error('无法清空频道上下文。')
-      setChannelActionError(resetError.message)
-      throw resetError
     }
   }
   const refreshAgentRuntime = async () => {
@@ -497,33 +546,32 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
       setChannelActionError(cause instanceof Error ? cause.message : '无法读取来源消息。')
     }
   }
-  return <div className={`workspace-shell${mainView === 'dream' ? ' dream-view' : ''}`}>
-    <RepositorySidebar workspaces={snapshot.workspaces} agents={agents} channels={snapshot.channels} tasks={snapshot.tasks} selectedChannelId={selection.channel.id} selectedWorkspaceId={workspace?.id ?? null} selectedTaskId={selectedTask?.id ??null} onSelectChannel={selectChannel} onSelectWorkspace={selectWorkspace} onSelectTask={selectTask} onCreateTask={(workspaceId) => setTaskComposerDraft({ initialWorkspaceId: workspaceId })} onCreateChannel={() => setCreatingChannel(true)} onArchiveChannel={archiveChannel} onRestoreChannel={restoreChannel} channelReadOnly={Boolean(selection.channel.archivedAt)} onCreateWorkspace={() => setCreatingWorkspace(true)} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} pendingMemoryCandidateCount={snapshot.pendingMemoryCandidateCount} dreamSelected={mainView === 'dream'} onSelectDream={() => { setMainView('dream'); setNavOpen(false) }} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
-    {mainView === 'dream' ? <DreamCenter api={api} channels={snapshot.channels} onJumpToSource={jumpToDreamSource} refreshGeneration={refreshGeneration} onOpenNavigation={() => setNavOpen(true)} /> : <><main className="conversation-panel">
+  return <div className={`workspace-shell${mainView === 'dream' ? ' dream-view' : mainView === 'tasks' ? ' task-board-view' : ''}`}>
+    <RepositorySidebar workspaces={snapshot.workspaces} agents={allAgents} channels={snapshot.channels} tasks={snapshot.tasks} selectedChannelId={selection.channel.id} selectedWorkspaceId={workspace?.id ?? null} selectedTaskId={selectedTask?.id ??null} onSelectChannel={selectChannel} onSelectWorkspace={selectWorkspace} onSelectTask={selectTask} onCreateTask={(workspaceId) => setTaskComposerDraft({ initialWorkspaceId: workspaceId })} onCreateChannel={() => setCreatingChannel(true)} onArchiveChannel={archiveChannel} onRestoreChannel={restoreChannel} channelReadOnly={Boolean(selection.channel.archivedAt)} onCreateWorkspace={() => setCreatingWorkspace(true)} onSelectAgent={setSelectedAgent} onCreateAgent={() => setCreatingAgent(true)} pendingMemoryCandidateCount={snapshot.pendingMemoryCandidateCount} dreamSelected={mainView === 'dream'} onSelectDream={() => { setMainView('dream'); setNavOpen(false) }} tasksSelected={mainView === 'tasks'} onSelectTasks={() => { setMainView('tasks'); setNavOpen(false) }} mobileOpen={navOpen} mobileHidden={narrowNavigation && !navOpen} onClose={() => setNavOpen(false)} />
+    {mainView === 'dream' ? <DreamCenter api={api} channels={snapshot.channels} onJumpToSource={jumpToDreamSource} refreshGeneration={refreshGeneration} onOpenNavigation={() => setNavOpen(true)} /> : <>{mainView === 'tasks' ? <main className="task-board-panel">
+      <header className="task-board-header"><NavigationToggle onClick={() => setNavOpen(true)} /><div className="channel-heading"><h1>任务看板</h1></div><button type="button" className="primary-action" onClick={() => setTaskComposerDraft({ channelId: selection.channel.id, initialWorkspaceId: selection.channel.boundWorkspaceIds[0] })}>新建任务</button></header>
+      <TaskBoard tasks={taskBoardTasks} agents={allAgents} selectedTaskId={selectedTask?.id ?? null} readOnly={false} onSelect={openBoardTask} onMove={moveTask} />
+    </main> : <main className="conversation-panel">
       <header className="channel-header"><NavigationToggle onClick={() => setNavOpen(true)} /><div className="channel-heading"><h1># {selection.channel.name}</h1><p>{selection.channel.archivedAt ? '已归档频道 · 只读' : '全局频道'}</p></div><div className="header-actions"><span className="connection-state" data-reconnecting={reconnecting}>{reconnecting ? '正在重新连接' : '已连接'}</span><button type="button" className="icon-button" aria-label="打开上下文" data-tooltip="打开上下文" onClick={() => setContextOpen(true)}><PanelRightOpen size={18} /></button></div></header>
       {channelActionError && <p className="channel-action-error" role="alert">{channelActionError}</p>}
-      <ChannelTimeline messages={messages} agents={agents} turnActivities={turnActivities} onOpenThread={(message) => { setSelectedThreadRootId(message.id); setSelectedTurnId(null); setContextOpen(true) }} onOpenTurn={(turnId) => { setSelectedTurnId(turnId); setSelectedThreadRootId(null); setContextOpen(true) }} />
-      {selection.channel.archivedAt ? <div className="archived-channel-notice" role="status">此频道已归档，只能查看历史记录。</div> : <MessageComposer channelName={selection.channel.name} agents={agents} onSend={sendMessage} />}
-    </main>
+      <ChannelTimeline messages={messages} agents={channelAgents} turnActivities={turnActivities} turnResults={turnResults} onOpenThread={(message) => { setSelectedThreadRootId(message.id); setSelectedTurnId(null); setContextOpen(true) }} onOpenTurn={(turnId) => { setSelectedTurnId(turnId); setSelectedThreadRootId(null); setContextOpen(true) }} />
+      {selection.channel.archivedAt ? <div className="archived-channel-notice" role="status">此频道已归档，只能查看历史记录。</div> : <MessageComposer channelName={selection.channel.name} agents={channelAgents} onSend={sendMessage} />}
+    </main>}
     <aside className="context-panel" aria-label="任务与上下文" aria-hidden={narrowContext && !contextOpen || undefined} inert={narrowContext && !contextOpen} data-mobile-open={contextOpen}>
       <header className="context-header"><strong>上下文</strong><button type="button" className="icon-button context-close" aria-label="关闭上下文" data-tooltip="关闭上下文" onClick={() => setContextOpen(false)}><X size={17} /></button></header>
-      {threadRoot && <ThreadPanel root={threadRoot} replies={threadReplies} agents={agents} readOnly={Boolean(selection.channel.archivedAt)} onSend={sendThreadMessage} onClose={() => setSelectedThreadRootId(null)} />}
+      {threadRoot && <ThreadPanel root={threadRoot} replies={threadReplies} agents={channelAgents} readOnly={Boolean(selection.channel.archivedAt)} onSend={sendThreadMessage} onClose={() => setSelectedThreadRootId(null)} />}
       {selectedTurnId && <section className="context-section turn-details-context">
         {selectedTurnDetailsError && <div className="turn-detail-refresh-error" role="alert"><span>{selectedTurnDetailsError.message}</span><button type="button" className="secondary-action" disabled={retryingSelectedTurn} onClick={() => void retrySelectedTurnDetails()}>{retryingSelectedTurn ? '正在重试...' : '重试 Turn 详情'}</button></div>}
-        {displayedTurnDetails ? <ConversationTurnDetail key={displayedTurnDetails.turn.id} detail={displayedTurnDetails} agents={agents} onCancel={cancelSelectedTurn} /> : !selectedTurnDetailsError && <p className="context-empty">正在读取 Turn 详情...</p>}
+        {displayedTurnDetails ? <ConversationTurnDetail key={displayedTurnDetails.turn.id} detail={displayedTurnDetails} agents={channelAgents} onCancel={cancelSelectedTurn} /> : !selectedTurnDetailsError && <p className="context-empty">正在读取 Turn 详情...</p>}
       </section>}
-      {taskScope && workspace && <section className="context-section"><div className="context-section-heading"><h2>{taskRepository ? `${taskRepository.name} 任务` : `${workspace.name} 任务`}</h2>{!selection.channel.archivedAt && <button type="button" className="icon-button" aria-label="新建当前上下文任务" data-tooltip="新建任务" onClick={() => setTaskComposerDraft({ initialWorkspaceId: workspace.id })}>+</button>}</div><TaskList tasks={taskScopeTasks} selectedTaskId={selectedTask?.id ?? null} onSelect={setSelectedTaskId} /></section>}
-      {selectedTask && <section className="context-section task-details-context">{taskDetails ? <TaskDetailPanel details={taskDetails} onQueueInput={(body) => queueTaskInput(taskDetails.task.id, body)} onReview={(action) => reviewTask(taskDetails.task.id, action)} onRequeue={() => requeueTask(taskDetails.task.id)} onReadArtifact={(artifactId) => api.readArtifact(taskDetails.task.id, artifactId)} /> : <p className="context-empty">{taskDetailsError ?? '正在读取任务详情...'}</p>}</section>}
-      <ChannelAgentMembers channel={selection.channel} agents={snapshotAgents(snapshot)} api={api} onChanged={refresh} />
-      <ChannelWorkspaceBindings channel={selection.channel} workspaces={snapshot.workspaces} limit={snapshot.maxWorkspaceBindingsPerChannel} api={api} onChanged={refresh} />
-      <section className="context-section"><h2>频道操作</h2>{!selection.channel.archivedAt && canResetChannelContext(selection.channel.name) && <button type="button" className="context-action context-danger" onClick={() => setContextResetDialogOpen(true)}><Trash2 size={16} /> 清空频道上下文</button>}<button type="button" className="context-action" onClick={() => setContextOpen(false)}><PanelRightClose size={16} /> 收起上下文</button></section>
+      <ChannelAgentMembers channel={selection.channel} agents={allAgents} api={api} onChanged={refresh} />
     </aside></>}
-    {taskComposerDraft && <TaskComposerPanel workspaces={selection.boundWorkspaces} agents={agents} initialWorkspaceId={taskComposerDraft.initialWorkspaceId} initialTitle={taskComposerDraft.initialTitle} initialDirectAgentId={taskComposerDraft.initialDirectAgentId} onCreate={createTask} onClose={() => setTaskComposerDraft(null)} />}
+    {taskComposerDraft && <TaskComposerPanel workspaces={snapshot.workspaces} channels={snapshot.channels} agents={snapshotAgents(snapshot)} initialChannelId={taskComposerDraft.channelId ?? selection.channel.id} initialWorkspaceId={taskComposerDraft.initialWorkspaceId} initialTitle={taskComposerDraft.initialTitle} initialDirectAgentId={taskComposerDraft.initialDirectAgentId} onBrowseDirectory={() => api.pickDirectory()} onCreate={createTask} onClose={() => setTaskComposerDraft(null)} />}
+    {taskDetailDialogOpen && selectedTask && <TaskDetailDialog task={selectedTask} details={taskDetails} agents={snapshot ? snapshotAgents(snapshot) : []} error={taskDetailsError} onComment={(body) => addTaskComment(selectedTask, body)} onRetryAnalysis={() => retryTaskAnalysis(selectedTask)} onReadArtifact={readSelectedTaskArtifact} onListOutputFiles={listTaskOutputFiles} onReadOutputFile={readTaskOutputFile} onClose={() => setTaskDetailDialogOpen(false)} />}
     {creatingWorkspace && <WorkspaceCreateDialog onCreate={createWorkspace} onClose={() => setCreatingWorkspace(false)} />}
     {creatingChannel && <ChannelCreateDialog onCreate={createChannel} onClose={() => setCreatingChannel(false)} />}
     {creatingAgent && <AgentCreateDialog onCreate={createAgent} onClose={() => setCreatingAgent(false)} />}
     {selectedAgent && <AgentConfigDialog agent={selectedAgent} refreshingRuntime={refreshingAgentId === selectedAgent.id} onRefreshRuntime={refreshAgentRuntime} onUpdateIdentity={updateAgentIdentity} onUpdateResponsibilities={updateAgentResponsibilities} onClose={() => setSelectedAgent(null)} />}
-    {contextResetDialogOpen && <ChannelContextResetDialog channelName={selection.channel.name} onConfirm={resetChannelContext} onClose={() => setContextResetDialogOpen(false)} />}
   </div>
 }
 
@@ -536,17 +584,12 @@ function findSelection(snapshot: WorkspaceSnapshot | null, selectedChannelId: st
 }
 
 function findTask(snapshot: WorkspaceSnapshot | null, taskId: string | null, channelId: string | undefined, boundWorkspaceIds: string[]): TaskView | undefined {
-  if (!taskId || !channelId) return undefined
+  if (!taskId) return undefined
   return snapshot?.tasks.find((task) =>
     task.id === taskId
-    && task.channelId === channelId
+    && (!channelId || task.channelId === channelId)
     && boundWorkspaceIds.includes(task.workspaceId),
   )
-}
-
-function findRepository(workspace: WorkspaceView | undefined, repositoryId: string | null): RepositoryView | undefined {
-  if (!repositoryId) return undefined
-  return workspace?.repositories.find((repository) => repository.id === repositoryId)
 }
 
 function useMediaQuery(query: string): boolean {
@@ -566,9 +609,18 @@ function useMediaQuery(query: string): boolean {
 const selectionStorageKey = 'sinapsis:workspace-selection'
 
 interface TaskComposerDraft {
+  channelId?: string
   initialWorkspaceId?: string
   initialTitle?: string
   initialDirectAgentId?: string
+}
+
+function workspaceNameFromDirectory(directory: string): string {
+  return directory.split('/').filter(Boolean).at(-1) ?? '本地工作空间'
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 }
 
 interface TurnDetailsError {

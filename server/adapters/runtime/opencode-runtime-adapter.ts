@@ -84,7 +84,7 @@ export class OpenCodeRuntimeAdapter implements RuntimeAdapter {
 
   private launch(session: RuntimeSession, prompt: string, sink: RuntimeEventSink): void {
     const restricted = session.executionPolicy === 'read-only-no-tools'
-    const args = [...(restricted ? [] : session.profile.args), '--format', 'json', '--dir', session.worktreePath]
+    const args = [...(restricted ? ['run'] : session.profile.args), '--format', 'json', '--dir', session.worktreePath]
     if (isQualifiedModel(session.profile.model)) args.push('--model', session.profile.model)
     if (session.sessionId) args.push('--session', session.sessionId)
     if (restricted) args.push('--pure', '--agent', RESTRICTED_AGENT)
@@ -220,7 +220,7 @@ function initialPrompt(task: RuntimeTaskRequest): string {
 function taskPrompt(task: RuntimeTaskRequest): string {
   return [
     'You are working on a single assigned task inside the provided worktree.',
-    'Do not push, merge, or modify files outside this worktree. You may run tests and create a commit on the task branch.',
+    'Do not push, merge, or modify files outside this worktree. Completion is determined by the task result, not Git activity. Do not create a branch or commit unless the task explicitly asks for one.',
     `Task: ${task.title}`,
     task.description,
     `Acceptance criteria: ${task.acceptanceCriteria}`,

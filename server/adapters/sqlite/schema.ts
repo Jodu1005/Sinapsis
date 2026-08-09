@@ -360,7 +360,7 @@ export function migrateSchema(database: DatabaseSync): void {
           channel_id TEXT NOT NULL REFERENCES channels(id),
           thread_root_message_id TEXT REFERENCES messages(id),
           agent_id TEXT NOT NULL REFERENCES agents(id),
-          runtime TEXT NOT NULL CHECK(runtime IN ('opencode', 'pi', 'claude-code')),
+          runtime TEXT NOT NULL CHECK(runtime IN ('opencode', 'opencode-acp', 'pi', 'claude-code')),
           runtime_session_id TEXT,
           runtime_session_file TEXT,
           status TEXT NOT NULL CHECK(status IN ('ready', 'active', 'stale', 'failed')),
@@ -801,6 +801,31 @@ export function migrateSchema(database: DatabaseSync): void {
           ON dream_recovery_audit(entity_type, entity_id, error);
       `)
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(24, new Date().toISOString())
+    }
+
+    const twentyFifthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 25').get()
+    if (!twentyFifthMigration) {
+      database.exec(`
+        ALTER TABLE conversation_sessions RENAME TO conversation_sessions_v24;
+        CREATE TABLE conversation_sessions (
+          id TEXT NOT NULL UNIQUE,
+          key TEXT PRIMARY KEY,
+          channel_id TEXT NOT NULL REFERENCES channels(id),
+          thread_root_message_id TEXT REFERENCES messages(id),
+          agent_id TEXT NOT NULL REFERENCES agents(id),
+          runtime TEXT NOT NULL CHECK(runtime IN ('opencode', 'opencode-acp', 'pi', 'claude-code')),
+          runtime_session_id TEXT,
+          runtime_session_file TEXT,
+          status TEXT NOT NULL CHECK(status IN ('ready', 'active', 'stale', 'failed')),
+          last_message_id TEXT REFERENCES messages(id),
+          last_used_at TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO conversation_sessions SELECT * FROM conversation_sessions_v24;
+        DROP TABLE conversation_sessions_v24;
+      `)
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(25, new Date().toISOString())
     }
 
     database.exec(`

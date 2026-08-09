@@ -5,7 +5,7 @@ import type { RuntimeKind } from '../adapters/runtime/runtime-profile'
 import type { Agent } from '../domain/agent'
 import type { ConversationSession } from '../domain/conversation'
 import type { WorkspaceRepositories } from '../ports/repositories'
-import type { RuntimeAdapter, RuntimeEvent, RuntimeSession, RuntimeTaskRequest } from '../ports/runtime'
+import type { RuntimeAdapter, RuntimeEvent, RuntimeExecutionPolicy, RuntimeSession, RuntimeTaskRequest } from '../ports/runtime'
 import {
   parseDuplicateDecision,
   parseParticipation,
@@ -25,6 +25,7 @@ export interface ConversationSessionInvocation {
   agent: Agent
   context: string
   initialMessage: string
+  executionPolicy?: RuntimeExecutionPolicy
   conversation?: ConversationMetadata
   candidateAgentIds?: string[]
   onSettled?(result: ConversationSessionResult): void
@@ -265,6 +266,7 @@ export class ConversationSessionService {
         env: input.agent.env,
         policy: 'task-worktree',
       },
+      executionPolicy: input.executionPolicy,
       conversation: input.conversation,
     }, (event) => this.handleRuntimeEvent(state, event))
 

@@ -66,6 +66,7 @@ import type {
   CancelConversationTurnInput,
   CancelConversationTurnResult,
   ConversationTurnDetails,
+  ConversationTurnParticipantSnapshot,
   ConversationTurnClaimResult,
   ExpiredLease,
   LeaseRecovery,
@@ -113,6 +114,7 @@ interface TaskRow {
   channel_id: string
   thread_root_message_id: string | null
   direct_agent_id: string | null
+  last_agent_id?: string | null
   title: string
   description: string
   acceptance_criteria: string
@@ -260,7 +262,7 @@ interface AgentRow {
   workspace_id: string
   identity: string
   mention_name: string
-  runtime: 'opencode' | 'pi' | 'claude-code'
+  runtime: 'opencode' | 'opencode-acp' | 'pi' | 'claude-code'
   status: Agent['status']
   capability_tags_json: string
   responsibilities_json: string
@@ -450,7 +452,7 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     if (!channel) throw new Error(`Channel ${channelId} does not exist.`)
     if (channel.archivedAt) return channel
     const activeTask = this.database.prepare(`
-      SELECT id FROM tasks WHERE channel_id = ? AND status NOT IN ('accepted', 'merged', 'cancelled') LIMIT 1
+      SELECT id FROM tasks WHERE channel_id = ? AND status NOT IN ('completed', 'accepted', 'merged', 'cancelled') LIMIT 1
     `).get(channelId)
     if (activeTask) throw new DomainError(`Channel #${channel.name} has unfinished tasks and cannot be archived.`)
     const archivedAt = occurredAt.toISOString()
@@ -560,7 +562,7 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
       description: requireText(input.description, 'Task description'),
       acceptanceCriteria: requireText(input.acceptanceCriteria, 'Acceptance criteria'),
       labels: input.labels ?? [],
-      status: 'queued',
+      status: input.status ?? 'queued',
       queuedAt: createdAt,
       attemptCount: 0,
       maxRetries: input.maxRetries ?? 2,
@@ -1008,7 +1010,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
     this.inTransaction((unitOfWork) => unitOfWork.createReviewDecision(taskId, decision, reason))
   }
 
-  finishTaskExecution(taskId: string, agentId: string, next: Extract<TaskStatus, 'in_review' | 'needs_human' | 'cancelled'>, reason: string): Task {
+  finishTaskExecution(taskId: string, agentId: string, next: Extract<TaskStatus, 'completed' | 'in_review' | 'needs_human' | 'cancelled'>, reason: string): Task {
     return this.inTransaction((unitOfWork) => {
       const task = readTask(this.sqlite.database, taskId)
       if (!task) throw new Error(`Task ${taskId} does not exist.`)
@@ -1016,7 +1018,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
       const updatedAt = new Date(transitioned.updatedAt)
       this.sqlite.database.prepare('DELETE FROM task_leases WHERE task_id = ? AND agent_id = ?').run(taskId, agentId)
       this.sqlite.database.prepare('UPDATE agents SET status = ?, updated_at = ? WHERE id = ?').run('idle', transitioned.updatedAt, agentId)
-      const sessionStatus = next === 'in_review' ? 'completed' : next === 'cancelled' ? 'cancelled' : 'failed'
+      const sessionStatus = next === 'completed' || next === 'in_review' ? 'completed' : next === 'cancelled' ? 'cancelled' : 'failed'
       const sessionUpdate = this.sqlite.database.prepare(`
         UPDATE task_sessions SET status = ?, updated_at = ?
         WHERE id = (
@@ -1091,6 +1093,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
       sessions: (database.prepare('SELECT * FROM task_sessions WHERE task_id = ? ORDER BY created_at').all(taskId) as unknown as TaskSessionRow[]).map(mapTaskSession),
       leases: (database.prepare('SELECT * FROM task_leases WHERE task_id = ? ORDER BY created_at').all(taskId) as unknown as TaskLeaseRow[]).map(mapTaskLease),
       inputs: (database.prepare('SELECT * FROM task_input_queue WHERE task_id = ? ORDER BY created_at').all(taskId) as unknown as TaskInputRow[]).map(mapTaskInput),
+      comments: (database.prepare('SELECT * FROM messages WHERE task_id = ? AND deleted_at IS NULL ORDER BY created_at, rowid').all(taskId) as unknown as MessageRow[]).map(mapMessage),
       decisions: (database.prepare('SELECT * FROM review_decisions WHERE task_id = ? ORDER BY created_at').all(taskId) as unknown as ReviewDecisionRow[]).map(mapReviewDecision),
       artifacts: (database.prepare('SELECT * FROM task_artifacts WHERE task_id = ? ORDER BY created_at').all(taskId) as unknown as TaskArtifactRow[]).map(mapTaskArtifact),
       events: (database.prepare('SELECT * FROM task_events WHERE task_id = ? ORDER BY created_at').all(taskId) as unknown as TaskEventRow[]).map(mapTaskEvent),
@@ -1680,6 +1683,20 @@ export class SqliteRepositories implements WorkspaceRepositories {
       invocations: this.listAgentInvocations(turnId),
       handoffs: this.listConversationHandoffs(turnId),
     }
+  }
+
+  listRecentConversationTurnParticipants(channelId: string, limit = 12): ConversationTurnParticipantSnapshot[] {
+    const rows = this.sqlite.database.prepare(`
+      SELECT id
+      FROM conversation_turns
+      WHERE channel_id = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?
+    `).all(channelId, Math.max(1, Math.floor(limit))) as Array<{ id: string }>
+    return rows.reverse().flatMap((row) => {
+      const turn = this.getConversationTurn(row.id)
+      return turn ? [{ turn, participants: this.listTurnParticipants(row.id) }] : []
+    })
   }
 
   listActiveConversationActivity(channelId?: string): ActiveConversationTurnProjection[] {
@@ -2374,11 +2391,11 @@ export class SqliteRepositories implements WorkspaceRepositories {
             direct_agent_id = ?
             OR EXISTS (SELECT 1 FROM task_leases WHERE task_leases.task_id = tasks.id AND task_leases.agent_id = ?)
           )
-          AND status NOT IN ('accepted', 'merged', 'cancelled') LIMIT 1
+          AND status NOT IN ('completed', 'accepted', 'merged', 'cancelled') LIMIT 1
         `).get(channelId, workspaceId, agentId, agentId)
       : this.sqlite.database.prepare(`
           SELECT 1 FROM tasks WHERE channel_id = ? AND workspace_id = ?
-          AND status NOT IN ('accepted', 'merged', 'cancelled') LIMIT 1
+          AND status NOT IN ('completed', 'accepted', 'merged', 'cancelled') LIMIT 1
         `).get(channelId, workspaceId)
     return row !== undefined
   }
@@ -2452,8 +2469,9 @@ export class SqliteRepositories implements WorkspaceRepositories {
         if (!candidate) return undefined
 
         const taskUpdate = database.prepare(`
-          UPDATE tasks SET status = 'claimed', updated_at = ? WHERE id = ? AND status = 'queued'
-        `).run(occurredAtIso, candidate.id)
+          UPDATE tasks SET status = 'claimed', direct_agent_id = COALESCE(direct_agent_id, ?), updated_at = ?
+          WHERE id = ? AND status = 'queued'
+        `).run(agentId, occurredAtIso, candidate.id)
         if (Number(taskUpdate.changes) === 1) break
       }
 
@@ -2471,7 +2489,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
 
       unitOfWork.recordTaskEvent(candidate.id, 'task.claimed', { agentId, leaseId: lease.id, expiresAt: lease.expiresAt })
       unitOfWork.afterCommit(event('agent.status_changed', 'agent', agentId, occurredAtIso))
-      return { task: { ...candidate, status: 'claimed', updatedAt: occurredAtIso }, lease }
+      return { task: { ...candidate, directAgentId: candidate.directAgentId ?? agentId, status: 'claimed', updatedAt: occurredAtIso }, lease }
     })
   }
 
@@ -2652,7 +2670,14 @@ export class SqliteRepositories implements WorkspaceRepositories {
       }
     })
     const tasks = (database.prepare(`
-      SELECT tasks.* FROM tasks
+      SELECT tasks.*,
+        (
+          SELECT task_sessions.agent_id FROM task_sessions
+          WHERE task_sessions.task_id = tasks.id
+          ORDER BY task_sessions.created_at DESC, task_sessions.rowid DESC
+          LIMIT 1
+        ) AS last_agent_id
+      FROM tasks
       JOIN channels ON channels.id = tasks.channel_id
       WHERE channels.context_reset_at IS NULL OR tasks.created_at > channels.context_reset_at
       ORDER BY tasks.queued_at, tasks.rowid
@@ -2864,6 +2889,7 @@ function mapTask(row: TaskRow): Task {
     channelId: row.channel_id,
     threadRootMessageId: row.thread_root_message_id,
     directAgentId: row.direct_agent_id,
+    lastAgentId: row.last_agent_id ?? null,
     title: row.title,
     description: row.description,
     acceptanceCriteria: row.acceptance_criteria,

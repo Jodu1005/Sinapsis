@@ -3,6 +3,7 @@ import path from 'node:path'
 import { CommandGitClient } from './adapters/git/git-client'
 import { GitWorktreeManager } from './adapters/git/git-worktree-manager'
 import { ClaudeCodeRuntimeAdapter } from './adapters/runtime/claude-code-runtime-adapter'
+import { OpenCodeAcpRuntimeAdapter } from './adapters/runtime/opencode-acp-runtime-adapter'
 import { OpenCodeRuntimeAdapter } from './adapters/runtime/opencode-runtime-adapter'
 import { PiRuntimeAdapter } from './adapters/runtime/pi-runtime-adapter'
 import { CommandRuntimeAvailabilityDetector, resolveRuntimeProfile, runtimeKinds, type RuntimeAvailabilityDetector } from './adapters/runtime/runtime-profile'
@@ -14,7 +15,9 @@ import { ChannelMembershipService } from './application/channel-membership-servi
 import { ChannelMessageService } from './application/channel-message-service'
 import { ChannelContextResetService } from './application/channel-context-reset-service'
 import { ChannelWorkspaceService } from './application/channel-workspace-service'
+import { BacklogAnalysisService } from './application/backlog-analysis-service'
 import { ConversationCoordinator } from './application/conversation-coordinator'
+import { ConversationSessionService } from './application/conversation-session-service'
 import { DreamRunService } from './application/dream-run-service'
 import { MemoryConsolidator } from './application/memory-consolidator'
 import { MemoryReviewService, MemoryReviewValidationError } from './application/memory-review-service'
@@ -23,7 +26,7 @@ import { routeMentions, UnknownMentionError } from './application/mention-router
 import { TaskExecutionCoordinator } from './application/task-execution-coordinator'
 import { TaskReviewService } from './application/task-review-service'
 import { TaskScheduler } from './application/task-scheduler'
-import { TaskService } from './application/task-service'
+import { TaskService, type BacklogAnalysisStarter } from './application/task-service'
 import {
   DeterministicRollingThreadSummaryGenerator,
   ThreadSummaryService,
@@ -36,11 +39,13 @@ import type {
   ConversationTurn,
   TurnParticipant,
 } from './domain/conversation'
-import { DomainError } from './domain/task'
+import { DomainError, type Task } from './domain/task'
 import type { DreamRun, DreamRunErrorCategory, MemoryCandidate, MemoryCandidateStatus, MemoryRecord } from './domain/memory'
 import type { GitClient } from './ports/git-client'
 import { NodeProcessRunner } from './ports/process-runner'
-import type { ConversationTurnDetails, WorkspaceRepositories, WorkspaceUnitOfWork } from './ports/repositories'
+import { NativeDirectoryPicker } from './adapters/system/native-directory-picker'
+import type { DirectoryPicker } from './ports/directory-picker'
+import type { ConversationTurnParticipantSnapshot, ConversationTurnDetails, WorkspaceRepositories, WorkspaceUnitOfWork } from './ports/repositories'
 import type { RuntimeAdapter } from './ports/runtime'
 import { createHumanCapability, requireHumanCapability } from './human-capability'
 
@@ -127,7 +132,9 @@ export interface CreateAppOptions {
   >>
   scheduler?: TaskScheduler
   reviewService?: TaskReviewService
+  backlogAnalysisStarter?: BacklogAnalysisStarter
   humanCapability?: string
+  directoryPicker?: DirectoryPicker
 }
 
 export function createApp(options: CreateAppOptions = {}): Express {
@@ -141,15 +148,26 @@ export function createApp(options: CreateAppOptions = {}): Express {
   const eventPublisher = new SseDomainEventPublisher()
   const repositories = new SqliteRepositories(database, eventPublisher, maxWorkspaceBindingsPerChannel)
   const catalog = new RepositoryWorkspaceCatalog(repositories)
-  const workspaceService = new WorkspaceService(catalog, options.gitClient ?? new CommandGitClient())
+  const gitClient = options.gitClient ?? new CommandGitClient()
+  const workspaceService = new WorkspaceService(catalog, gitClient)
   const agentService = new AgentService(catalog, options.runtimeAvailabilityDetector ?? new CommandRuntimeAvailabilityDetector())
-  const taskService = new TaskService(repositories)
   const messages = new ChannelMessageService(repositories)
   const runtimes = {
     opencode: new OpenCodeRuntimeAdapter(new NodeProcessRunner()),
+    'opencode-acp': new OpenCodeAcpRuntimeAdapter(new NodeProcessRunner()),
     pi: new PiRuntimeAdapter(new NodeProcessRunner(), path.dirname(databasePath)),
     'claude-code': new ClaudeCodeRuntimeAdapter(new NodeProcessRunner()),
   }
+  const backlogAnalysisStarter = options.backlogAnalysisStarter ?? (process.env.NODE_ENV === 'test' ? undefined : new BacklogAnalysisService({
+    repositories,
+    messages,
+    sessions: new ConversationSessionService({
+      repositories,
+      runtimes: options.conversationRuntimes ?? runtimes,
+      conversationDirectory: path.join(path.dirname(databasePath), 'backlog-analysis'),
+    }),
+  }))
+  const taskService = new TaskService(repositories, backlogAnalysisStarter, gitClient)
   const coordinator = options.executionCoordinator ?? new TaskExecutionCoordinator({
     repositories,
     runtimes,
@@ -179,6 +197,14 @@ export function createApp(options: CreateAppOptions = {}): Express {
   )
   const scheduler = options.scheduler ?? new TaskScheduler(repositories, coordinator)
   const reviewService = options.reviewService ?? new TaskReviewService(repositories, coordinator, messages)
+  const nudgeTaskScheduler = (task: Task) => {
+    if (task.status !== 'queued') return
+    if (task.directAgentId) {
+      scheduler.claimNext(task.directAgentId)
+      return
+    }
+    for (const agentId of repositories.getIdleAgentIds()) scheduler.claimNext(agentId)
+  }
   const dreamRunService = new DreamRunService({
     repositories,
     consolidator: new MemoryConsolidator({
@@ -192,6 +218,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
     concurrency: serviceConfig.dreamMaintenanceConcurrency,
   })
   const memoryReviewService = new MemoryReviewService({ repositories })
+  const directoryPicker = options.directoryPicker ?? new NativeDirectoryPicker()
 
   app.locals.closeDatabase = () => database.close()
   app.locals.closeSse = () => eventPublisher.close()
@@ -207,6 +234,12 @@ export function createApp(options: CreateAppOptions = {}): Express {
   app.get('/api/health', (_request, response) => {
     response.json({ status: 'ok' })
   })
+
+  app.post('/api/directories/pick', asyncRoute(async (request, response) => {
+    const body = request.body === undefined ? {} : objectBody(request.body)
+    assertOnlyKeys(body, [])
+    response.json({ directory: await directoryPicker.pickDirectory() })
+  }))
 
   app.get('/api/dream/runs', requireHuman, (_request, response) => {
     response.json(repositories.listDreamRuns().map(toPublicDreamRun))
@@ -281,12 +314,16 @@ export function createApp(options: CreateAppOptions = {}): Express {
     const activeTurnsByChannel = Object.fromEntries(snapshot.channels.map((channel) => (
       [channel.id, projectedActivities[channel.id] ?? []]
     )))
+    const recentTurnResultsByChannel = Object.fromEntries(snapshot.channels.map((channel) => [
+      channel.id,
+      repositories.listRecentConversationTurnParticipants(channel.id).map(toPublicTurnResultSummary),
+    ]))
     const typingAgentIdsByChannel = Object.fromEntries(snapshot.channels.map((channel) => [
       channel.id,
       [...new Set(activeTurnsByChannel[channel.id]
         .flatMap((activity) => activity.agentId ? [activity.agentId] : []))],
     ]))
-    response.json(sanitizeBootstrap(snapshot, typingAgentIdsByChannel, activeTurnsByChannel))
+    response.json(sanitizeBootstrap(snapshot, typingAgentIdsByChannel, activeTurnsByChannel, recentTurnResultsByChannel))
   })
 
   app.post('/api/workspaces', asyncRoute((request, response) => {
@@ -444,9 +481,9 @@ export function createApp(options: CreateAppOptions = {}): Express {
     const task = taskService.createTask({
       workspaceId: requiredString(body, 'workspaceId'),
       channelId: requiredParam(request.params.channelId, 'channelId'),
-      title: requiredString(body, 'title'),
+      title: optionalTaskString(body, 'title'),
       description: requiredString(body, 'description'),
-      acceptanceCriteria: requiredString(body, 'acceptanceCriteria'),
+      acceptanceCriteria: optionalTaskString(body, 'acceptanceCriteria'),
       labels: body.labels === undefined ? undefined : requiredStringArray(body, 'labels'),
       directAgentId: optionalString(body, 'directAgentId'),
       timeoutMs: optionalPositiveInteger(body, 'timeoutMs'),
@@ -466,9 +503,9 @@ export function createApp(options: CreateAppOptions = {}): Express {
       workspaceId: repository.workspaceId,
       repositoryId,
       channelId: requiredString(body, 'channelId'),
-      title: requiredString(body, 'title'),
+      title: optionalTaskString(body, 'title'),
       description: requiredString(body, 'description'),
-      acceptanceCriteria: requiredString(body, 'acceptanceCriteria'),
+      acceptanceCriteria: optionalTaskString(body, 'acceptanceCriteria'),
       labels: body.labels === undefined ? undefined : requiredStringArray(body, 'labels'),
       directAgentId: optionalString(body, 'directAgentId'),
       timeoutMs: optionalPositiveInteger(body, 'timeoutMs'),
@@ -488,6 +525,16 @@ export function createApp(options: CreateAppOptions = {}): Express {
       ...details,
       artifacts: details.artifacts.map(({ path: _path, ...artifact }) => artifact),
     })
+  }))
+
+  app.post('/api/tasks/:taskId/analyze', asyncRoute((request, response) => {
+    const body = request.body === undefined ? {} : objectBody(request.body)
+    assertOnlyKeys(body, [])
+    const task = taskService.getTaskDetails(requiredParam(request.params.taskId, 'taskId')).task
+    if (task.status !== 'backlog') throw new DomainError('Only backlog tasks can be analyzed.')
+    if (!backlogAnalysisStarter) throw new DomainError('Backlog analysis is unavailable.')
+    backlogAnalysisStarter.start(task)
+    response.status(202).json(task)
   }))
 
   app.post('/api/tasks/:taskId/input', asyncRoute((request, response) => {
@@ -574,12 +621,34 @@ export function createApp(options: CreateAppOptions = {}): Express {
     const action = requiredString(body, 'action')
     if (action !== 'accept' && action !== 'return') throw new ValidationError('action must be accept or return.')
     const task = await reviewService.review(requiredParam(request.params.taskId, 'taskId'), action, requiredString(body, 'message'))
+    nudgeTaskScheduler(task)
     response.json(task)
+  }))
+
+  app.post('/api/tasks/:taskId/move', asyncRoute(async (request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['lane', 'message'])
+    const taskId = requiredParam(request.params.taskId, 'taskId')
+    const lane = taskBoardLane(requiredString(body, 'lane'))
+    let task: Task
+    if (lane === 'todo') {
+      const current = taskService.getTaskDetails(taskId).task
+      task = current.status === 'in_review'
+        ? await reviewService.review(taskId, 'return', requiredString(body, 'message'))
+        : taskService.requeueTask(taskId)
+    } else if (lane === 'done') {
+      const message = typeof body.message === 'string' && body.message.trim() ? body.message.trim() : '验收已通过。'
+      task = await reviewService.review(taskId, 'accept', message)
+    } else {
+      throw new DomainError('Human task moves are limited to backlog -> todo, review -> todo, and review -> done.')
+    }
+    nudgeTaskScheduler(task)
+    response.json(repositories.getTask(task.id) ?? task)
   }))
 
   app.post('/api/tasks/:taskId/requeue', asyncRoute((request, response) => {
     const task = taskService.requeueTask(requiredParam(request.params.taskId, 'taskId'))
-    if (task.directAgentId) scheduler.claimNext(task.directAgentId)
+    nudgeTaskScheduler(task)
     response.json(repositories.getTask(task.id) ?? task)
   }))
 
@@ -599,6 +668,17 @@ export function createApp(options: CreateAppOptions = {}): Express {
       requiredParam(request.params.taskId, 'taskId'), requiredParam(request.params.artifactId, 'artifactId'),
     )
     response.type(artifact.kind.startsWith('runtime-') || artifact.kind === 'review-controlled-stderr' ? 'text/plain' : 'application/json').send(artifact.content)
+  }))
+
+  app.get('/api/tasks/:taskId/files', asyncRoute(async (request, response) => {
+    response.json(await taskService.listOutputFiles(requiredParam(request.params.taskId, 'taskId')))
+  }))
+
+  app.get('/api/tasks/:taskId/files/read', asyncRoute(async (request, response) => {
+    const file = await taskService.readOutputFile(
+      requiredParam(request.params.taskId, 'taskId'), requiredParam(request.query.path, 'path'),
+    )
+    response.type('text/plain').send(file.content)
   }))
 
   app.get('/events', (request, response) => {
@@ -688,6 +768,17 @@ function requiredRawString(body: Record<string, unknown>, key: string): string {
 function optionalString(body: Record<string, unknown>, key: string): string | undefined {
   if (body[key] === undefined) return undefined
   return requiredString(body, key)
+}
+
+function optionalTaskString(body: Record<string, unknown>, key: string): string | undefined {
+  if (body[key] === undefined) return undefined
+  if (typeof body[key] !== 'string') throw new ValidationError(`${key} must be a string.`)
+  return body[key].trim() || undefined
+}
+
+function taskBoardLane(value: string): 'backlog' | 'todo' | 'doing' | 'review' | 'done' {
+  if (value === 'backlog' || value === 'todo' || value === 'doing' || value === 'review' || value === 'done') return value
+  throw new ValidationError('lane must be backlog, todo, doing, review, or done.')
 }
 
 function requiredStringArray(body: Record<string, unknown>, key: string): string[] {
@@ -837,12 +928,30 @@ function sanitizeBootstrap(
   snapshot: ReturnType<WorkspaceRepositories['getBootstrap']>,
   typingAgentIdsByChannel: Record<string, string[]>,
   activeTurnsByChannel: Record<string, TurnActivity[]>,
+  recentTurnResultsByChannel: Record<string, PublicTurnResultSummary[]>,
 ) {
   return {
     ...snapshot,
     agents: snapshot.agents.map(sanitizeAgent),
     typingAgentIdsByChannel,
     activeTurnsByChannel,
+    recentTurnResultsByChannel,
+  }
+}
+
+interface PublicTurnResultSummary {
+  turnId: string
+  triggerMessageId: string
+  status: ConversationTurn['status']
+  participants: Array<Pick<TurnParticipant, 'agentId' | 'decision' | 'status'>>
+}
+
+function toPublicTurnResultSummary(details: ConversationTurnParticipantSnapshot): PublicTurnResultSummary {
+  return {
+    turnId: details.turn.id,
+    triggerMessageId: details.turn.triggerMessageId,
+    status: details.turn.status,
+    participants: details.participants.map(({ agentId, decision, status }) => ({ agentId, decision, status })),
   }
 }
 

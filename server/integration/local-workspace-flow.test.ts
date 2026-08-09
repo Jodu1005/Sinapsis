@@ -9,7 +9,6 @@ import { FakeRuntimeAdapter } from '../adapters/runtime/fake-runtime-adapter'
 import { createSqliteDatabase, type SqliteDatabase } from '../adapters/sqlite/database'
 import { SqliteRepositories } from '../adapters/sqlite/sqlite-repositories'
 import { TaskExecutionCoordinator } from '../application/task-execution-coordinator'
-import { TaskReviewService } from '../application/task-review-service'
 import { TaskScheduler } from '../application/task-scheduler'
 import type { DomainEvent } from '../domain/events'
 import type { DomainEventPublisher } from '../ports/domain-event-publisher'
@@ -31,7 +30,7 @@ describe('local workspace flow', () => {
     source = undefined
   })
 
-  it('coordinates FIFO tasks in separate worktrees and accepts a committed result without merging', async () => {
+  it('coordinates FIFO tasks in separate worktrees and completes a settled result without merging', async () => {
     dataDirectory = await mkdtemp(path.join(tmpdir(), 'sinapsis-local-flow-'))
     database = createSqliteDatabase(path.join(dataDirectory, 'sinapsis.sqlite'))
     const repositories = new SqliteRepositories(database, new NoopEventPublisher())
@@ -137,13 +136,7 @@ describe('local workspace flow', () => {
     await coordinator.flush(firstTask.id)
 
     expect(repositories.getTask(firstTask.id)?.status).toBe('in_review')
-    const review = new TaskReviewService(repositories, coordinator)
-    await review.review(firstTask.id, 'accept', 'Evidence is sufficient.')
-
-    expect(repositories.getTask(firstTask.id)?.status).toBe('accepted')
-    expect(repositories.getTaskDetails(firstTask.id)?.decisions).toEqual([
-      expect.objectContaining({ decision: 'accept' }),
-    ])
+    expect(repositories.getTaskDetails(firstTask.id)?.decisions).toEqual([])
     await expect(execFileAsync('git', ['-C', source.repositoryRoot, 'merge-base', '--is-ancestor', commit, 'main'], { shell: false })).rejects.toThrow()
     const sourceBranch = (await execFileAsync('git', ['-C', source.repositoryRoot, 'branch', '--show-current'], { shell: false })).stdout.trim()
     expect(sourceBranch).toBe('main')
@@ -192,7 +185,7 @@ describe('local workspace flow', () => {
   })
 })
 
-function agentInput(workspaceId: string, mentionName: string, runtime: 'opencode' | 'pi' | 'claude-code', command: string) {
+function agentInput(workspaceId: string, mentionName: string, runtime: 'opencode' | 'opencode-acp' | 'pi' | 'claude-code', command: string) {
   return {
     workspaceId,
     identity: mentionName,

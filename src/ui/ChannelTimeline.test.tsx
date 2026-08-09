@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { AgentView, ChannelMessage, TurnActivityView } from '../domain/workspace-view'
+import type { AgentView, ChannelMessage, TurnActivityView, TurnResultSummaryView } from '../domain/workspace-view'
 import { ChannelTimeline } from './ChannelTimeline'
 
 const agents: AgentView[] = [
@@ -61,6 +61,17 @@ describe('ChannelTimeline', () => {
     expect(screen.queryByText('Newton 正在准备回复')).not.toBeInTheDocument()
   })
 
+  it('renders Agent replies as compact Markdown', () => {
+    render(<ChannelTimeline messages={[{
+      id: 'agent-markdown', channelId: 'channel-1', taskId: null, senderType: 'agent', senderId: 'agent-newton', authorName: 'Newton',
+      body: '## 处理结果\n\n- **测试已通过**\n- 查看了 `TaskBoard`', createdAt: '2026-07-31T08:02:00.000Z', updatedAt: '2026-07-31T08:02:00.000Z', deletedAt: null,
+    }]} />)
+
+    expect(screen.getByRole('heading', { name: '处理结果' })).toBeInTheDocument()
+    expect(screen.getByText('测试已通过').tagName).toBe('STRONG')
+    expect(screen.getByText('TaskBoard').tagName).toBe('CODE')
+  })
+
   it('shows stable multi-agent turn activity at the bottom of the timeline', async () => {
     const user = userEvent.setup()
     const openTurn = vi.fn()
@@ -74,6 +85,25 @@ describe('ChannelTimeline', () => {
     await user.click(screen.getByRole('button', { name: '查看 Turn turn-1 活动详情' }))
 
     expect(openTurn).toHaveBeenCalledWith('turn-1')
+  })
+
+  it('shows each Agent participation result under the triggering message', async () => {
+    const user = userEvent.setup()
+    const openTurn = vi.fn()
+    const results: TurnResultSummaryView[] = [{
+      turnId: 'turn-result', triggerMessageId: humanMessage.id, status: 'completed', participants: [
+        { agentId: 'agent-newton', decision: 'silent', status: 'skipped' },
+        { agentId: 'agent-clawd', decision: 'speak', status: 'spoken' },
+      ],
+    }]
+
+    render(<ChannelTimeline messages={[humanMessage]} agents={agents} turnResults={results} onOpenTurn={openTurn} />)
+
+    expect(screen.getByLabelText('Turn turn-result 参与结果')).toBeInTheDocument()
+    expect(screen.getByText('未参与')).toBeInTheDocument()
+    expect(screen.getByText('已回复')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Turn 结果' }))
+    expect(openTurn).toHaveBeenCalledWith('turn-result')
   })
 
   it('keeps a new turn preparing activity visible when the same Agent has an older reply', () => {

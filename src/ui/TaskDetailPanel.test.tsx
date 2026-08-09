@@ -31,12 +31,12 @@ describe('TaskDetailPanel', () => {
 
     expect(screen.getByRole('heading', { name: '概览' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '输入队列' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '证据' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '处理记录' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '审查' })).toBeInTheDocument()
     expect(screen.getByText(/此版本没有 OS 级沙箱/)).toBeInTheDocument()
-    expect(screen.getByText(/工作树隔离是约定而非权限边界/)).toBeInTheDocument()
+    expect(screen.getByText(/运行目录隔离是约定而非权限边界/)).toBeInTheDocument()
     expect(screen.getByText(/运行未经信任的本地 CLI 前，请先确认信任它/)).toBeInTheDocument()
-    expect(screen.getByText(/内置 API 不会自动 push 或 merge/)).toBeInTheDocument()
+    expect(screen.getByText('审核只看任务结果，无需提交或合并。')).toBeInTheDocument()
     expect(await screen.findByText('abc123 Implement mobile drawer')).toBeInTheDocument()
     expect(screen.getByText('M src/ui/WorkspaceShell.tsx')).toBeInTheDocument()
     expect(screen.getByText('受控进程 stderr（非测试结论）')).toBeInTheDocument()
@@ -45,8 +45,8 @@ describe('TaskDetailPanel', () => {
     const runtimeLog = screen.getByText('运行日志').closest('details')
     expect(runtimeLog).not.toHaveAttribute('open')
     await userEvent.setup().click(screen.getByRole('button', { name: '接受验收' }))
-    expect(onReview).toHaveBeenCalledWith('accept')
-    expect(await screen.findByText('验收已通过，尚未合并')).toBeInTheDocument()
+    expect(onReview).toHaveBeenCalledWith('accept', '验收已通过。')
+    expect(await screen.findByText('验收已通过')).toBeInTheDocument()
     expect(screen.queryByText('已合并')).not.toBeInTheDocument()
   })
 
@@ -54,12 +54,12 @@ describe('TaskDetailPanel', () => {
     const onReview = vi.fn().mockResolvedValue({ ...task, status: 'accepted' })
     const view = render(<TaskDetailPanel details={details} onQueueInput={vi.fn()} onReview={onReview} onReadArtifact={vi.fn()} />)
     await userEvent.setup().click(screen.getByRole('button', { name: '接受验收' }))
-    expect(await screen.findByText('验收已通过，尚未合并')).toBeInTheDocument()
+    expect(await screen.findByText('验收已通过')).toBeInTheDocument()
 
     view.rerender(<TaskDetailPanel details={{ ...details, task: { ...task, id: 'task-2', title: '第二个待验收任务' } }} onQueueInput={vi.fn()} onReview={vi.fn()} onReadArtifact={vi.fn()} />)
 
     expect(screen.getByRole('button', { name: '接受验收' })).toBeEnabled()
-    expect(screen.queryByText('验收已通过，尚未合并')).not.toBeInTheDocument()
+    expect(screen.queryByText('验收已通过')).not.toBeInTheDocument()
   })
 
   it('clears queued input feedback when selecting another task', async () => {
@@ -97,8 +97,22 @@ describe('TaskDetailPanel', () => {
     const onRequeue = vi.fn().mockResolvedValue(undefined)
     render(<TaskDetailPanel details={{ ...details, task: { ...task, status: 'needs_human' } }} onQueueInput={vi.fn()} onReview={vi.fn()} onRequeue={onRequeue} onReadArtifact={vi.fn()} />)
 
-    expect(screen.getByRole('button', { name: '接受验收' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '接受验收' })).not.toBeInTheDocument()
     await userEvent.setup().click(screen.getByRole('button', { name: '重新执行' }))
     expect(onRequeue).toHaveBeenCalledOnce()
+  })
+
+  it('requires review feedback before returning a task to todo', async () => {
+    const onReview = vi.fn().mockResolvedValue({ ...task, status: 'queued' })
+    const user = userEvent.setup()
+    render(<TaskDetailPanel details={details} onQueueInput={vi.fn()} onReview={onReview} onReadArtifact={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '退回修改' }))
+    expect(await screen.findByText('退回任务前需要填写修改意见。')).toBeInTheDocument()
+    expect(onReview).not.toHaveBeenCalled()
+
+    await user.type(screen.getByRole('textbox', { name: '审核意见' }), '补充空状态测试。')
+    await user.click(screen.getByRole('button', { name: '退回修改' }))
+    expect(onReview).toHaveBeenCalledWith('return', '补充空状态测试。')
   })
 })

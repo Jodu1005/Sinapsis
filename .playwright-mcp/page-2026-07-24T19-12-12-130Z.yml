@@ -1,0 +1,89 @@
+- generic [ref=f2e5]:
+  - navigation "代码仓与频道" [ref=f2e6]:
+    - generic [ref=f2e8]:
+      - generic [ref=f2e9]: S
+      - strong [ref=f2e10]: Sinapsis
+    - generic [ref=f2e11]: 代码仓
+    - generic [ref=f2e13]:
+      - generic [ref=f2e14]:
+        - generic [ref=f2e20]: prototype-zero-control-room
+        - generic [ref=f2e21]: codex/prototype-zero-control-room
+        - button "新建 prototype-zero-control-room 任务" [ref=f2e22] [cursor=pointer]
+      - button "# general" [ref=f2e25] [cursor=pointer]:
+        - generic [ref=f2e29]: general
+      - button "任务 1" [ref=f2e30] [cursor=pointer]
+    - region "Agent 状态" [ref=f2e35]:
+      - generic [ref=f2e36]: 运行中的 Agent
+      - button "查看 前端 Agent 配置" [active] [ref=f2e37] [cursor=pointer]:
+        - generic [ref=f2e42]:
+          - strong [ref=f2e43]: 前端 Agent
+          - generic [ref=f2e44]: "@frontend · opencode"
+        - generic [ref=f2e45]: 离线
+  - main [ref=f2e46]:
+    - generic [ref=f2e47]:
+      - generic [ref=f2e48]:
+        - heading "# general" [level=1] [ref=f2e49]
+        - paragraph [ref=f2e50]: prototype-zero-control-room · codex/prototype-zero-control-room
+      - generic [ref=f2e51]:
+        - generic [ref=f2e52]: 已连接
+        - button "打开上下文" [ref=f2e53] [cursor=pointer]
+    - region "频道消息" [ref=f2e57]:
+      - article [ref=f2e58]:
+        - generic [ref=f2e59]: "Y"
+        - generic [ref=f2e60]:
+          - generic [ref=f2e61]:
+            - strong [ref=f2e62]: 你
+            - time [ref=f2e63]: 02:47
+          - paragraph [ref=f2e64]: 频道工作台已接入本机服务。
+    - generic [ref=f2e65]:
+      - generic [ref=f2e66]: 发送消息
+      - textbox "发送消息" [ref=f2e67]:
+        - /placeholder: "发送消息到 # general"
+      - button "发送消息" [disabled] [ref=f2e68]
+  - complementary "任务与上下文" [ref=f2e71]:
+    - strong [ref=f2e73]: 上下文
+    - generic [ref=f2e74]:
+      - generic [ref=f2e75]:
+        - heading "本频道任务" [level=2] [ref=f2e76]
+        - button "新建当前上下文任务" [ref=f2e77] [cursor=pointer]: +
+      - generic [ref=f2e78]:
+        - tablist "任务筛选" [ref=f2e79]:
+          - tab "等待" [selected] [ref=f2e80] [cursor=pointer]
+          - tab "执行中" [ref=f2e81] [cursor=pointer]
+          - tab "等待输入" [ref=f2e82] [cursor=pointer]
+          - tab "待人工验收" [ref=f2e83] [cursor=pointer]
+          - tab "已结束" [ref=f2e84] [cursor=pointer]
+        - button "验证任务详情面板 排队中" [pressed] [ref=f2e86] [cursor=pointer]:
+          - generic [ref=f2e87]: 验证任务详情面板
+          - generic [ref=f2e88]: 排队中
+    - paragraph [ref=f2e90]: 正在读取任务详情...
+    - generic [ref=f2e91]:
+      - heading "频道操作" [level=2] [ref=f2e92]
+      - button "收起上下文" [ref=f2e93] [cursor=pointer]
+  - dialog [ref=f2e97]:
+    - banner [ref=f2e98]:
+      - generic [ref=f2e99]:
+        - paragraph [ref=f2e100]: Agent 配置
+        - heading "前端 Agent" [level=2] [ref=f2e101]
+      - button "关闭 Agent 配置" [ref=f2e102] [cursor=pointer]
+    - generic [ref=f2e106]:
+      - generic [ref=f2e107]:
+        - term [ref=f2e108]: Runtime
+        - definition [ref=f2e109]: opencode · 未验证
+      - generic [ref=f2e110]:
+        - term [ref=f2e111]: Command
+        - definition [ref=f2e112]:
+          - code [ref=f2e113]: opencode
+      - generic [ref=f2e114]:
+        - term [ref=f2e115]: Model
+        - definition [ref=f2e116]: claude
+      - generic [ref=f2e117]:
+        - term [ref=f2e118]: Args
+        - definition [ref=f2e119]:
+          - code [ref=f2e120]: run
+      - generic [ref=f2e121]:
+        - term [ref=f2e122]: 能力标签
+        - definition [ref=f2e123]: frontend
+      - generic [ref=f2e124]:
+        - term [ref=f2e125]: 环境变量
+        - definition [ref=f2e126]: API_TOKEN（已配置）

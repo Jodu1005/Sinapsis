@@ -19,4 +19,21 @@ describe('RuntimeEvidence', () => {
     expect(screen.getByText('显示最近 12 项，共 16 项。')).toBeInTheDocument()
     expect(screen.getByText('运行日志').closest('details')).not.toHaveAttribute('open')
   })
+
+  it('shows every processing event and artifact in the expanded task detail', () => {
+    const artifacts = Array.from({ length: 16 }, (_, index) => ({
+      id: `artifact-${index}`, taskId: 'task-1', kind: 'runtime-jsonl', createdAt: `2026-07-25T08:${String(index).padStart(2, '0')}:00.000Z`,
+    }))
+    const events = Array.from({ length: 60 }, (_, index) => ({
+      id: `event-${index}`, taskId: 'task-1', type: index === 0 ? 'runtime.tool_call' : 'runtime.text', payload: index === 0 ? { tool: 'npm test' } : { text: `E${String(index).padStart(3, '0')}|` }, createdAt: `2026-07-25T08:${String(index).padStart(2, '0')}:00.000Z`,
+    }))
+
+    render(<RuntimeEvidence expanded artifacts={artifacts} events={events} onReadArtifact={vi.fn()} />)
+
+    expect(screen.getByLabelText('Agent 实时输出')).toHaveTextContent('E001|')
+    expect(screen.getAllByRole('button', { name: 'runtime-jsonl' })).toHaveLength(16)
+    expect(screen.getAllByRole('listitem')).toHaveLength(60)
+    expect(screen.getByRole('heading', { name: '全部处理事件' })).toBeInTheDocument()
+    expect(screen.getByText('运行日志').closest('details')).toHaveAttribute('open')
+  })
 })

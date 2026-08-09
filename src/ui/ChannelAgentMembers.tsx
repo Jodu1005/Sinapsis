@@ -37,7 +37,7 @@ export function ChannelAgentMembers({ channel, agents, api, onChanged }: {
     }
   }
 
-  return <section className="context-section channel-agent-members"><div className="context-section-heading"><h2>频道 Agent</h2>{capabilities.mutableMembership && <button type="button" className="context-small-action" onClick={() => setPickerOpen(true)} disabled={saving || availableAgents.length === 0}><UserPlus size={15} /> 添加 Agent</button>}</div>
+  return <section className="context-section channel-agent-members"><div className="context-section-heading"><h2>当前频道 Agent</h2>{capabilities.mutableMembership && <button type="button" className="context-small-action" onClick={() => setPickerOpen(true)} disabled={saving || availableAgents.length === 0}><UserPlus size={15} /> 添加 Agent</button>}</div>
     {capabilities.automaticAllAgents && <p className="channel-management-note">自动同步所有 Agent</p>}
     <ul className="channel-management-list">{members.map((agent) => {
       const removeLabel = duplicateMemberIdentities.has(normalizeIdentity(agent.identity)) ? `移除 ${agent.identity} @${agent.mentionName}` : `移除 ${agent.identity}`
@@ -50,7 +50,7 @@ export function ChannelAgentMembers({ channel, agents, api, onChanged }: {
 }
 
 function runtimeLabel(runtime: AgentView['runtime']): string {
-  return { opencode: 'OpenCode', pi: 'Pi', 'claude-code': 'Claude Code' }[runtime]
+  return { opencode: 'OpenCode CLI', 'opencode-acp': 'OpenCode ACP', pi: 'Pi', 'claude-code': 'Claude Code' }[runtime]
 }
 
 function findDuplicateIdentities(agents: AgentView[]): Set<string> {

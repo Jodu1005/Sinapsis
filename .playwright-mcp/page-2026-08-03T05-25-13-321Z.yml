@@ -1,0 +1,201 @@
+- generic [ref=f1e3]:
+  - navigation "工作空间" [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - generic [ref=f1e6]: 频道
+      - button "添加频道" [ref=f1e7] [cursor=pointer]
+    - generic [ref=f1e9]:
+      - generic [ref=f1e10]:
+        - button "# summit" [ref=f1e11] [cursor=pointer]:
+          - generic [ref=f1e15]: summit
+        - 'button "归档 # summit" [ref=f1e16] [cursor=pointer]'
+      - generic [ref=f1e20]:
+        - button "# channel1" [ref=f1e21] [cursor=pointer]:
+          - generic [ref=f1e25]: channel1
+        - 'button "归档 # channel1" [ref=f1e26] [cursor=pointer]'
+      - generic [ref=f1e30]:
+        - button "# channel2" [ref=f1e31] [cursor=pointer]:
+          - generic [ref=f1e35]: channel2
+        - 'button "归档 # channel2" [ref=f1e36] [cursor=pointer]'
+      - generic [ref=f1e40]:
+        - button "# channel4" [ref=f1e41] [cursor=pointer]:
+          - generic [ref=f1e45]: channel4
+        - 'button "归档 # channel4" [ref=f1e46] [cursor=pointer]'
+    - region "已归档频道" [ref=f1e50]:
+      - button "已归档频道（3）" [ref=f1e51] [cursor=pointer]:
+        - generic [ref=f1e54]: 已归档频道
+        - generic [ref=f1e55]: "3"
+    - button "Dream（0 个待确认）" [ref=f1e56] [cursor=pointer]:
+      - generic [ref=f1e69]: Dream
+      - generic [ref=f1e70]: "0"
+    - generic [ref=f1e71]:
+      - generic [ref=f1e72]: 工作空间
+      - button "添加工作空间" [ref=f1e74] [cursor=pointer]
+    - group "channel4 的工作空间" [ref=f1e76]:
+      - paragraph [ref=f1e77]: 未绑定工作空间
+    - generic [ref=f1e78]: 任务
+    - paragraph [ref=f1e79]: 请先为频道绑定工作空间
+    - region "Agent 状态" [ref=f1e80]:
+      - generic [ref=f1e81]:
+        - generic [ref=f1e82]: 运行中的 Agent
+        - button "添加 Agent" [ref=f1e83] [cursor=pointer]
+      - button "查看 newton 配置" [ref=f1e85] [cursor=pointer]:
+        - generic [ref=f1e90]:
+          - strong [ref=f1e91]: newton
+          - generic [ref=f1e92]: "@newton · pi"
+        - generic [ref=f1e93]: 空闲
+      - button "查看 前端 Agent 配置" [ref=f1e94] [cursor=pointer]:
+        - generic [ref=f1e99]:
+          - strong [ref=f1e100]: 前端 Agent
+          - generic [ref=f1e101]: "@前端 Agent · opencode"
+        - generic [ref=f1e102]: 空闲
+      - button "查看 clawd 配置" [ref=f1e103] [cursor=pointer]:
+        - generic [ref=f1e108]:
+          - strong [ref=f1e109]: clawd
+          - generic [ref=f1e110]: "@clawd · claude-code"
+        - generic [ref=f1e111]: 空闲
+  - main [ref=f1e112]:
+    - generic [ref=f1e113]:
+      - generic [ref=f1e114]:
+        - heading "# channel4" [level=1] [ref=f1e115]
+        - paragraph [ref=f1e116]: 全局频道
+      - generic [ref=f1e117]:
+        - generic [ref=f1e118]: 已连接
+        - button "打开上下文" [ref=f1e119] [cursor=pointer]
+    - region "频道消息" [ref=f1e123]:
+      - article [ref=f1e124]:
+        - generic [ref=f1e125]: "Y"
+        - generic [ref=f1e126]:
+          - generic [ref=f1e127]:
+            - strong [ref=f1e128]: 你
+            - time [ref=f1e129]: 11:43
+          - paragraph [ref=f1e130]: hello@all
+          - button "回复 你 的消息" [ref=f1e131] [cursor=pointer]
+      - article [ref=f1e134]:
+        - generic [ref=f1e135]: "Y"
+        - generic [ref=f1e136]:
+          - generic [ref=f1e137]:
+            - strong [ref=f1e138]: 你
+            - time [ref=f1e139]: 12:36
+          - paragraph [ref=f1e140]: hello@newton
+          - button "回复 你 的消息" [ref=f1e141] [cursor=pointer]
+      - article [ref=f1e144]:
+        - generic [ref=f1e149]:
+          - generic [ref=f1e150]:
+            - strong [ref=f1e151]: newton
+            - time [ref=f1e152]: 12:36
+          - paragraph [ref=f1e153]: The human message is "hello@newton" - they're directly mentioning me (newton). My role is not set, but I only handle messages directly mentioning me. The message says "hello@newton" which is a direct mention. I should reply concisely and clearly to the human message. Simple greeting response.Hello! I'm newton. I see you've pinged me directly. What can I help you with today?
+          - button "回复 newton 的消息" [ref=f1e154] [cursor=pointer]
+      - article [ref=f1e157]:
+        - generic [ref=f1e158]: "Y"
+        - generic [ref=f1e159]:
+          - generic [ref=f1e160]:
+            - strong [ref=f1e161]: 你
+            - time [ref=f1e162]: 12:40
+          - paragraph [ref=f1e163]: 无艾特回复测试：请只回复收到。
+          - button "回复 你 的消息" [ref=f1e164] [cursor=pointer]
+      - article [ref=f1e167]:
+        - generic [ref=f1e172]:
+          - generic [ref=f1e173]:
+            - strong [ref=f1e174]: 前端 Agent
+            - time [ref=f1e175]: 12:40
+          - paragraph [ref=f1e176]: 收到。
+          - button "回复 前端 Agent 的消息" [ref=f1e177] [cursor=pointer]
+      - article [ref=f1e180]:
+        - generic [ref=f1e181]: "Y"
+        - generic [ref=f1e182]:
+          - generic [ref=f1e183]:
+            - strong [ref=f1e184]: 你
+            - time [ref=f1e185]: 12:41
+          - paragraph [ref=f1e186]: hello
+          - button "回复 你 的消息" [ref=f1e187] [cursor=pointer]
+      - article [ref=f1e190]:
+        - generic [ref=f1e195]:
+          - generic [ref=f1e196]:
+            - strong [ref=f1e197]: clawd
+            - time [ref=f1e198]: 12:41
+          - paragraph [ref=f1e199]: Hello! I'm clawd. What can I help you with?
+          - button "回复 clawd 的消息" [ref=f1e200] [cursor=pointer]
+    - generic [ref=f1e203]:
+      - generic [ref=f1e204]: 发送消息
+      - textbox "发送消息" [ref=f1e205]:
+        - /placeholder: "发送消息到 # channel4"
+      - button "发送消息" [disabled] [ref=f1e206]
+  - complementary "任务与上下文" [ref=f1e209]:
+    - strong [ref=f1e211]: 上下文
+    - generic [ref=f1e212]:
+      - generic [ref=f1e213]:
+        - heading "频道 Agent" [level=2] [ref=f1e214]
+        - button "添加 Agent" [ref=f1e215] [cursor=pointer]
+      - list [ref=f1e219]:
+        - listitem [ref=f1e220]:
+          - generic [ref=f1e221]:
+            - strong [ref=f1e222]: 前端 Agent
+            - generic [ref=f1e223]: "@frontend · 空闲 · Runtime: OpenCode"
+          - button "移除 前端 Agent" [ref=f1e224] [cursor=pointer]
+        - listitem [ref=f1e228]:
+          - generic [ref=f1e229]:
+            - strong [ref=f1e230]: newton
+            - generic [ref=f1e231]: "@newton · 空闲 · Runtime: Pi"
+          - button "移除 newton" [ref=f1e232] [cursor=pointer]
+        - listitem [ref=f1e236]:
+          - generic [ref=f1e237]:
+            - strong [ref=f1e238]: clawd
+            - generic [ref=f1e239]: "@build · 空闲 · Runtime: Claude Code"
+          - button "移除 clawd" [ref=f1e240] [cursor=pointer]
+    - generic [ref=f1e244]:
+      - generic [ref=f1e245]:
+        - heading "频道工作空间 0/5" [level=2] [ref=f1e246]:
+          - text: 频道工作空间
+          - generic [ref=f1e247]: 0/5
+        - button "添加工作空间" [ref=f1e248] [cursor=pointer]
+      - list
+      - paragraph [ref=f1e252]: 尚未绑定工作空间。
+    - generic [ref=f1e253]:
+      - heading "频道操作" [level=2] [ref=f1e254]
+      - button "收起上下文" [ref=f1e255] [cursor=pointer]
+  - dialog [ref=f1e259]:
+    - banner [ref=f1e260]:
+      - generic [ref=f1e261]:
+        - paragraph [ref=f1e262]: Agent 配置
+        - heading "newton" [level=2] [ref=f1e263]
+      - generic [ref=f1e264]:
+        - button "重新检测 Agent Runtime" [ref=f1e265] [cursor=pointer]
+        - button "关闭 Agent 配置" [active] [ref=f1e271] [cursor=pointer]
+    - generic [ref=f1e275]:
+      - generic [ref=f1e276]:
+        - term [ref=f1e277]: Runtime
+        - definition [ref=f1e278]: Pi
+      - generic [ref=f1e279]:
+        - term [ref=f1e280]: Runtime 可用性
+        - definition [ref=f1e281]: 可用
+      - generic [ref=f1e282]:
+        - term [ref=f1e283]: 预设
+        - definition [ref=f1e284]: Pi RPC 受管运行
+      - generic [ref=f1e285]:
+        - term [ref=f1e286]: Command
+        - definition [ref=f1e287]:
+          - code [ref=f1e288]: pi
+      - generic [ref=f1e289]:
+        - term [ref=f1e290]: Model
+        - definition [ref=f1e291]: 使用 Runtime 默认值
+      - generic [ref=f1e292]:
+        - term [ref=f1e293]: Args
+        - definition [ref=f1e294]:
+          - code [ref=f1e295]: "--mode rpc"
+      - generic [ref=f1e296]:
+        - term [ref=f1e297]: 能力标签
+        - definition [ref=f1e298]: typescript
+      - generic [ref=f1e299]:
+        - term [ref=f1e300]: 环境变量
+        - definition [ref=f1e301]: 未设置
+    - generic [ref=f1e302]:
+      - generic [ref=f1e303]: 名称
+      - textbox "名称" [ref=f1e304]: newton
+      - paragraph [ref=f1e305]: 名称用于频道显示和 @ 提及；原有 @newton 仍然可用。
+      - button "保存名称" [disabled] [ref=f1e306]
+    - generic [ref=f1e307]:
+      - generic [ref=f1e308]: 职责
+      - textbox "职责" [ref=f1e309]:
+        - /placeholder: 前端界面与交互\n每行一项，也可用逗号分隔
+      - paragraph [ref=f1e310]: 未 @ 时，系统只会把消息交给职责匹配的空闲 Agent。
+      - button "保存职责" [ref=f1e311] [cursor=pointer]

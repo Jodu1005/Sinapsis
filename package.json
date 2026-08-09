@@ -6,7 +6,7 @@
   "scripts": {
     "dev:api": "tsx watch server/main.ts",
     "dev:web": "vite",
-    "dev": "concurrently -k -n api,web -c cyan,magenta \"npm:dev:api\" \"npm:dev:web\"",
+    "dev": "node scripts/dev.mjs",
     "build": "tsc --noEmit && vite build",
     "test": "vitest",
     "test:run": "vitest run",
@@ -16,17 +16,19 @@
     "express": "latest",
     "lucide-react": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@types/express": "latest",
-    "@types/node": "latest",
-    "@vitejs/plugin-react": "latest",
     "@testing-library/jest-dom": "latest",
     "@testing-library/react": "latest",
     "@testing-library/user-event": "latest",
+    "@types/express": "latest",
+    "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
     "concurrently": "latest",
     "jsdom": "latest",
     "tsx": "latest",

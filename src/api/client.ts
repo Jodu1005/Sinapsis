@@ -1,7 +1,8 @@
-import type { AgentView, ChannelMessage, ChannelView, ConversationTurnDetailView, DreamRunView, MemoryCandidateStatus, MemoryCandidateView, MemoryScope, MemoryView, RepositoryView, TaskDetailView, TaskInputView, TaskView, WorkspaceSnapshot, WorkspaceView } from '../domain/workspace-view'
+import type { AgentView, ChannelMessage, ChannelView, ConversationTurnDetailView, DreamRunView, MemoryCandidateStatus, MemoryCandidateView, MemoryScope, MemoryView, RepositoryView, TaskBoardLane, TaskDetailView, TaskInputView, TaskOutputFileView, TaskView, WorkspaceSnapshot, WorkspaceView } from '../domain/workspace-view'
 
 export interface WorkspaceApi {
   getBootstrap(): Promise<WorkspaceSnapshot>
+  pickDirectory(): Promise<string | null>
   createWorkspace(input: { name: string }): Promise<WorkspaceView>
   addRepository(workspaceId: string, input: { directory: string; name?: string }): Promise<RepositoryView>
   createAgent(input: CreateAgentRequest): Promise<AgentView>
@@ -22,10 +23,14 @@ export interface WorkspaceApi {
   getConversationTurn(channelId: string, turnId: string): Promise<ConversationTurnDetailView>
   cancelConversationTurn(channelId: string, turnId: string): Promise<void>
   getTaskDetails(taskId: string): Promise<TaskDetailView>
+  retryTaskAnalysis(taskId: string): Promise<TaskView>
   queueTaskInput(taskId: string, body: string): Promise<TaskInputView>
   reviewTask(taskId: string, action: 'accept' | 'return', message: string): Promise<TaskView>
+  moveTask(taskId: string, lane: TaskBoardLane, message?: string): Promise<TaskView>
   requeueTask(taskId: string): Promise<TaskView>
   readArtifact(taskId: string, artifactId: string): Promise<string>
+  listTaskOutputFiles(taskId: string): Promise<TaskOutputFileView[]>
+  readTaskOutputFile(taskId: string, filePath: string): Promise<string>
   listDreamRuns(): Promise<DreamRunView[]>
   startDream(channelId?: string): Promise<DreamRunView[]>
   listMemoryCandidates(status: MemoryCandidateStatus): Promise<MemoryCandidateView[]>
@@ -38,9 +43,9 @@ export interface WorkspaceApi {
 
 export interface CreateTaskRequest {
   workspaceId: string
-  title: string
+  title?: string
   description: string
-  acceptanceCriteria: string
+  acceptanceCriteria?: string
   labels: string[]
   directAgentId?: string
 }
@@ -48,7 +53,7 @@ export interface CreateTaskRequest {
 export interface CreateAgentRequest {
   identity: string
   mention: string
-  runtime: 'opencode' | 'pi' | 'claude-code'
+  runtime: 'opencode' | 'opencode-acp' | 'pi' | 'claude-code'
   capabilityTags: string[]
   responsibilities?: string[]
 }
@@ -63,6 +68,10 @@ export class ApiClient implements WorkspaceApi {
   private readonly humanCapability = captureHumanCapability()
 
   async getBootstrap(): Promise<WorkspaceSnapshot> { return this.request('/api/bootstrap') }
+  async pickDirectory(): Promise<string | null> {
+    const result = await this.request<{ directory: string | null }>('/api/directories/pick', { method: 'POST' })
+    return result.directory
+  }
   async createWorkspace(input: { name: string }): Promise<WorkspaceView> {
     return this.request('/api/workspaces', { method: 'POST', body: JSON.stringify(input) })
   }
@@ -121,17 +130,34 @@ export class ApiClient implements WorkspaceApi {
     await this.request(`/api/channels/${channelId}/turns/${turnId}/cancel`, { method: 'POST' })
   }
   async getTaskDetails(taskId: string): Promise<TaskDetailView> { return this.request(`/api/tasks/${taskId}`) }
+  async retryTaskAnalysis(taskId: string): Promise<TaskView> {
+    return this.request(`/api/tasks/${taskId}/analyze`, { method: 'POST' })
+  }
   async queueTaskInput(taskId: string, body: string): Promise<TaskInputView> {
     return this.request(`/api/tasks/${taskId}/input`, { method: 'POST', body: JSON.stringify({ body }) })
   }
   async reviewTask(taskId: string, action: 'accept' | 'return', message: string): Promise<TaskView> {
     return this.request(`/api/tasks/${taskId}/review`, { method: 'POST', body: JSON.stringify({ action, message }) })
   }
+  async moveTask(taskId: string, lane: TaskBoardLane, message?: string): Promise<TaskView> {
+    return this.request(`/api/tasks/${taskId}/move`, { method: 'POST', body: JSON.stringify({ lane, ...(message ? { message } : {}) }) })
+  }
   async requeueTask(taskId: string): Promise<TaskView> {
     return this.request(`/api/tasks/${taskId}/requeue`, { method: 'POST' })
   }
   async readArtifact(taskId: string, artifactId: string): Promise<string> {
     const response = await fetch(`/api/tasks/${taskId}/artifacts/${artifactId}`, { headers: { 'Content-Type': 'application/json' } })
+    if (!response.ok) {
+      const payload: unknown = await response.json().catch(() => undefined)
+      throw new Error(isErrorPayload(payload) ? payload.error : `请求失败 (${response.status})`)
+    }
+    return response.text()
+  }
+  async listTaskOutputFiles(taskId: string): Promise<TaskOutputFileView[]> {
+    return this.request(`/api/tasks/${taskId}/files`)
+  }
+  async readTaskOutputFile(taskId: string, filePath: string): Promise<string> {
+    const response = await fetch(`/api/tasks/${taskId}/files/read?path=${encodeURIComponent(filePath)}`, { headers: { 'Content-Type': 'application/json' } })
     if (!response.ok) {
       const payload: unknown = await response.json().catch(() => undefined)
       throw new Error(isErrorPayload(payload) ? payload.error : `请求失败 (${response.status})`)

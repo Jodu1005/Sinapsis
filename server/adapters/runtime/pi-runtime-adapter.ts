@@ -121,6 +121,8 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
     const type = stringValue(value.type)
     if (type === 'message_update') {
       const event = isRecord(value.assistantMessageEvent) ? value.assistantMessageEvent : isRecord(value.delta) ? value.delta : value
+      const eventType = stringValue(event.type)
+      if (eventType !== undefined && eventType !== 'text_delta') return
       const text = stringValue(event.delta) ?? stringValue(event.text_delta)
       if (text) sink({ kind: 'text', taskId: session.taskId, text })
     }
@@ -217,7 +219,7 @@ function initialPrompt(task: RuntimeTaskRequest): string {
 
 function taskPrompt(task: RuntimeTaskRequest): string {
   return [
-    'Work only in the assigned worktree. Do not push, merge, or modify files outside it. If you make changes, stage and commit the completed work on the task branch before you finish.',
+    'Work only in the assigned worktree. Do not push, merge, or modify files outside it. Completion is determined by the task result, not Git activity. Do not create a branch or commit unless the task explicitly asks for one.',
     `Task: ${task.title}`,
     task.description,
     `Acceptance criteria: ${task.acceptanceCriteria}`,

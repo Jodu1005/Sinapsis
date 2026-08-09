@@ -1,0 +1,11 @@
+[     474ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://corp.hwp.huawei.com/hwpinternet/scripts/ocs/collector/service/hwp-cs.js:0
+[     981ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://career.huawei.com/-/media/plugin/e2bc41fa73c1840d900aed60c04570d0/jquery.min.js:1
+[    1252ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://hwa.his.huawei.com/dist/uem_f.js?_2026-08-03:0
+[    1295ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recommend/pub/getRecommendLicense?recruitSubScenario=RECRUITMENT_ASSISTANT&licenseCode=&X-HW-ID=app_000000035886:0
+[    1295ms] r
+[    1547ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recommend/pub/getRecommendLicense?recruitSubScenario=NEW_CAMPUS&licenseCode=&X-HW-ID=app_000000035886:0
+[    1548ms] r
+[    1549ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recommend/pub/getRecommendLicense?recruitSubScenario=NEW_INTERNS&licenseCode=&X-HW-ID=app_000000035886:0
+[    1550ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recruitmentPosition/pub/getJobPage?X-HW-ID=app_000000035886:0
+[    1550ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recruitmentPosition/pub/findJobAddressList?X-HW-ID=app_000000035886:0
+[    1792ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recruitmentPosition/pub/getCampusRecruitmentCategory?X-HW-ID=app_000000035886:0

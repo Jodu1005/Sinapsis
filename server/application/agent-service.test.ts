@@ -69,6 +69,17 @@ describe('AgentService', () => {
     })
   })
 
+  it('resolves the OpenCode ACP runtime preset for protocol-based agent sessions', () => {
+    expect(resolveRuntimeProfile('opencode-acp')).toEqual({
+      runtime: 'opencode-acp',
+      command: 'opencode',
+      args: ['acp'],
+      model: '',
+      env: {},
+      policy: 'task-worktree',
+    })
+  })
+
   it('probes the resolved runtime profile before storing the Agent configuration', async () => {
     const detector = availableDetector()
     const service = new AgentService(new RecordingAgentRepository(), detector)

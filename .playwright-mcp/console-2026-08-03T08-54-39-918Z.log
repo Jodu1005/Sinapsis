@@ -1,0 +1,68 @@
+[    7757ms] [ERROR] Executing inline script violates the following Content Security Policy directive 'script-src *.alicdn.com *.alipayobjects.com *.alipay.com *.cnzz.com res.wx.qq.com cf.aliyun.com ynuf.aliapp.org 'nonce-2lJ0V24GqOiXyuhdM5ie' 'unsafe-eval' 'self' 'report-sample' cf.aliyun.com ynuf.aliapp.org *.nlark.com *.taobao.com'. Either the 'unsafe-inline' keyword, a hash ('sha256-RPxVYBXPlLfnTzF6CoE0csHhGI4Ay9W7FBgvwId7Ma8='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked. @ https://o.alicdn.com/frontend-lib/common-lib/jquery.min.js:0
+[    7897ms] [LOG] Mon Aug 03 2026 16:54:47 GMT+0800 (中国标准时间) @ https://o.alicdn.com/frontend-lib/common-lib/jquery.min.js:0
+[    8112ms] [ERROR] Failed to load resource: the server responded with a status of 405 (Not Allowed) @ https://www.yuque.com/r/csp/report:0
+[    8285ms] [LOG] 🚀 app launch isH5: false @ https://gw.alipayobjects.com/os/chair-script/skylark/pc.2188dd6d.js:65
+[    9160ms] [WARNING] 调用 useDowngrade 时未传入 bizId @ https://gw.alipayobjects.com/os/lib/alipay/ReactLolita/1.5.3/dist/index.umd.min.js:0
+[   11876ms] [ERROR] Executing inline script violates the following Content Security Policy directive 'script-src *.alicdn.com *.alipayobjects.com *.alipay.com *.cnzz.com res.wx.qq.com cf.aliyun.com ynuf.aliapp.org 'nonce-XYwAXJ6Px8emlfy2PYrt' 'unsafe-eval' 'self' 'report-sample' cf.aliyun.com ynuf.aliapp.org *.nlark.com *.taobao.com'. Either the 'unsafe-inline' keyword, a hash ('sha256-RPxVYBXPlLfnTzF6CoE0csHhGI4Ay9W7FBgvwId7Ma8='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked. @ https://o.alicdn.com/frontend-lib/common-lib/jquery.min.js:0
+[   11889ms] [LOG] Mon Aug 03 2026 16:54:51 GMT+0800 (中国标准时间) @ https://o.alicdn.com/frontend-lib/common-lib/jquery.min.js:0
+[   11911ms] [LOG] 🚀 app launch isH5: false @ https://gw.alipayobjects.com/os/chair-script/skylark/pc.2188dd6d.js:65
+[   12243ms] [ERROR] Failed to load resource: the server responded with a status of 405 (Not Allowed) @ https://www.yuque.com/r/csp/report:0
+[   13925ms] [COUNT] %c%d: 1 @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   13925ms] [DIR] %c%d font-size:0;color:transparent Error @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   13925ms] [DIRXML] %c%d font-size:0;color:transparent Error @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   13925ms] [INFO] %c%d font-size:0;color:transparent NaN @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   13925ms] [INFO] %c%d font-size:0;color:transparent NaN @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   13925ms] [LOG] %c%d font-size:0;color:transparent NaN @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   13925ms] [TABLE] %c%d font-size:0;color:transparent Error @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   13925ms] [INFO] %c%d font-size:0;color:transparent NaN @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   40342ms] [ERROR] Failed to load resource: the server responded with a status of 400 (Bad Request) @ https://www.yuque.com/api/accounts/login:0
+[   40344ms] [LOG] [app]error ignored:  {error: Error: Login error
+    at Object.unsuccessfulResponseToError (https://gw.alipayobjects.com/os/chair…} @ https://gw.alipayobjects.com/os/chair-script/skylark/common.d114c29e.js:0
+[   44020ms] [ERROR] Failed to load resource: net::ERR_TIMED_OUT @ https://upload.captcha-open.aliyuncs.com/:0
+[   54803ms] [ERROR] Error: timeout
+    at i.ontimeout (https://g.alicdn.com/captcha-frontend/dynamicJS/3.29.0/sg.057.8524e36d5af24c15.js:1:290836)
+    at XMLHttpRequest.<anonymous> (https://o.alicdn.com/frontend-lib/common-lib/jquery.min.js:1:146089) @ https://g.alicdn.com/captcha-frontend/dynamicJS/3.29.0/sg.057.8524e36d5af24c15.js:0
+[   62236ms] [ERROR] Executing inline script violates the following Content Security Policy directive 'script-src *.alicdn.com *.alipayobjects.com *.alipay.com *.cnzz.com res.wx.qq.com cf.aliyun.com ynuf.aliapp.org 'nonce-miq3Yd2CemdjAlsKhzZx' 'unsafe-eval' 'self' 'report-sample' cf.aliyun.com ynuf.aliapp.org *.nlark.com *.taobao.com'. Either the 'unsafe-inline' keyword, a hash ('sha256-RPxVYBXPlLfnTzF6CoE0csHhGI4Ay9W7FBgvwId7Ma8='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked. @ https://o.alicdn.com/frontend-lib/common-lib/jquery.min.js:0
+[   62250ms] [LOG] Mon Aug 03 2026 16:55:42 GMT+0800 (中国标准时间) @ https://o.alicdn.com/frontend-lib/common-lib/jquery.min.js:0
+[   62262ms] [LOG] 🚀 app launch isH5: false @ https://gw.alipayobjects.com/os/chair-script/skylark/pc.2188dd6d.js:65
+[   62930ms] [ERROR] Failed to load resource: the server responded with a status of 405 (Not Allowed) @ https://www.yuque.com/r/csp/report:0
+[   64701ms] [COUNT] %c%d: 1 @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   64701ms] [DIR] %c%d font-size:0;color:transparent Error @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   64701ms] [DIRXML] %c%d font-size:0;color:transparent Error @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   64701ms] [INFO] %c%d font-size:0;color:transparent NaN @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   64701ms] [INFO] %c%d font-size:0;color:transparent NaN @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   64701ms] [LOG] %c%d font-size:0;color:transparent NaN @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   64701ms] [TABLE] %c%d font-size:0;color:transparent Error @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   64701ms] [INFO] %c%d font-size:0;color:transparent NaN @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   89961ms] [ERROR] Failed to load resource: the server responded with a status of 400 (Bad Request) @ https://www.yuque.com/api/accounts/login:0
+[   89962ms] [LOG] [app]error ignored:  {error: Error: 账号登录异常，需要双重验证
+    at Object.unsuccessfulResponseToError (https://gw.alipayobjects.com/os/cha…} @ https://gw.alipayobjects.com/os/chair-script/skylark/common.d114c29e.js:0
+[   91018ms] [ERROR] Executing inline script violates the following Content Security Policy directive 'script-src *.alicdn.com *.alipayobjects.com *.alipay.com *.cnzz.com res.wx.qq.com cf.aliyun.com ynuf.aliapp.org 'nonce-qUhwlpcJ1vnqAmhhaBuL' 'unsafe-eval' 'self' 'report-sample' cf.aliyun.com ynuf.aliapp.org *.nlark.com *.taobao.com'. Either the 'unsafe-inline' keyword, a hash ('sha256-RPxVYBXPlLfnTzF6CoE0csHhGI4Ay9W7FBgvwId7Ma8='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked. @ https://o.alicdn.com/frontend-lib/common-lib/jquery.min.js:0
+[   91031ms] [LOG] Mon Aug 03 2026 16:56:10 GMT+0800 (中国标准时间) @ https://o.alicdn.com/frontend-lib/common-lib/jquery.min.js:0
+[   91044ms] [LOG] 🚀 app launch isH5: false @ https://gw.alipayobjects.com/os/chair-script/skylark/pc.2188dd6d.js:65
+[   91563ms] [COUNT] %c%d: 1 @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   91563ms] [DIR] %c%d font-size:0;color:transparent Error @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   91563ms] [DIRXML] %c%d font-size:0;color:transparent Error @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   91563ms] [INFO] %c%d font-size:0;color:transparent NaN @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   91563ms] [INFO] %c%d font-size:0;color:transparent NaN @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   91563ms] [LOG] %c%d font-size:0;color:transparent NaN @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   91563ms] [TABLE] %c%d font-size:0;color:transparent Error @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   91563ms] [INFO] %c%d font-size:0;color:transparent NaN @ https://g.alicdn.com/captcha-frontend/FeiLin/1.5.1/feilin124.a2a4086db5a7fd80b6b33ef2b785e264e2009af3cd3a224a16fa243ffbc86c15.js:0
+[   91610ms] [ERROR] Failed to load resource: the server responded with a status of 405 (Not Allowed) @ https://www.yuque.com/r/csp/report:0
+[  118966ms] [ERROR] Failed to load resource: the server responded with a status of 400 (Bad Request) @ https://www.yuque.com/api/accounts/login:0
+[  118968ms] [LOG] [app]error ignored:  {error: Error: Login error
+    at Object.unsuccessfulResponseToError (https://gw.alipayobjects.com/os/chair…} @ https://gw.alipayobjects.com/os/chair-script/skylark/common.d114c29e.js:0
+[  128958ms] [ERROR] Executing inline script violates the following Content Security Policy directive 'script-src *.alicdn.com *.alipayobjects.com *.alipay.com *.cnzz.com res.wx.qq.com cf.aliyun.com ynuf.aliapp.org 'nonce-zeDGqhVKF0CHyFd47XR7' 'unsafe-eval' 'self' 'report-sample' cf.aliyun.com ynuf.aliapp.org *.nlark.com *.taobao.com'. Either the 'unsafe-inline' keyword, a hash ('sha256-RPxVYBXPlLfnTzF6CoE0csHhGI4Ay9W7FBgvwId7Ma8='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked. @ https://o.alicdn.com/frontend-lib/common-lib/jquery.min.js:0
+[  128971ms] [LOG] Mon Aug 03 2026 16:56:48 GMT+0800 (中国标准时间) @ https://o.alicdn.com/frontend-lib/common-lib/jquery.min.js:0
+[  128983ms] [LOG] 🚀 app launch isH5: false @ https://gw.alipayobjects.com/os/chair-script/skylark/pc.2188dd6d.js:65
+[  129427ms] [ERROR] Failed to load resource: the server responded with a status of 405 (Not Allowed) @ https://www.yuque.com/r/csp/report:0
+[  132034ms] [LOG] isShowDebugPanel: false, isDingTalkDesktop: false, isAdmin: undefined @ https://gw.alipayobjects.com/os/chair-script/skylark/c__DashboardRecent.cec626a8.async.js:0
+[  132044ms] [LOG] isShowDebugPanel: false, isDingTalkDesktop: false, isAdmin: undefined @ https://gw.alipayobjects.com/os/chair-script/skylark/c__DashboardRecent.cec626a8.async.js:0
+[  132056ms] [LOG] isShowDebugPanel: false, isDingTalkDesktop: false, isAdmin: undefined @ https://gw.alipayobjects.com/os/chair-script/skylark/c__DashboardRecent.cec626a8.async.js:0
+[  132957ms] [LOG] isShowDebugPanel: false, isDingTalkDesktop: false, isAdmin: undefined @ https://gw.alipayobjects.com/os/chair-script/skylark/c__DashboardRecent.cec626a8.async.js:0
+[  133793ms] [LOG] isShowDebugPanel: false, isDingTalkDesktop: false, isAdmin: undefined @ https://gw.alipayobjects.com/os/chair-script/skylark/c__DashboardRecent.cec626a8.async.js:0
+[  136963ms] [ERROR] Executing inline script violates the following Content Security Policy directive 'script-src *.alicdn.com *.alipayobjects.com *.alipay.com *.cnzz.com res.wx.qq.com cf.aliyun.com ynuf.aliapp.org 'nonce-7JOmlsM4xc6LMRUpU87U' 'unsafe-eval' 'self' 'report-sample' cf.aliyun.com ynuf.aliapp.org *.nlark.com *.taobao.com'. Either the 'unsafe-inline' keyword, a hash ('sha256-RPxVYBXPlLfnTzF6CoE0csHhGI4Ay9W7FBgvwId7Ma8='), or a nonce ('nonce-...') is required to enable inline execution. The action has been blocked. @ https://o.alicdn.com/frontend-lib/common-lib/jquery.min.js:0
+[  136973ms] [LOG] Mon Aug 03 2026 16:56:56 GMT+0800 (中国标准时间) @ https://o.alicdn.com/frontend-lib/common-lib/jquery.min.js:0
+[  137386ms] [ERROR] Failed to load resource: the server responded with a status of 405 (Not Allowed) @ https://www.yuque.com/r/csp/report:0
+[  137478ms] [LOG] 🚀 app launch isH5: false @ https://gw.alipayobjects.com/os/chair-script/skylark/pc.2188dd6d.js:65
+[  139430ms] [TIMEEND] LakexTextViewer-280011495: 44.885009765625 ms @ https://gw.alipayobjects.com/os/chair-script/skylark/71187.c3365f74.async.js:0

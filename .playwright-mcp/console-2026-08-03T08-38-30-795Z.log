@@ -1,0 +1,17 @@
+[    6723ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://corp.hwp.huawei.com/hwpinternet/scripts/ocs/collector/service/hwp-cs.js:0
+[    8357ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://career.huawei.com/-/media/plugin/e2bc41fa73c1840d900aed60c04570d0/jquery.min.js:1
+[    8749ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://hwa.his.huawei.com/dist/uem_f.js?_2026-08-03:0
+[    9472ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recommend/pub/getRecommendLicense?recruitSubScenario=RECRUITMENT_ASSISTANT&licenseCode=&X-HW-ID=app_000000035886:0
+[    9472ms] r
+[   15956ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://corp.hwp.huawei.com/hwpinternet/scripts/ocs/collector/service/hwp-cs.js:0
+[   16340ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://career.huawei.com/-/media/plugin/e2bc41fa73c1840d900aed60c04570d0/jquery.min.js:1
+[   16610ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://hwa.his.huawei.com/dist/uem_f.js?_2026-08-03:0
+[   16889ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recommend/pub/getRecommendLicense?recruitSubScenario=RECRUITMENT_ASSISTANT&licenseCode=&X-HW-ID=app_000000035886:0
+[   16890ms] r
+[   17757ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/common/config/pub/lookup/list?lookupType=appraise_bad_reason&language=zh_CN&X-HW-ID=app_000000035886:0
+[   17757ms] r
+[   17762ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recommend/pub/privacy/data/zh_CN?language=zh_CN&X-HW-ID=app_000000035886:0
+[   17762ms] r
+[   17881ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recommend/pub/getRecommendLicense?recruitSubScenario=NEW_CAMPUS&licenseCode=&X-HW-ID=app_000000035886:0
+[   17881ms] r
+[   18005ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_CLOSED @ https://apigw-dgg-b0.huawei.com/api/apig/channelhw/recommend/pub/getRecommendLicense?recruitSubScenario=NEW_INTERNS&licenseCode=&X-HW-ID=app_000000035886:0

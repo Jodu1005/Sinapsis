@@ -1,8 +1,6 @@
-import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { promisify } from 'node:util'
 import type { RuntimeKind } from '../adapters/runtime/runtime-profile'
 import type { Agent } from '../domain/agent'
 import { DomainError, type Task } from '../domain/task'
@@ -11,19 +9,13 @@ import type { RuntimeAdapter, RuntimeEvent, RuntimeSession } from '../ports/runt
 import type { WorktreeManager } from '../ports/worktree-manager'
 import { ChannelMessageService } from './channel-message-service'
 
-const execFileAsync = promisify(execFile)
-
 export interface TaskExecutionCoordinatorOptions {
   repositories: WorkspaceRepositories
   runtimes: Partial<Record<RuntimeKind, RuntimeAdapter>>
   worktrees: WorktreeManager
   artifactDirectory: string
   messages?: ChannelMessageService
-  collectReviewEvidence?: ReviewEvidenceCollector
 }
-
-type ReviewEvidence = { commit: string; changedFiles: string; diffSummary: string }
-type ReviewEvidenceCollector = (worktreePath: string, targetBranch: string) => Promise<ReviewEvidence>
 
 interface ManagedExecution {
   taskId: string
@@ -46,7 +38,6 @@ export class TaskExecutionCoordinator {
   private readonly worktrees: WorktreeManager
   private readonly artifactDirectory: string
   private readonly messages: ChannelMessageService
-  private readonly collectReviewEvidence: ReviewEvidenceCollector
   private readonly executions = new Map<string, ManagedExecution>()
   private readonly pending = new Map<string, Promise<void>>()
 
@@ -56,7 +47,6 @@ export class TaskExecutionCoordinator {
     this.worktrees = options.worktrees
     this.artifactDirectory = options.artifactDirectory
     this.messages = options.messages ?? new ChannelMessageService(options.repositories)
-    this.collectReviewEvidence = options.collectReviewEvidence ?? collectGitReviewEvidence
   }
 
   async startClaim(claim: TaskClaim): Promise<void> {
@@ -126,9 +116,9 @@ export class TaskExecutionCoordinator {
     this.repositories.updateTaskSession(taskId, execution.agentId, { status: 'input_queued' })
   }
 
-  async resumeReturnedTask(taskId: string): Promise<void> {
+  async resumeReturnedTask(taskId: string): Promise<boolean> {
     const execution = this.executions.get(taskId)
-    if (!execution) throw new DomainError('The original runtime session is no longer available locally.')
+    if (!execution) return false
     const claim = this.repositories.reclaimReturnedTask(taskId, execution.agentId, new Date())
     if (!claim) throw new DomainError('Task cannot be resumed by its original agent.')
     this.repositories.transitionTask(taskId, 'running', '人工退回后恢复原 Runtime 会话')
@@ -138,6 +128,7 @@ export class TaskExecutionCoordinator {
       this.armTimeout(this.task(taskId), execution)
       this.deliverUnconsumedInputs(taskId)
       this.repositories.updateTaskSession(taskId, execution.agentId, { status: 'running' })
+      return true
     } catch (error) {
       this.fail(taskId, execution.agentId, error instanceof Error ? error.message : 'Runtime 会话恢复失败')
       throw error
@@ -243,32 +234,10 @@ export class TaskExecutionCoordinator {
 
   private async settle(execution: ManagedExecution): Promise<void> {
     const task = this.task(execution.taskId)
-    let hasCommit: boolean | null
-    try {
-      hasCommit = task.worktreePath ? await hasTaskBranchCommit(task.worktreePath, execution.targetBranch) : false
-    } catch (error) {
-      this.failReviewEvidence(task, execution.agentId, error)
-      return
-    }
-    if (!hasCommit) {
-      this.fail(task.id, execution.agentId, 'Runtime 已完成，但任务分支没有可供评审的提交。')
-      return
-    }
-    try {
-      await this.writeReviewEvidence(task, execution)
-    } catch (error) {
-      this.failReviewEvidence(task, execution.agentId, error)
-      return
-    }
-    this.repositories.finishTaskExecution(task.id, execution.agentId, 'in_review', 'Runtime 完成并检测到任务分支提交')
-    this.messages.postAgent(task.channelId, task.id, execution.agentId, execution.agentName, `已完成「${task.title}」，已提交改动，等待你验收。`, task.threadRootMessageId)
+    this.repositories.finishTaskExecution(task.id, execution.agentId, 'in_review', 'Runtime 已正常完成任务，等待人工审核。')
+    this.messages.postAgent(task.channelId, task.id, execution.agentId, execution.agentName, `已完成处理「${task.title}」，等待人工审核。`, task.threadRootMessageId)
     execution.active = false
     this.disarmTimeout(execution)
-  }
-
-  private failReviewEvidence(task: Task, agentId: string, error: unknown): void {
-    const detail = error instanceof Error ? error.message : '未知错误'
-    this.fail(task.id, agentId, `评审证据收集失败：${detail}`, 'task.review_evidence_failed')
   }
 
   private fail(taskId: string, agentId: string, reason: string, eventType = 'task.execution_failed'): void {
@@ -380,20 +349,6 @@ export class TaskExecutionCoordinator {
     execution.timeout = undefined
   }
 
-  private async writeReviewEvidence(task: Task, execution: ManagedExecution): Promise<void> {
-    if (!task.worktreePath) throw new Error('Task worktree is required before collecting review evidence.')
-    const evidence = await this.collectReviewEvidence(task.worktreePath, execution.targetBranch)
-    const controlledStderr = execution.controlledStderr.length > 0
-      ? execution.controlledStderr.join('')
-      : '受控进程未产生 stderr 输出。'
-    await Promise.all([
-      this.writeArtifact(task.id, 'review-commit', evidence.commit),
-      this.writeArtifact(task.id, 'review-changed-files', evidence.changedFiles),
-      this.writeArtifact(task.id, 'review-controlled-stderr', controlledStderr),
-      this.writeArtifact(task.id, 'review-diff-summary', evidence.diffSummary),
-    ])
-  }
-
   private async writeArtifact(taskId: string, kind: string, content: string): Promise<void> {
     const directory = path.join(this.artifactDirectory, taskId)
     await mkdir(directory, { recursive: true })
@@ -421,24 +376,4 @@ export class TaskExecutionCoordinator {
     }
     return { task: claim.task, agent, repository }
   }
-}
-
-async function hasTaskBranchCommit(worktreePath: string, targetBranch: string): Promise<boolean> {
-  const { stdout } = await execFileAsync('git', ['-C', worktreePath, 'log', `${targetBranch}..HEAD`, '--format=%H', '-1'], { shell: false })
-  return stdout.trim().length > 0
-}
-
-async function collectGitReviewEvidence(worktreePath: string, targetBranch: string): Promise<ReviewEvidence> {
-  const range = `${targetBranch}..HEAD`
-  const [commit, changedFiles, diffSummary] = await Promise.all([
-    gitOutput(worktreePath, ['log', '-1', '--format=%H%n%s']),
-    gitOutput(worktreePath, ['diff', '--name-status', range]),
-    gitOutput(worktreePath, ['diff', '--stat', range]),
-  ])
-  return { commit, changedFiles, diffSummary }
-}
-
-async function gitOutput(worktreePath: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', ['-C', worktreePath, ...args], { shell: false })
-  return stdout.trim() || '无输出'
 }

@@ -33,7 +33,7 @@ describe('ChannelTurnCoordinator', () => {
     database = undefined
   })
 
-  it('persists at most three responsibility candidates before probing all three in parallel', async () => {
+  it('probes every available channel member in parallel before selecting speakers', async () => {
     const fixture = await createFixture()
     const agents = Array.from({ length: 4 }, (_, index) => fixture.createAgent(`Agent ${index}`, ['shared topic']))
     const gates = new Map(agents.map((agent) => [agent.id, deferred<ConversationSessionResult>()]))
@@ -41,10 +41,10 @@ describe('ChannelTurnCoordinator', () => {
     const message = fixture.postHuman('shared topic')
 
     const dispatch = fixture.coordinator.dispatch(message)
-    await waitFor(() => fixture.sessions.calls.length === 3)
+    await waitFor(() => fixture.sessions.calls.length === 4)
 
     const turn = fixture.turnFor(message)
-    expect(fixture.repositories.listTurnParticipants(turn.id)).toHaveLength(3)
+    expect(fixture.repositories.listTurnParticipants(turn.id)).toHaveLength(4)
     expect(fixture.sessions.calls.every((call) => call.conversation?.kind === 'participation')).toBe(true)
 
     for (const gate of gates.values()) gate.resolve(participation('silent', 0))
@@ -70,30 +70,34 @@ describe('ChannelTurnCoordinator', () => {
     ])
   })
 
-  it('guarantees one fallback reply when no responsibility matches', async () => {
+  it('lets every member judge an unmatched message before selecting a reply', async () => {
     const fixture = await createFixture()
     const recentlySpoken = fixture.createAgent('Recently Spoken', ['backend'])
     const fallback = fixture.createAgent('Fallback', ['frontend'])
     fixture.setLastSpokenAt(recentlySpoken.id, '2026-08-03T00:00:00.000Z')
-    fixture.sessions.handle = async () => publicReply('fallback answer')
-
-    const turn = await fixture.coordinator.dispatch(fixture.postHuman('hello'))
-
-    expect(turn).toMatchObject({ mode: 'ordinary', status: 'completed', currentRound: 1 })
-    expect(fixture.sessions.calls).toHaveLength(1)
-    expect(fixture.sessions.calls[0]).toMatchObject({
-      agent: { id: fallback.id },
-      conversation: { kind: 'response' },
-    })
-    expect(fixture.repositories.listTurnParticipants(turn.id)).toEqual([
-      expect.objectContaining({
-        agentId: fallback.id,
-        source: 'responsibility',
-        decision: 'speak',
-        status: 'spoken',
-        reason: 'channel_fallback',
-      }),
+    const gates = new Map([
+      [recentlySpoken.id, deferred<ConversationSessionResult>()],
+      [fallback.id, deferred<ConversationSessionResult>()],
     ])
+    fixture.sessions.handle = (input) => input.conversation?.kind === 'participation'
+      ? gates.get(input.agent.id)!.promise
+      : Promise.resolve(publicReply('fallback answer'))
+
+    const dispatch = fixture.coordinator.dispatch(fixture.postHuman('hello'))
+    await waitFor(() => fixture.sessions.calls.length === 2)
+
+    expect(fixture.sessions.calls.every((call) => call.conversation?.kind === 'participation')).toBe(true)
+    gates.get(recentlySpoken.id)!.resolve(participation('silent', 0.9))
+    gates.get(fallback.id)!.resolve(participation('speak', 0.8))
+
+    const turn = await dispatch
+    expect(turn).toMatchObject({ mode: 'ordinary', status: 'completed', currentRound: 1 })
+    expect(fixture.sessions.calls.filter((call) => call.conversation?.kind === 'response')).toHaveLength(1)
+    expect(fixture.sessions.calls.find((call) => call.conversation?.kind === 'response')).toMatchObject({ agent: { id: fallback.id } })
+    expect(fixture.repositories.listTurnParticipants(turn.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ agentId: recentlySpoken.id, decision: 'silent', status: 'skipped' }),
+      expect.objectContaining({ agentId: fallback.id, decision: 'speak', status: 'spoken' }),
+    ]))
   })
 
   it('runs multiple explicit mentions in parallel and persists replies in mention order', async () => {
@@ -708,7 +712,7 @@ describe('ChannelTurnCoordinator', () => {
     const target = fixture.createAgent('Target', ['unrelated specialty'])
     const root = fixture.postHuman('Thread root')
     fixture.sessions.handle = async (input) => {
-      if (input.conversation?.kind === 'participation') return participation('speak', 0.9)
+      if (input.conversation?.kind === 'participation') return participation(input.agent.id === source.id ? 'speak' : 'silent', input.agent.id === source.id ? 0.9 : 0.1)
       if (input.conversation?.kind === 'response') {
         return publicReply('source answer', [{ agentId: target.id, question: 'Please verify.' }])
       }

@@ -1,0 +1,254 @@
+- generic [ref=f2e3]:
+  - navigation "工作空间" [ref=f2e4]:
+    - generic [ref=f2e5]:
+      - generic [ref=f2e6]: 频道
+      - button "添加频道" [ref=f2e7] [cursor=pointer]
+    - generic [ref=f2e9]:
+      - generic [ref=f2e10]:
+        - button "# summit" [ref=f2e11] [cursor=pointer]:
+          - generic [ref=f2e15]: summit
+        - 'button "归档 # summit" [ref=f2e16] [cursor=pointer]'
+      - generic [ref=f2e20]:
+        - button "# channel1" [ref=f2e21] [cursor=pointer]:
+          - generic [ref=f2e25]: channel1
+        - 'button "归档 # channel1" [ref=f2e26] [cursor=pointer]'
+      - generic [ref=f2e30]:
+        - button "# channel2" [ref=f2e31] [cursor=pointer]:
+          - generic [ref=f2e35]: channel2
+        - 'button "归档 # channel2" [ref=f2e36] [cursor=pointer]'
+      - generic [ref=f2e40]:
+        - button "# channel4" [ref=f2e41] [cursor=pointer]:
+          - generic [ref=f2e45]: channel4
+        - 'button "归档 # channel4" [ref=f2e46] [cursor=pointer]'
+    - region "已归档频道" [ref=f2e50]:
+      - button "已归档频道（3）" [ref=f2e51] [cursor=pointer]:
+        - generic [ref=f2e54]: 已归档频道
+        - generic [ref=f2e55]: "3"
+    - button "任务看板" [ref=f2e56] [cursor=pointer]:
+      - generic [ref=f2e61]: "0"
+    - button "Dream（0 个待确认）" [ref=f2e62] [cursor=pointer]:
+      - generic [ref=f2e75]: Dream
+      - generic [ref=f2e76]: "0"
+    - generic [ref=f2e77]:
+      - generic [ref=f2e78]: 工作空间
+      - button "添加工作空间" [ref=f2e80] [cursor=pointer]
+    - group "channel4 的工作空间" [ref=f2e82]:
+      - paragraph [ref=f2e83]: 未绑定工作空间
+    - generic [ref=f2e84]: 任务
+    - paragraph [ref=f2e85]: 请先为频道绑定工作空间
+    - region "Agent 状态" [ref=f2e86]:
+      - generic [ref=f2e87]:
+        - generic [ref=f2e88]: 运行中的 Agent
+        - button "添加 Agent" [ref=f2e89] [cursor=pointer]
+      - button "查看 clawd 配置" [ref=f2e91] [cursor=pointer]:
+        - generic [ref=f2e96]:
+          - strong [ref=f2e97]: clawd
+          - generic [ref=f2e98]: "@clawd · claude-code"
+        - generic [ref=f2e99]: 空闲
+      - button "查看 newton 配置" [ref=f2e100] [cursor=pointer]:
+        - generic [ref=f2e105]:
+          - strong [ref=f2e106]: newton
+          - generic [ref=f2e107]: "@newton · pi"
+        - generic [ref=f2e108]: 空闲
+      - button "查看 前端 Agent 配置" [ref=f2e109] [cursor=pointer]:
+        - generic [ref=f2e114]:
+          - strong [ref=f2e115]: 前端 Agent
+          - generic [ref=f2e116]: "@前端 Agent · opencode"
+        - generic [ref=f2e117]: 空闲
+  - main [ref=f2e118]:
+    - generic [ref=f2e119]:
+      - generic [ref=f2e120]:
+        - heading "任务看板" [level=1] [ref=f2e265]
+        - paragraph [ref=f2e122]: 按频道管理任务
+      - generic [ref=f2e266]:
+        - text: 频道
+        - combobox "看板频道" [ref=f2e267]:
+          - option "summit"
+          - option "channel1" [selected]
+          - option "channel2"
+          - option "channel4"
+          - option "general"
+          - option "channel2"
+          - option "channel3"
+      - button "新建任务" [ref=f2e268] [cursor=pointer]
+    - region "任务看板" [ref=f2e269]:
+      - generic [ref=f2e270]:
+        - region "积压任务" [ref=f2e271]:
+          - generic [ref=f2e272]:
+            - generic [ref=f2e273]: 积压任务
+            - generic [ref=f2e277]: "1"
+          - button "调研pi agent的实现和扩展 需要人工处理" [pressed] [ref=f2e315] [cursor=pointer]:
+            - generic [ref=f2e316]: 调研pi agent的实现和扩展
+            - generic [ref=f2e317]: 需要人工处理
+        - region "待办任务" [ref=f2e280]:
+          - generic [ref=f2e281]:
+            - generic [ref=f2e282]: 待办任务
+            - generic [ref=f2e286]: "0"
+          - paragraph [ref=f2e288]: 暂无任务
+        - region "处理中任务" [ref=f2e289]:
+          - generic [ref=f2e290]:
+            - generic [ref=f2e291]: 处理中任务
+            - generic [ref=f2e294]: "0"
+          - paragraph [ref=f2e296]: 暂无任务
+        - region "审核任务" [ref=f2e297]:
+          - generic [ref=f2e298]:
+            - generic [ref=f2e299]: 审核任务
+            - generic [ref=f2e303]: "0"
+          - paragraph [ref=f2e305]: 暂无任务
+        - region "已完成任务" [ref=f2e306]:
+          - generic [ref=f2e307]:
+            - generic [ref=f2e308]: 已完成任务
+            - generic [ref=f2e312]: "0"
+          - paragraph [ref=f2e314]: 暂无任务
+  - complementary "任务与上下文" [ref=f2e215]:
+    - strong [ref=f2e217]: 上下文
+    - generic [ref=f2e218]:
+      - generic [ref=f2e219]:
+        - heading "频道 Agent" [level=2] [ref=f2e220]
+        - button "添加 Agent" [ref=f2e221] [cursor=pointer]
+      - list [ref=f2e225]:
+        - listitem [ref=f2e226]:
+          - generic [ref=f2e227]:
+            - strong [ref=f2e228]: 前端 Agent
+            - generic [ref=f2e229]: "@frontend · 空闲 · Runtime: OpenCode"
+          - button "移除 前端 Agent" [ref=f2e230] [cursor=pointer]
+        - listitem [ref=f2e234]:
+          - generic [ref=f2e235]:
+            - strong [ref=f2e236]: newton
+            - generic [ref=f2e237]: "@newton · 空闲 · Runtime: Pi"
+          - button "移除 newton" [ref=f2e238] [cursor=pointer]
+        - listitem [ref=f2e242]:
+          - generic [ref=f2e243]:
+            - strong [ref=f2e244]: clawd
+            - generic [ref=f2e245]: "@build · 空闲 · Runtime: Claude Code"
+          - button "移除 clawd" [ref=f2e246] [cursor=pointer]
+    - generic [ref=f2e250]:
+      - generic [ref=f2e251]:
+        - heading "频道工作空间 0/5" [level=2] [ref=f2e252]:
+          - text: 频道工作空间
+          - generic [ref=f2e253]: 0/5
+        - button "添加工作空间" [ref=f2e254] [cursor=pointer]
+      - list
+      - paragraph [ref=f2e258]: 尚未绑定工作空间。
+    - generic [ref=f2e259]:
+      - heading "频道操作" [level=2] [ref=f2e260]
+      - button "收起上下文" [ref=f2e261] [cursor=pointer]
+  - dialog [ref=f2e318]:
+    - banner [ref=f2e319]:
+      - generic [ref=f2e320]:
+        - paragraph [ref=f2e321]: 任务处理详情
+        - heading "调研pi agent的实现和扩展" [level=2] [ref=f2e322]
+      - button "关闭任务详情" [active] [ref=f2e323] [cursor=pointer]
+    - generic [ref=f2e328]:
+      - heading "Agent 回复" [level=3] [ref=f2e329]
+      - generic "Agent 回复内容" [ref=f2e330]:
+        - paragraph [ref=f2e331]:
+          - text: The "pi agent" appears to be a Runtime adapter in this project. Let me explore the runtime adapter structure and the pi adapter specifically.The task is to research the Pi agent's implementation and extension in this codebase, and output a report. Let me dig into the runtime adapter, its ports, profiles, and tests.The
+          - code [ref=f2e332]: pi
+          - text: binary is the
+          - code [ref=f2e333]: "@earendil-works/pi-coding-agent"
+          - text: "npm package. Let me inspect it and research the upstream project.Local reads outside the worktree are blocked. I'll research the pi-coding-agent upstream project via the web instead.Web access isn't available in this session, so I'll base the report on the codebase itself — which contains the full integration. Let me read the remaining wiring: the plan docs, process-runner port, and how the coordinator consumes the runtime.Now let me examine how the coordinator drives Pi sessions (persistence, recovery, conversation turns) and the schema.I now have a complete picture. Let me write the report.The report is written. Let me verify the claims by running the Pi adapter tests, then commit.Tests require approval to run — I'll skip execution; the report's claims are all directly verified against the source. Let me commit the report.Git operations require approval in this session, so the report stays as an uncommitted file in the worktree — the deliverable itself is complete.调研完成，报告已输出到"
+          - strong [ref=f2e334]:
+            - code [ref=f2e335]: docs/pi-agent-report.md
+          - text: （在任务 worktree 内，测试与提交因权限被跳过）。
+        - heading "核心发现" [level=2] [ref=f2e336]
+        - paragraph [ref=f2e337]:
+          - strong [ref=f2e338]: Pi Agent 是什么
+          - text: ：Sinapsis 三种受管 Runtime 之一（
+          - code [ref=f2e339]: opencode
+          - text: /
+          - code [ref=f2e340]: pi
+          - text: /
+          - code [ref=f2e341]: claude-code
+          - text: ）。
+          - code [ref=f2e342]: pi
+          - text: 是本机安装的
+          - code [ref=f2e343]: "@earendil-works/pi-coding-agent"
+          - text: CLI（
+          - code [ref=f2e344]: /opt/homebrew/bin/pi
+          - text: ）。
+        - paragraph [ref=f2e345]:
+          - strong [ref=f2e346]: 实现方式
+          - text: （
+          - code [ref=f2e347]: server/adapters/runtime/pi-runtime-adapter.ts
+          - text: ，260 行，零第三方依赖）：
+        - list [ref=f2e348]:
+          - listitem [ref=f2e349]:
+            - strong [ref=f2e350]: 持久 RPC 进程模型
+            - text: — 与其他两种 Runtime（短生命周期逐轮进程）不同，Pi 以
+            - code [ref=f2e351]: pi --mode rpc
+            - text: 启动常驻子进程，通过 LF 分隔 JSONL 通信。这是三种 Runtime 中唯一的长连接会话模型
+          - listitem [ref=f2e352]:
+            - strong [ref=f2e353]: RPC 协议
+            - text: ：
+            - code [ref=f2e354]: get_state
+            - text: （获取 sessionId/sessionFile）→
+            - code [ref=f2e355]: prompt
+            - text: （空闲投递）/
+            - code [ref=f2e356]: steer
+            - text: （流式中追加）；恢复时
+            - code [ref=f2e357]: switch_session
+            - text: + 缓冲输入；
+            - code [ref=f2e358]: agent_settled
+            - text: 是完成边界
+          - listitem [ref=f2e359]:
+            - strong [ref=f2e360]: 事件翻译
+            - text: ：
+            - code [ref=f2e361]: message_update
+            - text: →text、
+            - code [ref=f2e362]: tool_execution_start/end
+            - text: →工具事件、
+            - code [ref=f2e363]: queue_update
+            - text: →队列长度；未知事件静默留作 artifact（协议演进的缓冲）
+          - listitem [ref=f2e364]:
+            - strong [ref=f2e365]: 执行策略
+            - text: ：
+            - code [ref=f2e366]: read-only-no-tools
+            - text: 会把参数整体替换为
+            - code [ref=f2e367]: "--no-tools --no-extensions --no-skills ... --no-approve"
+            - text: ，用于频道只读对话
+          - listitem [ref=f2e368]:
+            - strong [ref=f2e369]: 两条使用路径
+            - text: ：任务流（worktree +
+            - code [ref=f2e370]: task_sessions
+            - text: ）和对话流（
+            - code [ref=f2e371]: conversation_sessions
+            - text: 持久化 +
+            - code [ref=f2e372]: switch_session
+            - text: 恢复 +
+            - code [ref=f2e373]: session_lost
+            - text: 冷启动兜底）
+        - paragraph [ref=f2e374]:
+          - strong [ref=f2e375]: 扩展点
+          - text: （报告第 3 节，含优先级建议）：
+        - list [ref=f2e376]:
+          - listitem [ref=f2e377]:
+            - strong [ref=f2e378]: 协议层
+            - text: ：
+            - code [ref=f2e379]: recordJson
+            - text: 是唯一翻译点，新命令/事件在此扩展；端口已预留
+            - code [ref=f2e380]: needs_input
+            - text: 事件和
+            - code [ref=f2e381]: timeout
+            - text: 错误码但尚未使用
+          - listitem [ref=f2e382]:
+            - strong [ref=f2e383]: 执行策略
+            - text: ：在
+            - code [ref=f2e384]: launch()
+            - text: 的 args 分支加新枚举 → 新参数集
+          - listitem [ref=f2e385]:
+            - strong [ref=f2e386]: 新 Runtime 模板
+            - text: ：claude-code 的接入计划（
+            - code [ref=f2e387]: docs/superpowers/plans/2026-07-25-claude-code-runtime.md
+            - text: ）是完整工作示例
+          - listitem [ref=f2e388]:
+            - strong [ref=f2e389]: 最值得做的一步
+            - text: ：
+            - code [ref=f2e390]: task_sessions
+            - text: 目前只存
+            - code [ref=f2e391]: runtime_session_id
+            - text: 不存
+            - code [ref=f2e392]: sessionFile
+            - text: ，导致 Pi 任务在服务重启后无法
+            - code [ref=f2e393]: switch_session
+            - text: 恢复——补上即可与对话流对齐

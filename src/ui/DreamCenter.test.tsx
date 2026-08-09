@@ -121,6 +121,14 @@ describe('DreamCenter', () => {
     await expectDreamFailure('Dream 启动失败，请稍后重试。')
   })
 
+  it('explains when Dream was started without local human authorization', async () => {
+    const user = userEvent.setup()
+    render(<DreamCenter api={api({ startDream: vi.fn().mockRejectedValue(new Error('A local human capability is required.')) })} channels={[channel]} onJumpToSource={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '立即 Dream' }))
+    await expectDreamFailure('Dream 需要本地人工授权。请通过 Sinapsis 人工界面重新打开。')
+  })
+
   it('clears the running notice after the Dream poll times out', async () => {
     vi.useFakeTimers()
     try {

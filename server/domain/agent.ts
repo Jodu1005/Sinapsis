@@ -16,7 +16,7 @@ export interface Agent {
   id: string
   identity: string
   mentionName: string
-  runtime: 'opencode' | 'pi' | 'claude-code'
+  runtime: 'opencode' | 'opencode-acp' | 'pi' | 'claude-code'
   status: AgentStatus
   capabilityTags: string[]
   responsibilities?: string[]

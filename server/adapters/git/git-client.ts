@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import type { GitClient, RepositoryInspection } from '../../ports/git-client'
+import type { ChangedWorktreeFile, GitClient, RepositoryInspection } from '../../ports/git-client'
 
 export class CommandGitClient implements GitClient {
   async inspectRepository(directory: string): Promise<RepositoryInspection> {
@@ -10,6 +10,36 @@ export class CommandGitClient implements GitClient {
 
     return { rootPath, currentBranch, defaultBranch, isClean: status.trim().length === 0 }
   }
+
+  async listChangedFiles(directory: string): Promise<ChangedWorktreeFile[]> {
+    const output = await runGit(directory, ['status', '--porcelain=v1', '--untracked-files=all', '-z'])
+    const files = new Map<string, ChangedWorktreeFile>()
+    const records = output.split('\0')
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index]
+      if (!record || record.length < 4) continue
+      const status = record.slice(0, 2)
+      const filePath = record.slice(3)
+      if (!filePath || isDeletion(status)) continue
+      if (isRenameOrCopy(status)) index += 1
+      files.set(filePath, { path: filePath, status: statusForFile(status) })
+    }
+    return [...files.values()].sort((left, right) => left.path.localeCompare(right.path))
+  }
+}
+
+function isDeletion(status: string): boolean {
+  return status.includes('D')
+}
+
+function isRenameOrCopy(status: string): boolean {
+  return status.includes('R') || status.includes('C')
+}
+
+function statusForFile(status: string): ChangedWorktreeFile['status'] {
+  if (isRenameOrCopy(status)) return 'renamed'
+  if (status === '??' || status.includes('A')) return 'added'
+  return 'modified'
 }
 
 async function remoteDefaultBranch(rootPath: string, fallback: string): Promise<string> {

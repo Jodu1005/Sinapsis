@@ -87,6 +87,8 @@ describe('ClaudeCodeRuntimeAdapter', () => {
     expect(firstSpawn?.options.args[7]).toMatch(UUID_PATTERN)
     expect(firstSpawn?.options.args.join(' ')).toContain('Implement Claude adapter')
     expect(firstSpawn?.options.args.join(' ')).toContain(task.description)
+    expect(firstSpawn?.options.args.join(' ')).toContain('Completion is determined by the task result, not Git activity.')
+    expect(firstSpawn?.options.args.join(' ')).toContain('Do not create a branch or commit unless the task explicitly asks for one.')
     expect(session.sessionId).toMatch(UUID_PATTERN)
 
     runner.spawns[0]?.process.emitStdout(`{"type":"system","subtype":"init","session_id":"${session.sessionId}"}\n`)

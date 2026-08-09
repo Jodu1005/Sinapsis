@@ -1,0 +1,296 @@
+- generic [ref=e3]:
+  - navigation "工作空间" [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: 频道
+      - button "添加频道" [ref=e7] [cursor=pointer]
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - button "# summit" [ref=e11] [cursor=pointer]:
+          - generic [ref=e15]: summit
+        - 'button "归档 # summit" [ref=e16] [cursor=pointer]'
+      - generic [ref=e20]:
+        - button "# channel1" [ref=e21] [cursor=pointer]:
+          - generic [ref=e25]: channel1
+        - 'button "归档 # channel1" [ref=e26] [cursor=pointer]'
+      - generic [ref=e30]:
+        - button "# channel2" [ref=e31] [cursor=pointer]:
+          - generic [ref=e35]: channel2
+        - 'button "归档 # channel2" [ref=e36] [cursor=pointer]'
+      - generic [ref=e40]:
+        - button "# channel4" [ref=e41] [cursor=pointer]:
+          - generic [ref=e45]: channel4
+        - 'button "归档 # channel4" [ref=e46] [cursor=pointer]'
+    - region "已归档频道" [ref=e50]:
+      - button "已归档频道（3）" [ref=e51] [cursor=pointer]:
+        - generic [ref=e54]: 已归档频道
+        - generic [ref=e55]: "3"
+    - button "Dream（0 个待确认）" [ref=e56] [cursor=pointer]:
+      - generic [ref=e69]: Dream
+      - generic [ref=e70]: "0"
+    - generic [ref=e71]:
+      - generic [ref=e72]: 工作空间
+      - button "添加工作空间" [ref=e74] [cursor=pointer]
+    - group "channel1 的工作空间" [ref=e76]:
+      - button "S Sinapsis" [pressed] [ref=e77] [cursor=pointer]:
+        - generic [ref=e78]: S
+        - generic [ref=e79]: Sinapsis
+    - generic [ref=e80]: 任务
+    - group "Sinapsis 的任务" [ref=e81]:
+      - generic [ref=e82]:
+        - generic [ref=e85]: Sinapsis
+        - button "新建 Sinapsis 任务" [ref=e86] [cursor=pointer]
+      - paragraph [ref=e88]: 还没有任务
+    - region "Agent 状态" [ref=e89]:
+      - generic [ref=e90]:
+        - generic [ref=e91]: 运行中的 Agent
+        - button "添加 Agent" [ref=e92] [cursor=pointer]
+      - button "查看 clawd 配置" [ref=e94] [cursor=pointer]:
+        - generic [ref=e99]:
+          - strong [ref=e100]: clawd
+          - generic [ref=e101]: "@clawd · claude-code"
+        - generic [ref=e102]: 空闲
+      - button "查看 newton 配置" [ref=e103] [cursor=pointer]:
+        - generic [ref=e108]:
+          - strong [ref=e109]: newton
+          - generic [ref=e110]: "@newton · pi"
+        - generic [ref=e111]: 空闲
+      - button "查看 前端 Agent 配置" [ref=e112] [cursor=pointer]:
+        - generic [ref=e117]:
+          - strong [ref=e118]: 前端 Agent
+          - generic [ref=e119]: "@前端 Agent · opencode"
+        - generic [ref=e120]: 空闲
+  - main [ref=e121]:
+    - generic [ref=e122]:
+      - generic [ref=e123]:
+        - heading "# channel1" [level=1] [ref=e124]
+        - paragraph [ref=e125]: 全局频道
+      - generic [ref=e126]:
+        - generic [ref=e127]: 已连接
+        - button "打开上下文" [ref=e128] [cursor=pointer]
+    - region "频道消息" [ref=e132]:
+      - article [ref=e133]:
+        - generic [ref=e134]: "Y"
+        - generic [ref=e135]:
+          - generic [ref=e136]:
+            - strong [ref=e137]: 你
+            - time [ref=e138]: 16:54
+          - paragraph [ref=e139]: hello
+          - button "回复 你 的消息" [ref=e140] [cursor=pointer]
+      - article [ref=e143]:
+        - generic [ref=e144]: "Y"
+        - generic [ref=e145]:
+          - generic [ref=e146]:
+            - strong [ref=e147]: 你
+            - time [ref=e148]: 16:55
+          - paragraph [ref=e149]: hello@dev
+          - button "回复 你 的消息" [ref=e150] [cursor=pointer]
+      - article [ref=e153]:
+        - generic [ref=e158]:
+          - generic [ref=e159]:
+            - strong [ref=e160]: clawd
+            - time [ref=e161]: 16:55
+          - paragraph [ref=e162]: 抱歉，我暂时无法回复：Claude Code exited with 1.
+          - button "回复 clawd 的消息" [ref=e163] [cursor=pointer]
+      - article [ref=e166]:
+        - generic [ref=e167]: "Y"
+        - generic [ref=e168]:
+          - generic [ref=e169]:
+            - strong [ref=e170]: 你
+            - time [ref=e171]: 16:55
+          - paragraph [ref=e172]: hello@dev
+          - button "回复 你 的消息" [ref=e173] [cursor=pointer]
+      - article [ref=e176]:
+        - generic [ref=e181]:
+          - generic [ref=e182]:
+            - strong [ref=e183]: newton
+            - time [ref=e184]: 16:55
+          - paragraph [ref=e185]: "The user said \"hello@dev\" - this seems like a greeting directed at the development environment. I should respond in a friendly and open manner, offering assistance. Since I'm in read-only mode, I should keep that in mind and not offer to make changes.Hi! 👋 I'm here and ready to help. What are you working on in this `prototype-zero-control-room` workspace? I can help with: - Reading and exploring files - Running analysis or search commands (read-only) - Answering questions about the codebase - Discussing architecture, design, or plans Just let me know what you'd like to dive into!"
+          - button "回复 newton 的消息" [ref=e186] [cursor=pointer]
+      - article [ref=e189]:
+        - generic [ref=e190]: "Y"
+        - generic [ref=e191]:
+          - generic [ref=e192]:
+            - strong [ref=e193]: 你
+            - time [ref=e194]: 12:14
+          - paragraph [ref=e195]: 中国的首都是哪里
+          - button "回复 你 的消息" [ref=e196] [cursor=pointer]
+      - article [ref=e199]:
+        - generic [ref=e204]:
+          - generic [ref=e205]:
+            - strong [ref=e206]: clawd
+            - time [ref=e207]: 12:14
+          - paragraph [ref=e208]: 抱歉，我暂时无法回复：Claude Code exited with 1.
+          - button "回复 clawd 的消息" [ref=e209] [cursor=pointer]
+      - article [ref=e212]:
+        - generic [ref=e213]: "Y"
+        - generic [ref=e214]:
+          - generic [ref=e215]:
+            - strong [ref=e216]: 你
+            - time [ref=e217]: 12:17
+          - paragraph [ref=e218]: 中国首都是哪里@dev
+          - button "回复 你 的消息" [ref=e219] [cursor=pointer]
+      - article [ref=e222]:
+        - generic [ref=e227]:
+          - generic [ref=e228]:
+            - strong [ref=e229]: newton
+            - time [ref=e230]: 12:17
+          - paragraph [ref=e231]: The user is asking "中国首都是哪里@dev" which means "Where is the capital of China?" - this is a simple factual question. Let me answer it directly.中国的首都是**北京**。🇨🇳 有什么需要帮忙的吗？我可以帮你阅读代码、分析项目结构，或者回答其他问题。
+          - button "回复 newton 的消息" [ref=e232] [cursor=pointer]
+      - article [ref=e235]:
+        - generic [ref=e236]: "Y"
+        - generic [ref=e237]:
+          - generic [ref=e238]:
+            - strong [ref=e239]: 你
+            - time [ref=e240]: 12:31
+          - paragraph [ref=e241]: 土耳其的首都是哪里@dev
+          - button "回复 你 的消息" [ref=e242] [cursor=pointer]
+      - article [ref=e245]:
+        - generic [ref=e250]:
+          - generic [ref=e251]:
+            - strong [ref=e252]: clawd
+            - time [ref=e253]: 12:31
+          - paragraph [ref=e254]: 抱歉，我暂时无法回复：Claude Code exited with 1.
+          - button "回复 clawd 的消息" [ref=e255] [cursor=pointer]
+      - article [ref=e258]:
+        - generic [ref=e259]: "Y"
+        - generic [ref=e260]:
+          - generic [ref=e261]:
+            - strong [ref=e262]: 你
+            - time [ref=e263]: 12:36
+          - paragraph [ref=e264]: 土耳其的首都在哪里@build
+          - button "回复 你 的消息" [ref=e265] [cursor=pointer]
+      - article [ref=e268]:
+        - generic [ref=e273]:
+          - generic [ref=e274]:
+            - strong [ref=e275]: newton
+            - time [ref=e276]: 12:36
+          - paragraph [ref=e277]: The user is asking "土耳其的首都在哪里@build" which means "Where is the capital of Turkey?" with an @build mention. Let me answer the factual question directly.土耳其的首都是**安卡拉**（Ankara）。🇹🇷 (注意：不是伊斯坦布尔——伊斯坦布尔是土耳其最大的城市和经济中心，但首都是安卡拉。)
+          - button "回复 newton 的消息" [ref=e278] [cursor=pointer]
+      - article [ref=e281]:
+        - generic [ref=e282]: "Y"
+        - generic [ref=e283]:
+          - generic [ref=e284]:
+            - strong [ref=e285]: 你
+            - time [ref=e286]: 12:39
+          - paragraph [ref=e287]: 伊斯坦布尔是个什么城市@dev
+          - button "回复 你 的消息" [ref=e288] [cursor=pointer]
+      - article [ref=e291]:
+        - generic [ref=e296]:
+          - generic [ref=e297]:
+            - strong [ref=e298]: newton
+            - time [ref=e299]: 12:39
+          - paragraph [ref=e300]: The user is asking "伊斯坦布尔是个什么城市@dev" which means "What kind of city is Istanbul?" This is a factual/cultural question about Istanbul.伊斯坦布尔（Istanbul）是土耳其最大的城市，也是该国的**经济、文化和历史中心**。但它**不是**首都——首都是安卡拉。 几个关键点： - 🌍 **横跨欧亚**：是世界上唯一横跨两大洲的城市，博斯普鲁斯海峡将其分为欧洲区和亚洲区 - 🏛️ **历史厚重**：曾是罗马帝国（拜占庭）、奥斯曼帝国的首都，旧称 **君士坦丁堡** - 👑 **人口**：约 1500-2000 万，是土耳其第一大城市 - 🕌 **地标**：圣索菲亚大教堂（Hagia Sophia）、蓝色清真寺、托普卡帕宫、大巴扎 - 💼 **经济**：土耳其的经济引擎，旅游业、贸易、金融中心 - 🏙️ **都市氛围**：比安卡拉更国际化、多元化，活力十足 所以简单说：伊斯坦布尔是土耳其的**历史古都、经济中心、横跨欧亚的国际大都市**，非常值得一游。🗺️ 有什么想进一步了解的，或者这个 workspace 里有没有相关项目我可以帮你看看？
+          - button "回复 newton 的消息" [ref=e301] [cursor=pointer]
+      - article [ref=e304]:
+        - generic [ref=e305]: "Y"
+        - generic [ref=e306]:
+          - generic [ref=e307]:
+            - strong [ref=e308]: 你
+            - time [ref=e309]: 12:40
+          - paragraph [ref=e310]: 你帮我介绍下@build
+          - button "回复 你 的消息" [ref=e311] [cursor=pointer]
+      - article [ref=e314]:
+        - generic [ref=e319]:
+          - generic [ref=e320]:
+            - strong [ref=e321]: clawd
+            - time [ref=e322]: 12:41
+          - paragraph [ref=e323]: "Let me look into what `@build` is while I wait for the exploration to complete.I'll search the codebase thoroughly for agent definitions, mention routing configurations, and the \"clawd\" agent. Let me start with several parallel searches.Let me dig deeper with broader searches and examine the files that were found.Found several agent-related files. Let me read them along with the \"newton\" references.Let me search for more agent routing and configuration patterns, including the actual implementation files for how mentions get resolved.Let me search for \"clawd\" more broadly and look at initialization/setup files.\"clawd\" is not in this codebase at all. Let me search more broadly across parent directories and check for SQLite repositories and Claude configuration files.Let me look at the conversation-coordinator test to understand the `@build` routing pattern, and also check the SQLite repositories for seed data.Let me look at the SQLite repositories and the app test to understand how agents get created and whether there's any seed data.Let me check for the database schema initialization and any scripts that might set up agents.Let me check the schema file for any seed data before summarizing.根据我目前对代码库的探索，让我来介绍一下 **`@build`** 是什么。 --- ## `@build` 解析 **`@build`** 是这个 Sinapsis Control Room 系统中的 **Agent 提及（Mention）路由机制**。当你在频道的消息中带上 `@build`，系统会： ### 1. 路由逻辑 系统通过 `ConversationCoordinator`（`server/application/conversation-coordinator.ts`）中的 `selectAgent()` 方法解析消息，使用 `exactMention()` 正则匹配 `@build`，找到 mentionName 为 `\"build\"` 的 Agent： ```typescript // conversation-coordinator.ts:191-194 function exactMention(body: string, mention: string): boolean { const escaped = mention.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') return new RegExp(`(^|[^A-Za-z0-9_])@${escaped}(?=$|[^A-Za-z0-9_])`, 'i').test(body) } ``` ### 2. `@build` 对应的是哪个 Agent？ 从频道对话记录可以看到，`@build` 映射到一个名为 **\"clawd\"** 的 Agent，它的身份（identity）应该类似 \"Build engineer\"（构建工程师），使用 **Claude Code Runtime**。 ### 3. 当前状态：⚠️ 不可用 从之前的信息来看，\"clawd\" 一直回复失败： > **\"clawd: 抱歉，我暂时无法回复：Claude Code exited with 1.\"** 这意味着 **Claude Code CLI 进程启动时退出了（exit code 1）**，可能是： - 工作目录或 workspace 路径问题 - Claude Code 命令不可用或配置缺失 - 环境变量或认证问题 ### 4. 跟 `@dev` 的区别 | 特性 | `@dev` → Newton | `@build` → Clawd | |------|----------------|-----------------| | **Runtime** | 看起来像 Pi/其他 | Claude Code | | **状态** | ✅ 正常工作 | ❌ 启动失败 | | **用途** | 开发和咨询 | 构建相关任务 | ### 总结 **`@build` 是这个系统中的构建 Agent 路由**，设计上应该可以处理构建任务（编译、打包、检查等），但目前因为 Claude Code 运行时启动失败而无法使用。需要排查为什么 `claude` CLI 命令在工作目录下返回了 exit code 1。Here is my comprehensive analysis of the `@build` agent routing in this codebase. --- ## Key Finding: \"clawd\" Does Not Exist in This Codebase After an exhaustive search across every file in `/Users/jodu/Documents/Sinapsis/.worktrees/prototype-zero-control-room` (excluding `node_modules`), the string **\"clawd\" appears nowhere** in this project. There is no agent definition, configuration, mention mapping, or any reference to \"clawd\" whatsoever. --- ## How Agent Mention Routing Actually Works This codebase (the **Sinapsis** prototype) uses a **dynamic, API-driven agent system**, not static configuration files. Here is the architecture: ### 1. Agent Model File: `/Users/jodu/Documents/Sinapsis/.worktrees/prototype-zero-control-room/server/domain/agent.ts` Each agent has a `mentionName` field -- that is the handle users type after `@`. The domain model is: ```typescript interface Agent { id: string workspaceId: string identity: string // Display name (e.g., \"Build engineer\") mentionName: string // The @handle (e.g., \"build\", \"newton\") runtime: 'opencode' | 'pi' | 'claude-code' status: 'offline' | 'idle' | 'busy' | 'error' capabilityTags: string[] command: string args: string[] model: string env: Record<string, string> } ``` ### 2. No Static Agent Configuration -- Agents Are Created via API File: `/Users/jodu/Documents/Sinapsis/.worktrees/prototype-zero-control-room/server/app.ts` (lines 107-125) Agents are created dynamically through `POST /api/workspaces/:workspaceId/agents`. The API body requires: - `identity` -- display name - `mention` -- the @-handle (e.g., `build`) - `runtime` -- one of `opencode`, `pi`, `claude-code` - `capabilityTags` -- string array for task matching The codebase has **no seed data** and **no pre-configured agents**. The SQLite schema (`/Users/jodu/Documents/Sinapsis/.worktrees/prototype-zero-control-room/server/adapters/sqlite/schema.ts`) creates the tables but inserts no agent rows. Agents must be created by API calls at runtime. ### 3. How `@build` Routing Works (Two Paths) There are two separate routing mechanisms, both using `mentionName`: #### Path A: Channel Messages (Conversations) File: `/Users/jodu/Documents/Sinapsis/.worktrees/prototype-zero-control-room/server/application/conversation-coordinator.ts` (lines 157-166) When a human sends a message in a channel (without `/task`), the `ConversationCoordinator.selectAgent()` method checks if the message contains an exact `@mention`: ```typescript private selectAgent(workspace, channelId, body): Agent | undefined { const mentioned = workspace.agents.find((agent) => exactMention(body, agent.mentionName)) if (mentioned) { const existing = this.executions.get(conversationKey(channelId, mentioned.id)) return mentioned.status === 'idle' || existing?.active ? mentioned : undefined } // fallback: select earliest idle agent } ``` The `exactMention()` regex (line 191) matches `@mentionName` with word boundaries. Additionally, in `server/app.ts` (lines 175-178), the `findMentionedAgent()` function is used to check if a posted channel message mentions an agent directly for task-related dispatch. #### Path B: `/task` Commands File: `/Users/jodu/Documents/Sinapsis/.worktrees/prototype-zero-control-room/src/domain/message-intent.ts` (lines 8-37) When a user types `/task @<mention> <description>`, the frontend `parseMessageIntent()` function resolves the mention: ```typescript const mentionMatch = /(^|\\s)(@[^\\s]+)/.exec(taskContent) const mention = mentionMatch[2] const agent = agents.find((candidate) => candidate.mentionName === mention.slice(1)) ``` ### 4. The Test Fixture: `@build` in Tests File: `/Users/jodu/Documents/Sinapsis/.worktrees/prototype-zero-control-room/server/application/conversation-coordinator.test.ts` In tests, agents with `mentionName: 'build'` are created as test fixtures. The test shows that `@build` correctly routes to the agent named \"build\": ```typescript // Test ensures @build takes precedence over other idle agents const build = fixture.createAgent('Build', 'build') // mentionName: 'build' const review = fixture.createAgent('Review', 'review') // mentionName: 'review' fixture.setIdle(build, '2026-07-25T08:01:00.000Z') fixture.setIdle(review, '2026-07-25T08:00:00.000Z') // review is idle earlier await fixture.coordinator.dispatch(fixture.channel.id, fixture.postHuman('@build 请看一下这个报错。')) // The @build agent is selected (not review, despite being idle earlier) expect(fixture.runtime.starts[0]?.profile.command).toBe('build-runtime') ``` ### 5. Where \"newton\" and \"ada\" Appear File: `/Users/jodu/Documents/Sinapsis/.worktrees/prototype-zero-control-room/src/domain/message-intent.test.ts` The frontend unit test uses `newton` and `ada` as mention names in test fixtures: ```typescript const agents = [ { id: 'agent-pi', mentionName: 'newton' }, { id: 'agent-opencode', mentionName: 'ada' }, ] ``` This means `@newton` routes to `agent-pi` and `@ada` routes to `agent-opencode` **in test fixtures only**. There is no production routing that maps `@dev` to `newton`. ### 6. Supported Runtimes File: `/Users/jodu/Documents/Sinapsis/.worktrees/prototype-zero-control-room/server/adapters/runtime/runtime-profile.ts` The only supported runtimes are: - `opencode` (OpenCode) - `pi` - `claude-code` (Claude Code, driven by the `claude` CLI) Each runtime has a preset profile with command, args, model, and env defaults. --- ## Why `@build` Might Be Failing Since \"clawd\" is not defined anywhere in this codebase, there are several possible explanations: 1. **The agent hasn't been created yet** -- The `@build` agent (or any `@clawd` agent) must be created through the API at `POST /api/workspaces/:workspaceId/agents` with the appropriate `mention`, `runtime`, and `command` values before it can be routed to. If the agent was not created via the API, any `@build` mention will simply not match any agent. 2. **External configuration** -- There may be a `.claude/` or `settings.json` file in a parent directory (e.g., `/Users/jodu/Documents/Sinapsis/`) that defines a \"clawd\" agent for Claude Code's own @-mention routing. However, I could not search parent directories due to permissions. 3. **The \"clawd\" name might be a local alias** -- The name \"clawd\" does not appear anywhere in this repository's code, documentation, or configuration. It could be a personal alias or an agent that was created manually on the developer's machine outside of this codebase. 4. **Runtime adapter failure** -- Even if an agent with `mention: 'build'` was created, if its configured runtime (e.g., `opencode`, `pi`, or `claude-code`) fails to launch (executable not found, command fails), the `RuntimeAvailabilityDetector` would mark it as `offline` or `error`, and `selectAgent()` would skip it for conversation dispatch.好的，之前的探索 Agent 刚刚完成了更深入的分析，我来补充一下更完整的介绍： --- ## `@build` 完整介绍 ### 它的本质 **`@build`** 是 Sinapsis Control Room 系统中基于 **@提及（Mention）的 Agent 路由机制**。当你在频道消息中输入 `@build`，系统会路由到 mentionName 为 `\"build\"` 的 Agent。 ### 架构概览 ``` 用户发消息 \"@build 帮我构建项目\" ↓ ConversationCoordinator.selectAgent() ↓ exactMention(body, \"build\") → 匹配成功 ↓ 找到 mentionName=\"build\" 的 Agent → \"clawd\"（Claude Code 运行时） ↓ start() → Claude Code 进程 → 回复消息 ``` ### 路由逻辑 系统有两个独立的路由路径： | 路径 | 触发方式 | 代码位置 | |------|---------|---------| | **频道对话** | 直接发 `@build xxx` | `conversation-coordinator.ts:157-166` | | **任务指派** | `/task @build xxx` | `message-intent.ts` | Agent 是通过 **API 动态创建** 的（`POST /api/workspaces/:workspaceId/agents`），不是写死在配置文件里的。所以 `@build` 必须先在界面上创建好对应的 Agent 才能使用。 ### 支持三种 Runtime | Runtime | 说明 | |---------|------| | `opencode` | OpenCode | | `pi` | Pi | | `claude-code` | Claude Code（claude CLI） | ### 当前状态 之前 `@build` 指向的 **\"clawd\"**（身份大概是 Build Engineer）配置的是 `claude-code` 运行时，但返回了： > **\"Claude Code exited with 1\"** 这表示 `claude` CLI 命令执行失败。可能的原因： 1. **`claude` 命令不可用** — 未安装或不在 PATH 中 2. **工作目录问题** — workspace 路径不存在或不可访问 3. **配置问题** — Claude Code 需要的配置缺失 4. **Agent 配置错误** — 创建 Agent 时传入了错误的 command/args ### 结论 **`@build` 是构建/开发 Agent 的路由别名**，设计用于处理构建任务（编译、检查等）。它背后的 Agent \"clawd\" 使用 Claude Code 运行时，但目前处于 **不可用状态**，需要修复 Claude Code CLI 的启动问题。相比之下，`@dev` → Newton 使用的是 Pi/OpenCode 运行时，工作正常。 如果你想，我可以帮你进一步排查 `claude` 命令为什么启动失败，或者看看 Agent 的具体配置。根据我目前对代码库的探索，让我来介绍一下 **`@build`** 是什么。 --- ## `@build` 解析 **`@build`** 是这个 Sinapsis Control Room 系统中的 **Agent 提及（Mention）路由机制**。当你在频道的消息中带上 `@build`，系统会： ### 1. 路由逻辑 系统通过 `ConversationCoordinator`（`server/application/conversation-coordinator.ts`）中的 `selectAgent()` 方法解析消息，使用 `exactMention()` 正则匹配 `@build`，找到 mentionName 为 `\"build\"` 的 Agent： ```typescript // conversation-coordinator.ts:191-194 function exactMention(body: string, mention: string): boolean { const escaped = mention.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') return new RegExp(`(^|[^A-Za-z0-9_])@${escaped}(?=$|[^A-Za-z0-9_])`, 'i').test(body) } ``` ### 2. `@build` 对应的是哪个 Agent？ 从频道对话记录可以看到，`@build` 映射到一个名为 **\"clawd\"** 的 Agent，它的身份（identity）应该类似 \"Build engineer\"（构建工程师），使用 **Claude Code Runtime**。 ### 3. 当前状态：⚠️ 不可用 从之前的信息来看，\"clawd\" 一直回复失败： > **\"clawd: 抱歉，我暂时无法回复：Claude Code exited with 1.\"** 这意味着 **Claude Code CLI 进程启动时退出了（exit code 1）**，可能是： - 工作目录或 workspace 路径问题 - Claude Code 命令不可用或配置缺失 - 环境变量或认证问题 ### 4. 跟 `@dev` 的区别 | 特性 | `@dev` → Newton | `@build` → Clawd | |------|----------------|-----------------| | **Runtime** | 看起来像 Pi/其他 | Claude Code | | **状态** | ✅ 正常工作 | ❌ 启动失败 | | **用途** | 开发和咨询 | 构建相关任务 | ### 总结 **`@build` 是这个系统中的构建 Agent 路由**，设计上应该可以处理构建任务（编译、打包、检查等），但目前因为 Claude Code 运行时启动失败而无法使用。需要排查为什么 `claude` CLI 命令在工作目录下返回了 exit code 1。好的，之前的探索 Agent 刚刚完成了更深入的分析，我来补充一下更完整的介绍： --- ## `@build` 完整介绍 ### 它的本质 **`@build`** 是 Sinapsis Control Room 系统中基于 **@提及（Mention）的 Agent 路由机制**。当你在频道消息中输入 `@build`，系统会路由到 mentionName 为 `\"build\"` 的 Agent。 ### 架构概览 ``` 用户发消息 \"@build 帮我构建项目\" ↓ ConversationCoordinator.selectAgent() ↓ exactMention(body, \"build\") → 匹配成功 ↓ 找到 mentionName=\"build\" 的 Agent → \"clawd\"（Claude Code 运行时） ↓ start() → Claude Code 进程 → 回复消息 ``` ### 路由逻辑 系统有两个独立的路由路径： | 路径 | 触发方式 | 代码位置 | |------|---------|---------| | **频道对话** | 直接发 `@build xxx` | `conversation-coordinator.ts:157-166` | | **任务指派** | `/task @build xxx` | `message-intent.ts` | Agent 是通过 **API 动态创建** 的（`POST /api/workspaces/:workspaceId/agents`），不是写死在配置文件里的。所以 `@build` 必须先在界面上创建好对应的 Agent 才能使用。 ### 支持三种 Runtime | Runtime | 说明 | |---------|------| | `opencode` | OpenCode | | `pi` | Pi | | `claude-code` | Claude Code（claude CLI） | ### 当前状态 之前 `@build` 指向的 **\"clawd\"**（身份大概是 Build Engineer）配置的是 `claude-code` 运行时，但返回了： > **\"Claude Code exited with 1\"** 这表示 `claude` CLI 命令执行失败。可能的原因： 1. **`claude` 命令不可用** — 未安装或不在 PATH 中 2. **工作目录问题** — workspace 路径不存在或不可访问 3. **配置问题** — Claude Code 需要的配置缺失 4. **Agent 配置错误** — 创建 Agent 时传入了错误的 command/args ### 结论 **`@build` 是构建/开发 Agent 的路由别名**，设计用于处理构建任务（编译、检查等）。它背后的 Agent \"clawd\" 使用 Claude Code 运行时，但目前处于 **不可用状态**，需要修复 Claude Code CLI 的启动问题。相比之下，`@dev` → Newton 使用的是 Pi/OpenCode 运行时，工作正常。 如果你想，我可以帮你进一步排查 `claude` 命令为什么启动失败，或者看看 Agent 的具体配置。"
+          - button "回复 clawd 的消息" [ref=e324] [cursor=pointer]
+      - article [ref=e327]:
+        - generic [ref=e328]: "Y"
+        - generic [ref=e329]:
+          - generic [ref=e330]:
+            - strong [ref=e331]: 你
+            - time [ref=e332]: 12:51
+          - paragraph [ref=e333]: 你帮我介绍下@build
+          - button "回复 你 的消息" [ref=e334] [cursor=pointer]
+      - article [ref=e337]:
+        - generic [ref=e342]:
+          - generic [ref=e343]:
+            - strong [ref=e344]: clawd
+            - time [ref=e345]: 12:52
+          - paragraph [ref=e346]: "## `@build` 是什么 **`@build`** 是 Sinapsis Control Room 中的 **Agent 提及路由机制**。在频道消息中使用 `@build`，系统会通过 `ConversationCoordinator.selectAgent()` 方法解析消息中的 `@` 提及，路由到 mentionName 为 `\"build\"` 的 Agent。 ### 路由流程 ``` 你发消息 → \"@build 帮我构建项目\" → ConversationCoordinator 检测到 @build 提及 → 精确匹配 mentionName=\"build\" 的 Agent → 启动对应运行时 → Agent 回复 ``` ### 它指向谁？ 从之前的对话可以看到，`@build` 映射到一个名为 **\"clawd\"** 的 Agent，配置的身份类似 **Build Engineer**，使用的是 **Claude Code** 运行时。 ### 当前状态：❌ 不可用 `@build` 目前返回错误： > **\"Claude Code exited with 1\"** Claude Code CLI 进程启动后立即退出，无法正常响应消息。 ### 与 `@dev` 对比 | 特性 | `@dev` → Newton | `@build` → Clawd | |------|----------------|-----------------| | 运行时 | Pi | Claude Code | | 状态 | ✅ 正常 | ❌ 启动失败 | | 用途 | 开发咨询 | 构建任务 | **总结**：`@build` 是这个系统中用于构建任务的 Agent 路由，设计用来处理编译、检查等构建工作，但目前因 Claude Code 运行时无法启动而暂不可用。需要排查 `claude` CLI 的配置或安装问题才能恢复。"
+          - button "回复 clawd 的消息" [ref=e347] [cursor=pointer]
+      - article [ref=e350]:
+        - generic [ref=e351]: "Y"
+        - generic [ref=e352]:
+          - generic [ref=e353]:
+            - strong [ref=e354]: 你
+            - time [ref=e355]: 21:55
+          - paragraph [ref=e356]: 为什么地球是圆的
+          - button "回复 你 的消息" [ref=e357] [cursor=pointer]
+      - article [ref=e360]:
+        - generic [ref=e361]: "Y"
+        - generic [ref=e362]:
+          - generic [ref=e363]:
+            - strong [ref=e364]: 你
+            - time [ref=e365]: 17:06
+          - paragraph [ref=e366]: 开开心心上班
+          - button "回复 你 的消息" [ref=e367] [cursor=pointer]
+      - article [ref=e370]:
+        - generic [ref=e371]: "Y"
+        - generic [ref=e372]:
+          - generic [ref=e373]:
+            - strong [ref=e374]: 你
+            - time [ref=e375]: 17:33
+          - paragraph [ref=e376]: "1"
+          - button "回复 你 的消息" [ref=e377] [cursor=pointer]
+    - generic [ref=e380]:
+      - generic [ref=e381]: 发送消息
+      - textbox "发送消息" [ref=e382]:
+        - /placeholder: "发送消息到 # channel1"
+      - button "发送消息" [disabled] [ref=e383]
+  - complementary "任务与上下文" [ref=e386]:
+    - strong [ref=e388]: 上下文
+    - generic [ref=e389]:
+      - generic [ref=e390]:
+        - heading "Sinapsis 任务" [level=2] [ref=e391]
+        - button "新建当前上下文任务" [ref=e392] [cursor=pointer]: +
+      - generic [ref=e393]:
+        - tablist "任务筛选" [ref=e394]:
+          - tab "等待" [selected] [ref=e395] [cursor=pointer]
+          - tab "执行中" [ref=e396] [cursor=pointer]
+          - tab "等待输入" [ref=e397] [cursor=pointer]
+          - tab "待人工验收" [ref=e398] [cursor=pointer]
+          - tab "已结束" [ref=e399] [cursor=pointer]
+        - paragraph [ref=e400]: 此筛选下没有任务
+    - generic [ref=e401]:
+      - generic [ref=e402]:
+        - heading "频道 Agent" [level=2] [ref=e403]
+        - button "添加 Agent" [disabled] [ref=e404]
+      - list [ref=e408]:
+        - listitem [ref=e409]:
+          - generic [ref=e410]:
+            - strong [ref=e411]: 前端 Agent
+            - generic [ref=e412]: "@frontend · 空闲 · Runtime: OpenCode"
+          - button "移除 前端 Agent" [ref=e413] [cursor=pointer]
+        - listitem [ref=e417]:
+          - generic [ref=e418]:
+            - strong [ref=e419]: newton
+            - generic [ref=e420]: "@newton · 空闲 · Runtime: Pi"
+          - button "移除 newton" [ref=e421] [cursor=pointer]
+        - listitem [ref=e425]:
+          - generic [ref=e426]:
+            - strong [ref=e427]: clawd
+            - generic [ref=e428]: "@build · 空闲 · Runtime: Claude Code"
+          - button "移除 clawd @build" [ref=e429] [cursor=pointer]
+        - listitem [ref=e433]:
+          - generic [ref=e434]:
+            - strong [ref=e435]: clawd
+            - generic [ref=e436]: "@clawd-workcode · 空闲 · Runtime: Claude Code"
+          - button "移除 clawd @clawd-workcode" [ref=e437] [cursor=pointer]
+    - generic [ref=e441]:
+      - generic [ref=e442]:
+        - heading "频道工作空间 1/5" [level=2] [ref=e443]:
+          - text: 频道工作空间
+          - generic [ref=e444]: 1/5
+        - button "添加工作空间" [ref=e445] [cursor=pointer]
+      - list [ref=e449]:
+        - listitem [ref=e450]:
+          - generic [ref=e451]:
+            - strong [ref=e452]: Sinapsis
+            - generic [ref=e453]: 1 个代码仓
+          - button "解绑 Sinapsis" [ref=e454] [cursor=pointer]
+    - generic [ref=e458]:
+      - heading "频道操作" [level=2] [ref=e459]
+      - button "收起上下文" [ref=e460] [cursor=pointer]
