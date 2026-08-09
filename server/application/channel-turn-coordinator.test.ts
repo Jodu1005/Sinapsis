@@ -347,6 +347,28 @@ describe('ChannelTurnCoordinator', () => {
     ])
   })
 
+  it('turns an explicit Agent mention in a public reply into a visible handoff', async () => {
+    const fixture = await createFixture()
+    const source = fixture.createAgent('Source', [])
+    const target = fixture.createAgent('Target', [])
+    fixture.sessions.handle = async (input) => input.conversation?.kind === 'handoff_response'
+      ? publicReply('target answer')
+      : publicReply('@target please validate this from the product perspective')
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('@Source begin'))
+
+    expect(turn).toMatchObject({ mode: 'direct', status: 'completed', currentRound: 2 })
+    expect(fixture.agentMessages().map((message) => message.senderId)).toEqual([source.id, target.id])
+    expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({
+        fromAgentId: source.id,
+        toAgentId: target.id,
+        status: 'completed',
+        question: expect.stringContaining('@target please validate this'),
+      }),
+    ])
+  })
+
   it('gives response and Handoff calls the same bounded Context with role and invocation boundaries', async () => {
     const fixture = await createFixture()
     const source = fixture.createAgent('Source', ['triage requests'])

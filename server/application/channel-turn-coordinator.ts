@@ -886,9 +886,7 @@ export class ChannelTurnCoordinator {
     sourceInvocationId: string | null,
     handoffQuestion?: string,
   ): Promise<ResponseOutcome | null> {
-    const instruction = kind === 'handoff_response'
-      ? '回应交接问题，并生成一条可公开发布的回复。'
-      : '生成一条可公开发布的回复。'
+    const instruction = this.responseInstruction(turn, agent, kind)
     try {
       const invocationResult = await this.runInvocation(execution, turn, message, agent, {
         kind,
@@ -902,10 +900,11 @@ export class ChannelTurnCoordinator {
         deferSettlement: true,
       })
       if (!isPublicResponse(invocationResult.result.parsed)) throw new Error('Runtime returned no public response.')
+      const response = this.normalizeMentionHandoffs(turn, invocationResult.result.parsed)
       return {
         invocation: invocationResult.invocation,
-        response: invocationResult.result.parsed,
-        result: invocationResult.result,
+        response,
+        result: { ...invocationResult.result, parsed: response },
       }
     } catch (error) {
       if (!isInvocationCancellation(error)) {
@@ -916,6 +915,46 @@ export class ChannelTurnCoordinator {
       }
       return null
     }
+  }
+
+  private responseInstruction(
+    turn: ConversationTurn,
+    agent: Agent,
+    kind: Extract<InvocationKind, 'response' | 'handoff_response'>,
+  ): string {
+    const base = kind === 'handoff_response'
+      ? '回应交接问题，并生成一条可公开发布的回复。'
+      : '生成一条可公开发布的回复。'
+    const targets = this.repositories.getChannelAgentIds(turn.channelId)
+      .map((agentId) => this.repositories.getAgent(agentId))
+      .filter((candidate): candidate is Agent => candidate !== undefined
+        && candidate.id !== agent.id
+        && candidate.status !== 'offline'
+        && candidate.status !== 'error')
+    const mentions = targets.map((target) => `@${target.mentionName || target.identity}`).join('、')
+    if (!mentions) return `${base} 如果不需要其他 Agent 接续，请不要添加 @提及。`
+    return `${base} 如果确实需要其他 Agent 接续，请在公开回复中明确 @提及目标（可选目标：${mentions}）；系统会把这个 @提及转换为 Handoff。普通文字中不要随意提及 Agent。`
+  }
+
+  private normalizeMentionHandoffs(
+    turn: ConversationTurn,
+    response: PublicAgentResponse,
+  ): PublicAgentResponse {
+    const members = this.repositories.getChannelAgentIds(turn.channelId)
+      .map((agentId) => this.repositories.getAgent(agentId))
+      .filter((candidate): candidate is Agent => candidate !== undefined)
+    const route = routeMentions(response.reply, members)
+    if (route.mode === 'all' || route.targetAgentIds.length === 0) return response
+
+    const explicitTargets = new Set(response.handoffTo.map((target) => target.agentId))
+    const implicitTargets = route.targetAgentIds
+      .filter((agentId) => !explicitTargets.has(agentId))
+      .map((agentId) => ({
+        agentId,
+        question: `请继续处理这条回复：${response.reply}`,
+      }))
+    if (implicitTargets.length === 0) return response
+    return { ...response, handoffTo: [...response.handoffTo, ...implicitTargets] }
   }
 
   private settlePublicResponse(
