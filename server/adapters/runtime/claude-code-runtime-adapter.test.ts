@@ -157,6 +157,26 @@ describe('ClaudeCodeRuntimeAdapter', () => {
     expect(events).toContainEqual(expect.objectContaining({ kind: 'tool_end', toolName: 'Read' }))
   })
 
+  it('uses a final conversation assistant message when the result event has no text', async () => {
+    const runner = new FakeProcessRunner()
+    const events: RuntimeEvent[] = []
+    const adapter = new ClaudeCodeRuntimeAdapter(runner)
+
+    await adapter.start({
+      ...task,
+      mode: 'conversation',
+      initialMessage: 'Return a participation decision.',
+    }, (event) => events.push(event))
+    const process = runner.spawns[0]?.process
+
+    process?.emitStdout('{"type":"assistant","message":{"content":[{"type":"text","text":"{\\"decision\\":\\"speak\\",\\"confidence\\":0.9}"}]}}\n')
+    process?.emitStdout('{"type":"result","subtype":"success"}\n')
+
+    expect(events.filter((event) => event.kind === 'text')).toEqual([
+      { kind: 'text', taskId: task.taskId, text: '{"decision":"speak","confidence":0.9}' },
+    ])
+  })
+
   it('emits settled exactly once after a successful final run', async () => {
     const runner = new FakeProcessRunner()
     const events: RuntimeEvent[] = []

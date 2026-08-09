@@ -9,6 +9,7 @@ export class ClaudeCodeRuntimeAdapter implements RuntimeAdapter {
   private readonly processes = new WeakMap<RuntimeSession, ProcessHandle>()
   private readonly toolNames = new WeakMap<RuntimeSession, Map<string, string>>()
   private readonly conversationSessions = new WeakSet<RuntimeSession>()
+  private readonly conversationFinalTexts = new WeakMap<RuntimeSession, string>()
   private readonly sessionLostSessions = new WeakSet<RuntimeSession>()
 
   constructor(
@@ -50,6 +51,7 @@ export class ClaudeCodeRuntimeAdapter implements RuntimeAdapter {
 
   private launch(session: RuntimeSession, prompt: string, sink: RuntimeEventSink, resume: boolean): void {
     const args = resume ? resumeArgs(session, prompt) : startArgs(session, prompt)
+    this.conversationFinalTexts.delete(session)
     const process = this.processRunner.spawn({
       command: session.profile.command,
       args,
@@ -113,7 +115,16 @@ export class ClaudeCodeRuntimeAdapter implements RuntimeAdapter {
     }
 
     if (type === 'assistant') {
-      for (const block of contentBlocks(value)) this.recordContentBlock(session, block, sink, !isConversation)
+      const blocks = contentBlocks(value)
+      if (isConversation && !blocks.some((block) => stringValue(block.type) === 'tool_use')) {
+        const text = blocks
+          .filter((block) => stringValue(block.type) === 'text')
+          .map((block) => stringValue(block.text) ?? '')
+          .join('')
+          .trim()
+        if (text) this.conversationFinalTexts.set(session, text)
+      }
+      for (const block of blocks) this.recordContentBlock(session, block, sink, !isConversation)
       const text = stringValue(value.text)
       if (text && !isConversation) sink({ kind: 'text', taskId: session.taskId, text })
     }
@@ -132,7 +143,9 @@ export class ClaudeCodeRuntimeAdapter implements RuntimeAdapter {
     }
 
     if (type === 'result' && subtype !== 'error') {
-      const text = stringValue(value.result) ?? stringValue(value.message)
+      const text = isConversation
+        ? this.conversationFinalTexts.get(session) ?? stringValue(value.result) ?? stringValue(value.message)
+        : stringValue(value.result) ?? stringValue(value.message)
       if (text) sink({ kind: 'text', taskId: session.taskId, text })
     }
   }

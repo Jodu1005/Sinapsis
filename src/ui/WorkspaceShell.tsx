@@ -144,6 +144,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     ? allAgents.filter((agent) => selection.channel!.memberAgentIds.includes(agent.id))
     : allAgents, [allAgents, selection.channel])
   const turnActivities: TurnActivityView[] = useMemo(() => selection.channel ? snapshot?.activeTurnsByChannel?.[selection.channel.id] ?? [] : [], [selection.channel, snapshot])
+  const activeTurnIds = useMemo(() => [...new Set(turnActivities.map((activity) => activity.turnId))], [turnActivities])
   const turnResults = useMemo(() => selection.channel ? snapshot?.recentTurnResultsByChannel?.[selection.channel.id] ?? [] : [], [selection.channel, snapshot])
   const threadRoot = useMemo(() => selectedThreadRootId ? messages.find((message) => message.id === selectedThreadRootId && !message.threadRootMessageId) : undefined, [messages, selectedThreadRootId])
   const threadReplies = useMemo(() => threadRoot ? messages.filter((message) => message.threadRootMessageId === threadRoot.id) : [], [messages, threadRoot])
@@ -302,6 +303,12 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     await api.postMessage(selection.channel!.id, { body, threadRootMessageId: threadRoot.id })
     await refresh()
     return undefined
+  }
+  const stopActiveChannelTurns = async () => {
+    const channelId = selection.channel?.id
+    if (!channelId || activeTurnIds.length === 0) return
+    await Promise.all(activeTurnIds.map((turnId) => api.cancelConversationTurn(channelId, turnId)))
+    await refresh()
   }
   const selectChannel = (channelId: string) => {
     setMainView('channel')
@@ -555,7 +562,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
       <header className="channel-header"><NavigationToggle onClick={() => setNavOpen(true)} /><div className="channel-heading"><h1># {selection.channel.name}</h1><p>{selection.channel.archivedAt ? '已归档频道 · 只读' : '全局频道'}</p></div><div className="header-actions"><span className="connection-state" data-reconnecting={reconnecting}>{reconnecting ? '正在重新连接' : '已连接'}</span><button type="button" className="icon-button" aria-label="打开上下文" data-tooltip="打开上下文" onClick={() => setContextOpen(true)}><PanelRightOpen size={18} /></button></div></header>
       {channelActionError && <p className="channel-action-error" role="alert">{channelActionError}</p>}
       <ChannelTimeline messages={messages} agents={channelAgents} turnActivities={turnActivities} turnResults={turnResults} onOpenThread={(message) => { setSelectedThreadRootId(message.id); setSelectedTurnId(null); setContextOpen(true) }} onOpenTurn={(turnId) => { setSelectedTurnId(turnId); setSelectedThreadRootId(null); setContextOpen(true) }} />
-      {selection.channel.archivedAt ? <div className="archived-channel-notice" role="status">此频道已归档，只能查看历史记录。</div> : <MessageComposer channelName={selection.channel.name} agents={channelAgents} onSend={sendMessage} />}
+      {selection.channel.archivedAt ? <div className="archived-channel-notice" role="status">此频道已归档，只能查看历史记录。</div> : <MessageComposer channelName={selection.channel.name} agents={channelAgents} onSend={sendMessage} onStop={activeTurnIds.length > 0 ? stopActiveChannelTurns : undefined} />}
     </main>}
     <aside className="context-panel" aria-label="任务与上下文" aria-hidden={narrowContext && !contextOpen || undefined} inert={narrowContext && !contextOpen} data-mobile-open={contextOpen}>
       <header className="context-header"><strong>上下文</strong><button type="button" className="icon-button context-close" aria-label="关闭上下文" data-tooltip="关闭上下文" onClick={() => setContextOpen(false)}><X size={17} /></button></header>

@@ -1,4 +1,4 @@
-import { SendHorizontal } from 'lucide-react'
+import { SendHorizontal, Square } from 'lucide-react'
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { distinctAgentsByIdentity, type AgentView } from '../domain/workspace-view'
 
@@ -12,12 +12,23 @@ type MentionSuggestion =
   | { kind: 'all'; id: 'all'; identity: 'all' }
   | { kind: 'agent'; id: string; agent: AgentView; identity: string }
 
-export function MessageComposer({ channelName, agents, onSend }: { channelName: string; agents: AgentView[]; onSend(body: string): Promise<{ notice?: string } | void> }) {
+export function MessageComposer({
+  channelName,
+  agents,
+  onSend,
+  onStop,
+}: {
+  channelName: string
+  agents: AgentView[]
+  onSend(body: string): Promise<{ notice?: string } | void>
+  onStop?: () => Promise<void>
+}) {
   const [body, setBody] = useState('')
   const [caret, setCaret] = useState(0)
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0)
   const [closedMentionKey, setClosedMentionKey] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const [stopping, setStopping] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const formRef = useRef<HTMLFormElement>(null)
@@ -59,6 +70,19 @@ export function MessageComposer({ channelName, agents, onSend }: { channelName: 
     setClosedMentionKey(null)
   }
 
+  const stop = async () => {
+    if (!onStop || stopping) return
+    setStopping(true)
+    setError(null)
+    setNotice(null)
+    try {
+      await onStop()
+      setNotice('已停止当前频道进行中的对话。')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '停止对话失败，请重试。')
+    } finally { setStopping(false) }
+  }
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing || event.shiftKey) return
     if (suggestions.length > 0 && event.key === 'Escape') {
@@ -91,6 +115,7 @@ export function MessageComposer({ channelName, agents, onSend }: { channelName: 
     <label className="sr-only" htmlFor="message-body">发送消息</label>
     <textarea id="message-body" aria-label="发送消息" rows={1} value={body} onChange={(event) => { setBody(event.target.value); setCaret(event.target.selectionStart); setClosedMentionKey(null) }} onClick={(event) => setCaret(event.currentTarget.selectionStart)} onKeyUp={(event) => setCaret(event.currentTarget.selectionStart)} onKeyDown={onKeyDown} placeholder={`发送消息到 # ${channelName}`} />
     {mention && suggestions.length > 0 && <div className="mention-suggestions" role="listbox" aria-label="可提及 Agent">{suggestions.map((suggestion, index) => <button key={suggestion.id} type="button" role="option" aria-selected={index === activeSuggestionIndex} onMouseDown={(event) => event.preventDefault()} onClick={() => selectSuggestion(suggestion)}><strong>@{suggestion.identity}</strong>{suggestion.kind === 'all' ? <small>当前频道全部成员</small> : <small>{suggestion.agent.runtime} · {statusLabel(suggestion.agent.status)}</small>}</button>)}</div>}
+    {onStop && <button type="button" className="stop-conversation-button" aria-label="停止当前频道对话" disabled={stopping} onClick={() => void stop()}><Square size={14} fill="currentColor" />{stopping ? '停止中' : '停止'}</button>}
     <button type="submit" className="send-button" aria-label="发送消息" disabled={!body.trim() || sending}><SendHorizontal size={18} /></button>
     {error && <p className="form-error composer-error" role="alert">{error}</p>}
     {notice && <p className="composer-notice" role="status">{notice}</p>}
