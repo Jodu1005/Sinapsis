@@ -21,7 +21,8 @@ The local service listens only on `127.0.0.1:4174`. The browser uses `/api` and 
 4. Chat directly in the Channel, or use `/task [@Agent] task title` to dispatch code work.
 5. A code task requires a bound Workspace. One binding is selected automatically; multiple bindings require an explicit choice.
 6. A compatible idle Agent claims queued tasks in FIFO order. Each claimed task gets its own branch and Git worktree.
-7. Use the task detail panel for queued input, runtime evidence, and acceptance. Acceptance records a review decision only.
+7. New tasks enter the backlog for Agent analysis; move them to the todo lane when the scope is ready, then use the task board and detail dialog to track execution, output files, runtime evidence, and acceptance.
+8. OpenCode ACP is available as a protocol-based Runtime alongside OpenCode CLI, Pi, and Claude Code.
 
 Ordinary Channel membership is managed by a human. The system Channel `summit` is different: it always includes every global Agent automatically and does not expose member add/remove controls. The special behavior is keyed by `systemKey`, so renaming a normal Channel to `summit` does not grant system capabilities.
 
@@ -51,7 +52,7 @@ This first version does not automatically remove task worktrees. After a human h
 
 Unbinding a Workspace from a Channel only removes that relationship. It does not delete the Workspace, repository directory, task history, Git worktrees, evidence files, or Runtime artifacts. Removing an Agent from an ordinary Channel likewise preserves the global Agent and historical messages.
 
-Agents are instructed to edit their assigned task worktree, run tests, and create a commit. The built-in API has no automatic `git push` or merge action. Acceptance is not a merge; pushing, merging, or other external side effects remain separate human decisions.
+Agents are instructed to edit their assigned task worktree and run tests. They do not create a branch or commit unless the task explicitly asks for one, and task completion is determined by the task result rather than Git activity. The built-in API has no automatic `git push` or merge action. Acceptance is not a merge; pushing, merging, or other external side effects remain separate human decisions.
 
 This first version has no OS-level sandbox. A task worktree is a collaboration convention, not a filesystem permission boundary. Run a local CLI only after you trust it: an untrusted process can still access files, the network, or credentials available to the current OS user, and can explicitly provide its own credentials.
 
