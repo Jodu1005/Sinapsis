@@ -824,7 +824,11 @@ export class ChannelTurnCoordinator {
     message: Message,
     agent: Agent,
   ): Promise<DuplicateDecision | null | typeof duplicateCheckCancelled> {
-    const instruction = 'Check whether your proposed contribution duplicates the persisted public replies.'
+    const instruction = [
+      'Check whether your proposed contribution duplicates the persisted public replies.',
+      'Return only one JSON object with exactly these fields: decision ("speak" or "silent"), reason (non-empty string), and revisedAngle (string or null).',
+      'Do not include duplicate, confidence, proposedAngle, handoffTo, or any other fields.',
+    ].join(' ')
     try {
       const { result } = await this.runInvocation(execution, turn, message, agent, {
         kind: 'duplicate_check',

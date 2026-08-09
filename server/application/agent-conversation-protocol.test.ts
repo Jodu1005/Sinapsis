@@ -68,7 +68,13 @@ describe('agent conversation protocol', () => {
   it('parses and validates duplicate decisions', () => {
     expect(parseDuplicateDecision('{"decision":"speak","reason":"adds tests","revisedAngle":"cover errors"}'))
       .toEqual({ decision: 'speak', reason: 'adds tests', revisedAngle: 'cover errors' })
+    expect(parseDuplicateDecision('{"duplicate":false,"confidence":0.9,"reason":"adds tests"}'))
+      .toEqual({ decision: 'speak', reason: 'adds tests', revisedAngle: null })
+    expect(parseDuplicateDecision('{"decision":"silent","duplicate":true,"confidence":0.9,"reason":"covered","revisedAngle":null}'))
+      .toEqual({ decision: 'silent', reason: 'covered', revisedAngle: null })
     expect(() => parseDuplicateDecision('{"decision":"silent","reason":"covered","revisedAngle":null,"extra":true}')).toThrow()
+    expect(() => parseDuplicateDecision('{"duplicate":"false","reason":"covered"}')).toThrow()
+    expect(() => parseDuplicateDecision('{"duplicate":false,"confidence":2,"reason":"covered"}')).toThrow()
     expect(() => parseDuplicateDecision(`{"decision":"silent","reason":"covered","revisedAngle":"${'x'.repeat(501)}"}`)).toThrow()
   })
 

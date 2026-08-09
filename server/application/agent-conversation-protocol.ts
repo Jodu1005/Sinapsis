@@ -79,11 +79,26 @@ export function parsePublicResponse(raw: string): PublicAgentResponse {
 
 export function parseDuplicateDecision(raw: string): DuplicateDecision {
   const value = parseStructuredObject(raw)
-  assertOnlyKeys(value, ['decision', 'reason', 'revisedAngle'])
+  // Some Claude models have returned the older duplicate-check shape with
+  // `duplicate`/`confidence` alongside (or instead of) the current fields.
+  // Keep the boundary strict, but normalize that known compatible shape so a
+  // harmless schema drift does not turn a valid speaker into a failed check.
+  assertNoUnknownKeys(value, ['decision', 'duplicate', 'confidence', 'reason', 'revisedAngle'])
+  const hasDecision = 'decision' in value
+  const hasDuplicate = 'duplicate' in value
+  if (!hasDecision && !hasDuplicate) throw new Error('Missing structured fields: decision')
+  if (hasDuplicate && typeof value.duplicate !== 'boolean') {
+    throw new Error('duplicate must be a boolean.')
+  }
+  if ('confidence' in value) confidenceValue(value.confidence)
   return {
-    decision: decisionValue(value.decision),
+    decision: hasDecision
+      ? decisionValue(value.decision)
+      : value.duplicate ? 'silent' : 'speak',
     reason: boundedString(value.reason, 'reason', maxDecisionTextLength),
-    revisedAngle: nullableBoundedString(value.revisedAngle, 'revisedAngle', maxDecisionTextLength),
+    revisedAngle: value.revisedAngle === undefined
+      ? null
+      : nullableBoundedString(value.revisedAngle, 'revisedAngle', maxDecisionTextLength),
   }
 }
 
@@ -115,10 +130,14 @@ function isJsonFence(value: string): boolean {
 }
 
 function assertOnlyKeys(value: Record<string, unknown>, allowed: string[]): void {
-  const unknown = Object.keys(value).filter((key) => !allowed.includes(key))
-  if (unknown.length > 0) throw new Error(`Unknown structured fields: ${unknown.join(', ')}`)
+  assertNoUnknownKeys(value, allowed)
   const missing = allowed.filter((key) => !(key in value))
   if (missing.length > 0) throw new Error(`Missing structured fields: ${missing.join(', ')}`)
+}
+
+function assertNoUnknownKeys(value: Record<string, unknown>, allowed: string[]): void {
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key))
+  if (unknown.length > 0) throw new Error(`Unknown structured fields: ${unknown.join(', ')}`)
 }
 
 function decisionValue(value: unknown): 'speak' | 'silent' {
