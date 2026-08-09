@@ -828,6 +828,12 @@ export function migrateSchema(database: DatabaseSync): void {
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(25, new Date().toISOString())
     }
 
+    const twentySixthMigration = database.prepare('SELECT version FROM schema_migrations WHERE version = 26').get()
+    if (!twentySixthMigration) {
+      if (!hasColumn(database, 'agents', 'deleted_at')) database.exec('ALTER TABLE agents ADD COLUMN deleted_at TEXT')
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(26, new Date().toISOString())
+    }
+
     database.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS conversation_sessions_grain_unique_idx
         ON conversation_sessions(channel_id, COALESCE(thread_root_message_id, ''), agent_id);

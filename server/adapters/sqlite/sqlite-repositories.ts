@@ -2326,7 +2326,7 @@ export class SqliteRepositories implements WorkspaceRepositories {
   }
 
   listAgents(): Agent[] {
-    return (this.sqlite.database.prepare('SELECT * FROM agents ORDER BY created_at, id').all() as unknown as AgentRow[]).map(mapAgent)
+    return (this.sqlite.database.prepare('SELECT * FROM agents WHERE deleted_at IS NULL ORDER BY created_at, id').all() as unknown as AgentRow[]).map(mapAgent)
   }
 
   getChannelAgentIds(channelId: string): string[] {
@@ -2334,7 +2334,11 @@ export class SqliteRepositories implements WorkspaceRepositories {
     if (!channel) return []
     if (channel.systemKey === summitSystemKey) return this.listAgents().map((agent) => agent.id)
     return (this.sqlite.database.prepare(
-      'SELECT agent_id FROM channel_agent_memberships WHERE channel_id = ? ORDER BY agent_id',
+      `SELECT channel_agent_memberships.agent_id
+       FROM channel_agent_memberships
+       JOIN agents ON agents.id = channel_agent_memberships.agent_id
+       WHERE channel_agent_memberships.channel_id = ? AND agents.deleted_at IS NULL
+       ORDER BY channel_agent_memberships.agent_id`,
     ).all(channelId) as Array<{ agent_id: string }>).map((row) => row.agent_id)
   }
 
@@ -2402,13 +2406,13 @@ export class SqliteRepositories implements WorkspaceRepositories {
 
   hasAgentMention(mention: string): boolean {
     const row = this.sqlite.database.prepare(
-      'SELECT 1 FROM agents WHERE lower(trim(mention_name)) = lower(trim(?)) LIMIT 1',
+      'SELECT 1 FROM agents WHERE deleted_at IS NULL AND lower(trim(mention_name)) = lower(trim(?)) LIMIT 1',
     ).get(mention)
     return row !== undefined
   }
 
   getIdleAgentIds(): string[] {
-    return (this.sqlite.database.prepare('SELECT id FROM agents WHERE status = ? ORDER BY updated_at, id').all('idle') as Array<{ id: string }>)
+    return (this.sqlite.database.prepare('SELECT id FROM agents WHERE deleted_at IS NULL AND status = ? ORDER BY updated_at, id').all('idle') as Array<{ id: string }>)
       .map((agent) => agent.id)
   }
 
@@ -2416,7 +2420,8 @@ export class SqliteRepositories implements WorkspaceRepositories {
     return this.inTransaction((unitOfWork) => {
       const orphaned = this.sqlite.database.prepare(`
         SELECT id FROM agents
-        WHERE status = 'busy'
+        WHERE deleted_at IS NULL
+          AND status = 'busy'
           AND NOT EXISTS (SELECT 1 FROM task_leases WHERE task_leases.agent_id = agents.id)
       `).all() as Array<{ id: string }>
       if (orphaned.length === 0) return 0
@@ -2645,7 +2650,11 @@ export class SqliteRepositories implements WorkspaceRepositories {
       FROM channels ORDER BY archived_at IS NOT NULL, created_at, id
     `).all() as unknown as ChannelRow[]
     const membershipRows = database.prepare(
-      'SELECT channel_id, agent_id FROM channel_agent_memberships ORDER BY channel_id, agent_id',
+      `SELECT channel_agent_memberships.channel_id, channel_agent_memberships.agent_id
+       FROM channel_agent_memberships
+       JOIN agents ON agents.id = channel_agent_memberships.agent_id
+       WHERE agents.deleted_at IS NULL
+       ORDER BY channel_agent_memberships.channel_id, channel_agent_memberships.agent_id`,
     ).all() as Array<{ channel_id: string; agent_id: string }>
     const bindingRows = database.prepare(
       'SELECT channel_id, workspace_id FROM channel_workspace_bindings ORDER BY channel_id, workspace_id',
@@ -2863,8 +2872,14 @@ function mapRepository(row: RepositoryRow): Repository {
 
 function mapChannel(database: DatabaseSync, row: ChannelRow): Channel {
   const memberAgentIds = row.system_key === summitSystemKey
-    ? (database.prepare('SELECT id FROM agents ORDER BY created_at, id').all() as Array<{ id: string }>).map((agent) => agent.id)
-    : (database.prepare('SELECT agent_id FROM channel_agent_memberships WHERE channel_id = ? ORDER BY agent_id').all(row.id) as Array<{ agent_id: string }>).map((membership) => membership.agent_id)
+    ? (database.prepare('SELECT id FROM agents WHERE deleted_at IS NULL ORDER BY created_at, id').all() as Array<{ id: string }>).map((agent) => agent.id)
+    : (database.prepare(`
+      SELECT channel_agent_memberships.agent_id
+      FROM channel_agent_memberships
+      JOIN agents ON agents.id = channel_agent_memberships.agent_id
+      WHERE channel_agent_memberships.channel_id = ? AND agents.deleted_at IS NULL
+      ORDER BY channel_agent_memberships.agent_id
+    `).all(row.id) as Array<{ agent_id: string }>).map((membership) => membership.agent_id)
   const boundWorkspaceIds = (database.prepare(
     'SELECT workspace_id FROM channel_workspace_bindings WHERE channel_id = ? ORDER BY workspace_id',
   ).all(row.id) as Array<{ workspace_id: string }>).map((binding) => binding.workspace_id)
