@@ -369,6 +369,21 @@ describe('ChannelTurnCoordinator', () => {
     ])
   })
 
+  it('tells speakers to put a handoff handle at the start of its own line', async () => {
+    const fixture = await createFixture()
+    fixture.createAgent('Source', [])
+    fixture.createAgent('Target', [])
+    fixture.sessions.handle = async () => publicReply('source answer')
+
+    await fixture.coordinator.dispatch(fixture.postHuman('@Source begin'))
+
+    const responseCall = fixture.sessions.calls.find((call) => call.conversation?.kind === 'response')!
+    expect(responseCall.context).toContain('@提及目标单独放在一行开头')
+    expect(responseCall.context).toContain('不要有 Markdown 加粗、说明文字或标点')
+    expect(responseCall.context).toContain('@target（职责：未设置职责）')
+    expect(responseCall.context).toContain('职责最匹配、且尚未发言的一位 Agent')
+  })
+
   it('gives response and Handoff calls the same bounded Context with role and invocation boundaries', async () => {
     const fixture = await createFixture()
     const source = fixture.createAgent('Source', ['triage requests'])

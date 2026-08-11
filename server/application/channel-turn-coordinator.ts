@@ -931,9 +931,13 @@ export class ChannelTurnCoordinator {
         && candidate.id !== agent.id
         && candidate.status !== 'offline'
         && candidate.status !== 'error')
-    const mentions = targets.map((target) => `@${target.mentionName || target.identity}`).join('、')
-    if (!mentions) return `${base} 如果不需要其他 Agent 接续，请不要添加 @提及。`
-    return `${base} 如果确实需要其他 Agent 接续，请在公开回复中明确 @提及目标（可选目标：${mentions}）；系统会把这个 @提及转换为 Handoff。普通文字中不要随意提及 Agent。`
+    const roster = targets.map((target) => {
+      const handle = `@${target.mentionName || target.identity}`
+      const responsibilities = target.responsibilities?.join('；') || '未设置职责'
+      return `${handle}（职责：${responsibilities}）`
+    }).join('；')
+    if (!roster) return `${base} 如果不需要其他 Agent 接续，请不要添加 @提及。`
+    return `${base} 如果确实需要其他 Agent 接续，请只选择职责最匹配、且尚未发言的一位 Agent。把其 @提及目标单独放在一行开头（前面不要有 Markdown 加粗、说明文字或标点；候选：${roster}）；系统会把这条命令转换为 Handoff。普通文字中不要随意提及 Agent。`
   }
 
   private normalizeMentionHandoffs(
