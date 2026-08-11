@@ -2250,11 +2250,21 @@ export class SqliteRepositories implements WorkspaceRepositories {
           FROM messages
           JOIN channels ON channels.id = messages.channel_id
           WHERE messages.channel_id = ?
-            AND (messages.id = ? OR messages.thread_root_id = ?)
+            AND (
+              messages.id = ?
+              OR messages.thread_root_id = ?
+              OR messages.id IN (
+                SELECT invocation_messages.message_id
+                FROM conversation_invocation_messages AS invocation_messages
+                JOIN agent_invocations AS invocations ON invocations.id = invocation_messages.invocation_id
+                JOIN conversation_turns AS turns ON turns.id = invocations.turn_id
+                WHERE turns.trigger_message_id = ?
+              )
+            )
             AND messages.deleted_at IS NULL
             AND (channels.context_reset_at IS NULL OR messages.created_at > channels.context_reset_at)
           ORDER BY messages.created_at, messages.rowid
-        `).all(channelId, threadRootMessageId, threadRootMessageId)
+        `).all(channelId, threadRootMessageId, threadRootMessageId, threadRootMessageId)
     return (rows as unknown as MessageRow[]).map(mapMessage)
   }
 

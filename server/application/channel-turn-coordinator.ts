@@ -137,7 +137,11 @@ class ConversationTurnClaimLostError extends Error {
 const maxInitialSpeakers = 2
 const maxConversationRounds = 3
 const defaultParticipationProbeTimeoutMs = 30_000
-const conversationContextBudget = 4_000
+// Multi-role handoffs need enough room for a concrete implementation proposal,
+// its acceptance criteria, and the next reviewer question. 4k characters could
+// drop the entire prior proposal because ContextAssembler preserves complete
+// messages rather than slicing them mid-record.
+const conversationContextBudget = 20_000
 const defaultRecoveryClaimTtlMs = 30_000
 const defaultRecoveryHeartbeatMs = 10_000
 
@@ -925,10 +929,14 @@ export class ChannelTurnCoordinator {
     const base = kind === 'handoff_response'
       ? '回应交接问题，并生成一条可公开发布的回复。'
       : '生成一条可公开发布的回复。'
+    const unavailableHandoffAgentIds = new Set(this.repositories.listTurnParticipants(turn.id)
+      .filter((participant) => participant.status === 'selected' || participant.status === 'spoken')
+      .map((participant) => participant.agentId))
     const targets = this.repositories.getChannelAgentIds(turn.channelId)
       .map((agentId) => this.repositories.getAgent(agentId))
       .filter((candidate): candidate is Agent => candidate !== undefined
         && candidate.id !== agent.id
+        && !unavailableHandoffAgentIds.has(candidate.id)
         && candidate.status !== 'offline'
         && candidate.status !== 'error')
     const roster = targets.map((target) => {
