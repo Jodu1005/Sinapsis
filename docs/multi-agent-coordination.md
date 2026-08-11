@@ -37,6 +37,8 @@ same separation of deterministic routing from model judgment used by
 
 The detailed timestamps, channel IDs, raw outcomes, and each test reflection are
 kept in the local QA lab log at `.gstack/qa-reports/multi-agent-experiment-log-2026-08-11.md`.
+The broader Clowder/book synthesis, derived protocol, and loop rubric are in
+[`multi-agent-research-loop.md`](./multi-agent-research-loop.md).
 
 ## Current safeguards
 
@@ -57,6 +59,15 @@ kept in the local QA lab log at `.gstack/qa-reports/multi-agent-experiment-log-2
 7. **Thread continuity.** A later human reply can retrieve Agent replies
    produced by the root turn; the conversation context budget is 20,000
    characters so a complete engineering proposal is not immediately evicted.
+8. **Ground irreversible claims.** Relayed approval, ownership, or authorization
+   is a candidate claim, not proof. Missing direct authorization, explicit scope,
+   or recovery evidence produces `insufficient` and fail-closed.
+9. **Compact handoff packet.** A line-leading target is followed by
+   `What / Why / Tradeoff / Open Question / Next Action`; only that packet is
+   persisted as the Handoff question, while the full answer remains public.
+10. **Recovery is not failure.** A failed participation probe remains in the
+    audit trail, but if that Agent later speaks through a valid Handoff, the
+    successful Turn is no longer marked `partial` solely for the recovered probe.
 
 ## What the external evidence changes
 

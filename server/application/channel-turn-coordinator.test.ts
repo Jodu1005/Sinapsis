@@ -364,7 +364,42 @@ describe('ChannelTurnCoordinator', () => {
         fromAgentId: source.id,
         toAgentId: target.id,
         status: 'completed',
-        question: expect.stringContaining('@target please validate this'),
+        question: 'please validate this from the product perspective',
+      }),
+    ])
+  })
+
+  it('persists only the five-part packet after an implicit Handoff command', async () => {
+    const fixture = await createFixture()
+    const source = fixture.createAgent('Source', [])
+    const target = fixture.createAgent('Target', [])
+    fixture.sessions.handle = async (input) => input.conversation?.kind === 'handoff_response'
+      ? publicReply('target answer')
+      : publicReply([
+          'Public conclusion that remains visible.',
+          '',
+          '@target',
+          'What: verify the release gate',
+          'Why: the evidence is incomplete',
+          'Tradeoff: delay versus false release',
+          'Open Question: does the sample meet the threshold?',
+          'Next Action: run the frozen holdout',
+        ].join('\n'))
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('@Source begin'))
+
+    expect(turn).toMatchObject({ status: 'completed', currentRound: 2 })
+    expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({
+        fromAgentId: source.id,
+        toAgentId: target.id,
+        question: [
+          'What: verify the release gate',
+          'Why: the evidence is incomplete',
+          'Tradeoff: delay versus false release',
+          'Open Question: does the sample meet the threshold?',
+          'Next Action: run the frozen holdout',
+        ].join('\n'),
       }),
     ])
   })
@@ -382,6 +417,9 @@ describe('ChannelTurnCoordinator', () => {
     expect(responseCall.context).toContain('不要有 Markdown 加粗、说明文字或标点')
     expect(responseCall.context).toContain('@target（职责：未设置职责）')
     expect(responseCall.context).toContain('职责最匹配、且尚未发言的一位 Agent')
+    expect(responseCall.context).toContain('What / Why / Tradeoff / Open Question / Next Action')
+    expect(responseCall.context).toContain('转述本身不能作为 resolver')
+    expect(responseCall.context).toContain('标记 insufficient 并 fail-closed')
   })
 
   it('omits already selected ordinary speakers from a responder handoff roster', async () => {
@@ -845,7 +883,7 @@ describe('ChannelTurnCoordinator', () => {
     const targetParticipant = fixture.repositories.listTurnParticipants(turn.id)
       .find((participant) => participant.agentId === target.id)
 
-    expect(turn).toMatchObject({ status: 'partial', currentRound: 2 })
+    expect(turn).toMatchObject({ status: 'completed', currentRound: 2 })
     expect(targetParticipant).toMatchObject({
       source: 'handoff',
       decision: 'speak',
