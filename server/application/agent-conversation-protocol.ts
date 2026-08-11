@@ -107,15 +107,52 @@ function looksStructured(value: string): boolean {
 }
 
 function parseStructuredObject(raw: string): Record<string, unknown> {
-  const text = unwrapJsonFence(raw.trim())
-  let value: unknown
-  try {
-    value = JSON.parse(text)
-  } catch {
-    throw new Error('Expected valid JSON structured output.')
+  const text = raw.trim()
+  const candidates = isJsonFence(text)
+    ? [unwrapJsonFence(text)]
+    : [text, ...embeddedJsonObjects(text)]
+  for (const candidate of candidates) {
+    try {
+      const value: unknown = JSON.parse(candidate)
+      if (isRecord(value)) return value
+    } catch {
+      // A runtime may preface its final protocol JSON with ordinary text.
+      // Keep scanning until the final complete object, then validate its schema below.
+    }
   }
-  if (!isRecord(value)) throw new Error('Structured output must be a JSON object.')
-  return value
+  throw new Error('Expected valid JSON structured output.')
+}
+
+function embeddedJsonObjects(text: string): string[] {
+  const objects: string[] = []
+  let depth = 0
+  let objectStart = -1
+  let inString = false
+  let escaped = false
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!
+    if (inString) {
+      if (escaped) escaped = false
+      else if (character === '\\') escaped = true
+      else if (character === '"') inString = false
+      continue
+    }
+    if (character === '"') {
+      inString = true
+      continue
+    }
+    if (character === '{') {
+      if (depth === 0) objectStart = index
+      depth += 1
+      continue
+    }
+    if (character === '}' && depth > 0) {
+      depth -= 1
+      if (depth === 0 && objectStart >= 0) objects.push(text.slice(objectStart, index + 1))
+    }
+  }
+  return objects.reverse()
 }
 
 function unwrapJsonFence(value: string): string {

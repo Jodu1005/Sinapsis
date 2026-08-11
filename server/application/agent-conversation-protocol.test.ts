@@ -25,6 +25,19 @@ describe('agent conversation protocol', () => {
       .toEqual({ decision: 'silent', confidence: 0, reason: 'not relevant', proposedAngle: '', dependsOnAgentId: null })
   })
 
+  it('extracts a final participation JSON object after an OpenCode text preface', () => {
+    const raw = [
+      'The request needs an architectural contribution from the development agent.',
+      '',
+      '{"decision":"speak","confidence":0.9,"reason":"I can provide the technical architecture.","proposedAngle":"Start with a small data pipeline and MVP.","dependsOnAgentId":null}',
+    ].join('\n')
+
+    expect(parseParticipation(raw)).toEqual({
+      decision: 'speak', confidence: 0.9, reason: 'I can provide the technical architecture.',
+      proposedAngle: 'Start with a small data pipeline and MVP.', dependsOnAgentId: null,
+    })
+  })
+
   it('rejects invalid participation actions and unknown fields', () => {
     expect(() => parseParticipation('{"decision":"handoff"}')).toThrow()
     expect(() => parseParticipation('{"decision":"speak","confidence":0.8,"reason":"valid","proposedAngle":"valid","dependsOnAgentId":null,"extra":true}')).toThrow()
