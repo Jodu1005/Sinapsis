@@ -536,6 +536,18 @@ export class SqliteUnitOfWork implements WorkspaceUnitOfWork {
     return { ...agent, identity: nextIdentity, updatedAt }
   }
 
+  updateAgentModel(agentId: string, model: string): Agent {
+    const agent = readAgent(this.database, agentId)
+    if (!agent) throw new Error(`Agent ${agentId} does not exist.`)
+    const nextModel = model.trim()
+    const updatedAt = now()
+    this.database.prepare('UPDATE agents SET model = ?, updated_at = ? WHERE id = ?').run(
+      nextModel, updatedAt, agentId,
+    )
+    this.afterCommit(event('agent.configuration_changed', 'agent', agentId, updatedAt))
+    return { ...agent, model: nextModel, updatedAt }
+  }
+
   updateAgentResponsibilities(agentId: string, responsibilities: string[]): Agent {
     const agent = readAgent(this.database, agentId)
     if (!agent) throw new Error(`Agent ${agentId} does not exist.`)
@@ -927,6 +939,10 @@ export class SqliteRepositories implements WorkspaceRepositories {
 
   updateAgentIdentity(agentId: string, identity: string): Agent {
     return this.inTransaction((unitOfWork) => unitOfWork.updateAgentIdentity(agentId, identity))
+  }
+
+  updateAgentModel(agentId: string, model: string): Agent {
+    return this.inTransaction((unitOfWork) => unitOfWork.updateAgentModel(agentId, model))
   }
 
   updateAgentResponsibilities(agentId: string, responsibilities: string[]): Agent {

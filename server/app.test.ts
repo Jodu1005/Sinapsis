@@ -392,13 +392,14 @@ describe('local service API', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         identity: 'Build engineer', mention: 'build', runtime: 'opencode', capabilityTags: ['typescript'],
+        model: 'anthropic/claude-sonnet-4',
         env: { API_TOKEN: 'do-not-return-this' },
       }),
     })
 
     expect(agentResponse.status).toBe(201)
     const agent = await agentResponse.json() as Record<string, unknown>
-    expect(agent).toMatchObject({ profile: { env: ['API_TOKEN'] } })
+    expect(agent).toMatchObject({ profile: { model: 'anthropic/claude-sonnet-4', env: ['API_TOKEN'] } })
     expect(agent).not.toHaveProperty('workspaceId')
 
     const bootstrapResponse = await fetch(`${server.baseUrl}/api/bootstrap`)
@@ -1212,6 +1213,31 @@ describe('local service API', () => {
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({ id: agent.id, identity: '架构师', mentionName: 'newton', env: ['API_TOKEN'] })
     expect(repositories.getAgent(agent.id)).toMatchObject({ identity: '架构师', mentionName: 'newton' })
+  })
+
+  it('updates and clears an existing Agent model without exposing runtime secrets', async () => {
+    const app = createApp()
+    const repositories = app.locals.repositories as WorkspaceRepositories
+    repositories.createWorkspace({ name: 'Sinapsis' })
+    const agent = repositories.createAgent({
+      identity: 'Newton', mentionName: 'newton', runtime: 'pi', capabilityTags: ['typescript'],
+      maxConcurrentTasks: 1, command: 'pi', args: [], model: '', env: { API_TOKEN: 'secret' },
+    })
+    const server = await startHttpTestServer(app)
+    closeServer = server.close
+
+    const update = await fetch(`${server.baseUrl}/api/agents/${agent.id}/model`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'anthropic/claude-sonnet-4' }),
+    })
+    expect(update.status).toBe(200)
+    await expect(update.json()).resolves.toMatchObject({ id: agent.id, model: 'anthropic/claude-sonnet-4', env: ['API_TOKEN'] })
+    expect(repositories.getAgent(agent.id)?.model).toBe('anthropic/claude-sonnet-4')
+
+    const clear = await fetch(`${server.baseUrl}/api/agents/${agent.id}/model`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: '  ' }),
+    })
+    expect(clear.status).toBe(200)
+    await expect(clear.json()).resolves.toMatchObject({ id: agent.id, model: '' })
   })
 
   it('archives a channel as read-only and restores it unless its name has been reused', async () => {

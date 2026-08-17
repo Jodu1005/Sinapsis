@@ -60,6 +60,7 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     createAgent: vi.fn(),
     refreshAgentRuntime: vi.fn(),
     updateAgentIdentity: vi.fn().mockResolvedValue(snapshot.agents[0]!),
+    updateAgentModel: vi.fn().mockResolvedValue(snapshot.agents[0]!),
     updateAgentResponsibilities: vi.fn().mockResolvedValue(snapshot.agents[0]!),
     postMessage: vi.fn().mockResolvedValue(undefined),
     getChannelMessage: vi.fn(),
@@ -1015,12 +1016,34 @@ describe('WorkspaceShell', () => {
 
     await user.type(within(dialog).getByLabelText('Agent 名称'), 'Claude Agent')
     await user.selectOptions(within(dialog).getByLabelText('Runtime'), 'claude-code')
+    await user.type(within(dialog).getByLabelText('模型名称（可选）'), 'sonnet')
     await user.type(within(dialog).getByLabelText('能力标签'), 'review')
     await user.click(within(dialog).getByRole('button', { name: '添加 Agent' }))
 
     expect(api.createAgent).toHaveBeenCalledWith({
-      identity: 'Claude Agent', mention: 'claude-agent', runtime: 'claude-code', capabilityTags: ['review'], responsibilities: [],
+      identity: 'Claude Agent', mention: 'claude-agent', runtime: 'claude-code', model: 'sonnet', capabilityTags: ['review'], responsibilities: [],
     })
+  })
+
+  it('updates an existing Agent model and refreshes its configuration', async () => {
+    const updatedSnapshot = structuredClone(snapshot)
+    updatedSnapshot.agents[0].model = 'anthropic/claude-sonnet-4'
+    const updateAgentModel = vi.fn().mockResolvedValue(updatedSnapshot.agents[0])
+    const api = makeApi({
+      getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockResolvedValue(updatedSnapshot),
+      updateAgentModel,
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await user.click(await screen.findByRole('button', { name: '查看 实现 Agent 配置' }))
+    const dialog = screen.getByRole('dialog', { name: '实现 Agent' })
+    await user.clear(within(dialog).getByLabelText('模型名称'))
+    await user.type(within(dialog).getByLabelText('模型名称'), 'anthropic/claude-sonnet-4')
+    await user.click(within(dialog).getByRole('button', { name: '保存模型' }))
+
+    expect(updateAgentModel).toHaveBeenCalledWith('agent-1', 'anthropic/claude-sonnet-4')
+    expect(await within(dialog).findByText('anthropic/claude-sonnet-4')).toBeInTheDocument()
   })
 
   it('shows Claude Code runtime copy in the agent config dialog', async () => {

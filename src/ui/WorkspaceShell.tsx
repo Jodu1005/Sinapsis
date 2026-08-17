@@ -475,6 +475,12 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     setSelectedAgent(updated)
     await refresh()
   }
+  const updateAgentModel = async (model: string) => {
+    if (!selectedAgent) return
+    const updated = await api.updateAgentModel(selectedAgent.id, model)
+    setSelectedAgent(updated)
+    await refresh()
+  }
   const cancelSelectedTurn = async () => {
     if (!selectedTurnChannelId || !selectedTurnId) throw new Error('无法取消当前 Turn。')
     const channelId = selectedTurnChannelId
@@ -578,7 +584,7 @@ export function WorkspaceShell({ api: providedApi }: { api?: WorkspaceApi }) {
     {creatingWorkspace && <WorkspaceCreateDialog onCreate={createWorkspace} onClose={() => setCreatingWorkspace(false)} />}
     {creatingChannel && <ChannelCreateDialog onCreate={createChannel} onClose={() => setCreatingChannel(false)} />}
     {creatingAgent && <AgentCreateDialog onCreate={createAgent} onClose={() => setCreatingAgent(false)} />}
-    {selectedAgent && <AgentConfigDialog agent={selectedAgent} refreshingRuntime={refreshingAgentId === selectedAgent.id} onRefreshRuntime={refreshAgentRuntime} onUpdateIdentity={updateAgentIdentity} onUpdateResponsibilities={updateAgentResponsibilities} onClose={() => setSelectedAgent(null)} />}
+    {selectedAgent && <AgentConfigDialog agent={selectedAgent} refreshingRuntime={refreshingAgentId === selectedAgent.id} onRefreshRuntime={refreshAgentRuntime} onUpdateIdentity={updateAgentIdentity} onUpdateModel={updateAgentModel} onUpdateResponsibilities={updateAgentResponsibilities} onClose={() => setSelectedAgent(null)} />}
   </div>
 }
 

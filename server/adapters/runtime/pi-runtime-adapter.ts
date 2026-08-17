@@ -55,9 +55,10 @@ export class PiRuntimeAdapter implements RuntimeAdapter {
 
   private launch(session: RuntimeSession, sink: RuntimeEventSink): void {
     const args = session.executionPolicy === 'read-only-no-tools'
-      ? restrictedPiArgs()
+      ? [...restrictedPiArgs(), ...modelArgs(session.profile.model)]
       : [
           ...session.profile.args,
+          ...modelArgs(session.profile.model),
           '--session-dir', path.join(this.dataDirectory, 'pi-sessions'),
           '--name', `sinapsis:${session.taskId}`,
         ]
@@ -210,6 +211,10 @@ function restrictedPiArgs(): string[] {
     '--no-session',
     '--no-approve',
   ]
+}
+
+function modelArgs(model: string): string[] {
+  return model ? ['--model', model] : []
 }
 
 function initialPrompt(task: RuntimeTaskRequest): string {

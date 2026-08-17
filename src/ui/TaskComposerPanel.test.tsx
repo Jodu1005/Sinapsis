@@ -115,7 +115,7 @@ describe('TaskComposerPanel', () => {
   })
 
   it('shows the managed runtime preset and masks configured environment values', () => {
-    render(<AgentConfigDialog agent={{ ...agent, env: ['API_TOKEN'] }} refreshingRuntime={false} onRefreshRuntime={vi.fn().mockResolvedValue(undefined)} onUpdateIdentity={vi.fn().mockResolvedValue(undefined)} onUpdateResponsibilities={vi.fn().mockResolvedValue(undefined)} onClose={vi.fn()} />)
+    render(<AgentConfigDialog agent={{ ...agent, env: ['API_TOKEN'] }} refreshingRuntime={false} onRefreshRuntime={vi.fn().mockResolvedValue(undefined)} onUpdateIdentity={vi.fn().mockResolvedValue(undefined)} onUpdateModel={vi.fn().mockResolvedValue(undefined)} onUpdateResponsibilities={vi.fn().mockResolvedValue(undefined)} onClose={vi.fn()} />)
 
     expect(screen.getByText('Runtime 可用性')).toBeInTheDocument()
     expect(screen.getByText('预设')).toBeInTheDocument()
@@ -127,7 +127,7 @@ describe('TaskComposerPanel', () => {
   it('saves editable responsibilities from the Agent configuration', async () => {
     const user = userEvent.setup()
     const onUpdateResponsibilities = vi.fn().mockResolvedValue(undefined)
-    render(<AgentConfigDialog agent={agent} refreshingRuntime={false} onRefreshRuntime={vi.fn().mockResolvedValue(undefined)} onUpdateIdentity={vi.fn().mockResolvedValue(undefined)} onUpdateResponsibilities={onUpdateResponsibilities} onClose={vi.fn()} />)
+    render(<AgentConfigDialog agent={agent} refreshingRuntime={false} onRefreshRuntime={vi.fn().mockResolvedValue(undefined)} onUpdateIdentity={vi.fn().mockResolvedValue(undefined)} onUpdateModel={vi.fn().mockResolvedValue(undefined)} onUpdateResponsibilities={onUpdateResponsibilities} onClose={vi.fn()} />)
 
     await user.type(screen.getByLabelText('职责'), '前端界面与交互\n组件测试')
     await user.click(screen.getByRole('button', { name: '保存职责' }))
@@ -138,7 +138,7 @@ describe('TaskComposerPanel', () => {
   it('saves an edited Agent name from the configuration dialog', async () => {
     const user = userEvent.setup()
     const onUpdateIdentity = vi.fn().mockResolvedValue(undefined)
-    render(<AgentConfigDialog agent={agent} refreshingRuntime={false} onRefreshRuntime={vi.fn().mockResolvedValue(undefined)} onUpdateIdentity={onUpdateIdentity} onUpdateResponsibilities={vi.fn().mockResolvedValue(undefined)} onClose={vi.fn()} />)
+    render(<AgentConfigDialog agent={agent} refreshingRuntime={false} onRefreshRuntime={vi.fn().mockResolvedValue(undefined)} onUpdateIdentity={onUpdateIdentity} onUpdateModel={vi.fn().mockResolvedValue(undefined)} onUpdateResponsibilities={vi.fn().mockResolvedValue(undefined)} onClose={vi.fn()} />)
 
     await user.clear(screen.getByLabelText('名称'))
     await user.type(screen.getByLabelText('名称'), '前端专家')
@@ -194,5 +194,5 @@ function TaskComposerHarness() {
 
 function AgentConfigHarness() {
   const [open, setOpen] = useState(false)
-  return <div className="workspace-shell"><button type="button" onClick={() => setOpen(true)}>查看 Agent 配置</button>{open && <AgentConfigDialog agent={agent} refreshingRuntime={false} onRefreshRuntime={vi.fn().mockResolvedValue(undefined)} onUpdateIdentity={vi.fn().mockResolvedValue(undefined)} onUpdateResponsibilities={vi.fn().mockResolvedValue(undefined)} onClose={() => setOpen(false)} />}</div>
+  return <div className="workspace-shell"><button type="button" onClick={() => setOpen(true)}>查看 Agent 配置</button>{open && <AgentConfigDialog agent={agent} refreshingRuntime={false} onRefreshRuntime={vi.fn().mockResolvedValue(undefined)} onUpdateIdentity={vi.fn().mockResolvedValue(undefined)} onUpdateModel={vi.fn().mockResolvedValue(undefined)} onUpdateResponsibilities={vi.fn().mockResolvedValue(undefined)} onClose={() => setOpen(false)} />}</div>
 }
