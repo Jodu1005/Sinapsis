@@ -25,6 +25,19 @@ describe('agent conversation protocol', () => {
       .toEqual({ decision: 'silent', confidence: 0, reason: 'not relevant', proposedAngle: '', dependsOnAgentId: null })
   })
 
+  it('extracts a final participation JSON object after an OpenCode text preface', () => {
+    const raw = [
+      'The request needs an architectural contribution from the development agent.',
+      '',
+      '{"decision":"speak","confidence":0.9,"reason":"I can provide the technical architecture.","proposedAngle":"Start with a small data pipeline and MVP.","dependsOnAgentId":null}',
+    ].join('\n')
+
+    expect(parseParticipation(raw)).toEqual({
+      decision: 'speak', confidence: 0.9, reason: 'I can provide the technical architecture.',
+      proposedAngle: 'Start with a small data pipeline and MVP.', dependsOnAgentId: null,
+    })
+  })
+
   it('rejects invalid participation actions and unknown fields', () => {
     expect(() => parseParticipation('{"decision":"handoff"}')).toThrow()
     expect(() => parseParticipation('{"decision":"speak","confidence":0.8,"reason":"valid","proposedAngle":"valid","dependsOnAgentId":null,"extra":true}')).toThrow()
@@ -68,7 +81,13 @@ describe('agent conversation protocol', () => {
   it('parses and validates duplicate decisions', () => {
     expect(parseDuplicateDecision('{"decision":"speak","reason":"adds tests","revisedAngle":"cover errors"}'))
       .toEqual({ decision: 'speak', reason: 'adds tests', revisedAngle: 'cover errors' })
+    expect(parseDuplicateDecision('{"duplicate":false,"confidence":0.9,"reason":"adds tests"}'))
+      .toEqual({ decision: 'speak', reason: 'adds tests', revisedAngle: null })
+    expect(parseDuplicateDecision('{"decision":"silent","duplicate":true,"confidence":0.9,"reason":"covered","revisedAngle":null}'))
+      .toEqual({ decision: 'silent', reason: 'covered', revisedAngle: null })
     expect(() => parseDuplicateDecision('{"decision":"silent","reason":"covered","revisedAngle":null,"extra":true}')).toThrow()
+    expect(() => parseDuplicateDecision('{"duplicate":"false","reason":"covered"}')).toThrow()
+    expect(() => parseDuplicateDecision('{"duplicate":false,"confidence":2,"reason":"covered"}')).toThrow()
     expect(() => parseDuplicateDecision(`{"decision":"silent","reason":"covered","revisedAngle":"${'x'.repeat(501)}"}`)).toThrow()
   })
 

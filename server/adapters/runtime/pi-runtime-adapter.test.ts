@@ -88,6 +88,24 @@ describe('PiRuntimeAdapter', () => {
     expect(session).toMatchObject({ sessionId: 'pi-session-1', sessionFile: '/tmp/pi-session.jsonl' })
   })
 
+  it('passes a configured model to Pi for regular and read-only sessions', async () => {
+    const runner = new FakeProcessRunner()
+    const adapter = new PiRuntimeAdapter(runner, '/tmp/sinapsis-data')
+    const modelTask = { ...task, profile: resolveRuntimeProfile('pi', { command: 'pi-bin', model: 'anthropic/claude-sonnet-4' }) }
+
+    await adapter.start(modelTask, () => {})
+    await adapter.start({ ...modelTask, executionPolicy: 'read-only-no-tools' }, () => {})
+
+    expect(runner.spawns[0]?.options.args).toEqual([
+      '--mode', 'rpc', '--model', 'anthropic/claude-sonnet-4',
+      '--session-dir', '/tmp/sinapsis-data/pi-sessions', '--name', 'sinapsis:task-2',
+    ])
+    expect(runner.spawns[1]?.options.args).toEqual([
+      '--mode', 'rpc', '--no-tools', '--no-extensions', '--no-skills', '--no-prompt-templates',
+      '--no-context-files', '--no-session', '--no-approve', '--model', 'anthropic/claude-sonnet-4',
+    ])
+  })
+
   it('buffers human input until a resumed session has switched successfully', async () => {
     const runner = new FakeProcessRunner()
     const events: RuntimeEvent[] = []

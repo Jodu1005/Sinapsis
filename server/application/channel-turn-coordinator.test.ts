@@ -347,6 +347,102 @@ describe('ChannelTurnCoordinator', () => {
     ])
   })
 
+  it('turns an explicit Agent mention in a public reply into a visible handoff', async () => {
+    const fixture = await createFixture()
+    const source = fixture.createAgent('Source', [])
+    const target = fixture.createAgent('Target', [])
+    fixture.sessions.handle = async (input) => input.conversation?.kind === 'handoff_response'
+      ? publicReply('target answer')
+      : publicReply('@target please validate this from the product perspective')
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('@Source begin'))
+
+    expect(turn).toMatchObject({ mode: 'direct', status: 'completed', currentRound: 2 })
+    expect(fixture.agentMessages().map((message) => message.senderId)).toEqual([source.id, target.id])
+    expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({
+        fromAgentId: source.id,
+        toAgentId: target.id,
+        status: 'completed',
+        question: 'please validate this from the product perspective',
+      }),
+    ])
+  })
+
+  it('persists only the five-part packet after an implicit Handoff command', async () => {
+    const fixture = await createFixture()
+    const source = fixture.createAgent('Source', [])
+    const target = fixture.createAgent('Target', [])
+    fixture.sessions.handle = async (input) => input.conversation?.kind === 'handoff_response'
+      ? publicReply('target answer')
+      : publicReply([
+          'Public conclusion that remains visible.',
+          '',
+          '@target',
+          'What: verify the release gate',
+          'Why: the evidence is incomplete',
+          'Tradeoff: delay versus false release',
+          'Open Question: does the sample meet the threshold?',
+          'Next Action: run the frozen holdout',
+        ].join('\n'))
+
+    const turn = await fixture.coordinator.dispatch(fixture.postHuman('@Source begin'))
+
+    expect(turn).toMatchObject({ status: 'completed', currentRound: 2 })
+    expect(fixture.repositories.listConversationHandoffs(turn.id)).toEqual([
+      expect.objectContaining({
+        fromAgentId: source.id,
+        toAgentId: target.id,
+        question: [
+          'What: verify the release gate',
+          'Why: the evidence is incomplete',
+          'Tradeoff: delay versus false release',
+          'Open Question: does the sample meet the threshold?',
+          'Next Action: run the frozen holdout',
+        ].join('\n'),
+      }),
+    ])
+  })
+
+  it('tells speakers to put a handoff handle at the start of its own line', async () => {
+    const fixture = await createFixture()
+    fixture.createAgent('Source', [])
+    fixture.createAgent('Target', [])
+    fixture.sessions.handle = async () => publicReply('source answer')
+
+    await fixture.coordinator.dispatch(fixture.postHuman('@Source begin'))
+
+    const responseCall = fixture.sessions.calls.find((call) => call.conversation?.kind === 'response')!
+    expect(responseCall.context).toContain('@提及目标单独放在一行开头')
+    expect(responseCall.context).toContain('不要有 Markdown 加粗、说明文字或标点')
+    expect(responseCall.context).toContain('@target（职责：未设置职责）')
+    expect(responseCall.context).toContain('职责最匹配、且尚未发言的一位 Agent')
+    expect(responseCall.context).toContain('What / Why / Tradeoff / Open Question / Next Action')
+    expect(responseCall.context).toContain('转述本身不能作为 resolver')
+    expect(responseCall.context).toContain('标记 insufficient 并 fail-closed')
+  })
+
+  it('omits already selected ordinary speakers from a responder handoff roster', async () => {
+    const fixture = await createFixture()
+    const first = fixture.createAgent('First', ['ordinary roster topic'])
+    const second = fixture.createAgent('Second', ['ordinary roster topic'])
+    const reserve = fixture.createAgent('Reserve', ['ordinary roster topic'])
+    fixture.sessions.handle = async (input) => {
+      if (input.conversation?.kind === 'participation') {
+        const confidence = input.agent.id === first.id ? 1 : input.agent.id === second.id ? 0.9 : 0.8
+        return participation('speak', confidence)
+      }
+      if (input.conversation?.kind === 'duplicate_check') return duplicate('speak')
+      return publicReply(`${input.agent.identity} reply`)
+    }
+
+    await fixture.coordinator.dispatch(fixture.postHuman('ordinary roster topic'))
+
+    const firstResponse = fixture.sessions.calls.find((call) => call.conversation?.kind === 'response' && call.agent.id === first.id)!
+    expect(firstResponse.context).not.toContain('@second（职责：ordinary roster topic）')
+    expect(firstResponse.context).toContain('@reserve（职责：ordinary roster topic）')
+  })
+
   it('gives response and Handoff calls the same bounded Context with role and invocation boundaries', async () => {
     const fixture = await createFixture()
     const source = fixture.createAgent('Source', ['triage requests'])
@@ -368,6 +464,30 @@ describe('ChannelTurnCoordinator', () => {
     }
     expect(response.context).toContain('生成一条可公开发布的回复。')
     expect(handoff.context).toContain('回应交接问题，并生成一条可公开发布的回复。')
+  })
+
+  it('keeps replies to a root human message in its Thread for a later human follow-up', async () => {
+    const fixture = await createFixture()
+    const source = fixture.createAgent('Source', [])
+    const reviewer = fixture.createAgent('Reviewer', [])
+    fixture.sessions.handle = async (input) => {
+      if (input.agent.id === source.id) return publicReply('source decision: use a safe stop boundary')
+      if (input.agent.id === reviewer.id) {
+        expect(input.context).toContain('source decision: use a safe stop boundary')
+        return publicReply('reviewer confirms the decision')
+      }
+      return publicReply('unexpected')
+    }
+
+    const root = fixture.postHuman('@Source define the decision')
+    await fixture.coordinator.dispatch(root)
+    await fixture.coordinator.dispatch(fixture.postHuman('@Reviewer review the prior decision', root.id))
+
+    const messages = fixture.repositories.listMessagesForConversation(fixture.channel.id, root.id)
+    expect(messages.map((message) => message.body)).toEqual(expect.arrayContaining([
+      'source decision: use a safe stop boundary',
+      'reviewer confirms the decision',
+    ]))
   })
 
   it('refreshes a Thread Summary in the background for the next Turn context', async () => {
@@ -763,7 +883,7 @@ describe('ChannelTurnCoordinator', () => {
     const targetParticipant = fixture.repositories.listTurnParticipants(turn.id)
       .find((participant) => participant.agentId === target.id)
 
-    expect(turn).toMatchObject({ status: 'partial', currentRound: 2 })
+    expect(turn).toMatchObject({ status: 'completed', currentRound: 2 })
     expect(targetParticipant).toMatchObject({
       source: 'handoff',
       decision: 'speak',

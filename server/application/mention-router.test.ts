@@ -85,35 +85,27 @@ describe('routeMentions', () => {
     })
   })
 
-  it('routes a known Agent when Chinese text touches the mention on both sides', () => {
-    expect(routeMentions('请@Newton看看', [newton, clawd])).toEqual({
+  it('only routes explicit command-line mentions, leaving explanatory prose untouched', () => {
+    expect(routeMentions('@Newton 开始分析\n请在结尾把问题交给 @Clawd。\n不要把 @Missing 当作命令。', [newton, clawd])).toEqual({
       mode: 'direct',
       targetAgentIds: [newton.id],
       unknownMentions: [],
     })
   })
 
-  it('routes a known Agent when a Latin message touches the mention on the left', () => {
-    expect(routeMentions('hello@newton', [newton, clawd])).toEqual({
-      mode: 'direct',
-      targetAgentIds: [newton.id],
+  it('supports markdown command-line prefixes', () => {
+    expect(routeMentions('> @Newton 看一下\n- @Clawd 补充', [newton, clawd])).toEqual({
+      mode: 'multi_direct',
+      targetAgentIds: [newton.id, clawd.id],
       unknownMentions: [],
     })
   })
 
-  it('routes @all when a Latin message touches the mention on the left', () => {
-    expect(routeMentions('hello@all', [newton, clawd])).toEqual({
-      mode: 'all',
-      targetAgentIds: [],
-      unknownMentions: [],
-    })
-  })
-
-  it('reports unknown mentions at the start of text or after punctuation', () => {
+  it('reports unknown command-line mentions but ignores inline prose handles', () => {
     expect(routeMentions('@Missing 请回答；然后看（@Other）。', [newton])).toEqual({
       mode: 'ordinary',
       targetAgentIds: [],
-      unknownMentions: ['Missing', 'Other'],
+      unknownMentions: ['Missing'],
     })
   })
 })

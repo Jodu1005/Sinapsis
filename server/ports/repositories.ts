@@ -137,6 +137,7 @@ export interface WorkspaceUnitOfWork {
   resetChannelContext(channelId: string, occurredAt: Date): Channel
   createAgent(input: CreateAgentInput): Agent
   updateAgentIdentity(agentId: string, identity: string): Agent
+  updateAgentModel(agentId: string, model: string): Agent
   updateAgentResponsibilities(agentId: string, responsibilities: string[]): Agent
   createTask(input: CreateTaskInput): Task
   createTaskInput(taskId: string, body: string): TaskInput
@@ -167,6 +168,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   resetChannelContext(channelId: string, occurredAt: Date): Channel
   createAgent(input: CreateAgentInput): Agent
   updateAgentIdentity(agentId: string, identity: string): Agent
+  updateAgentModel(agentId: string, model: string): Agent
   updateAgentResponsibilities(agentId: string, responsibilities: string[]): Agent
   createTask(input: CreateTaskInput): Task
   createTaskInput(taskId: string, body: string): TaskInput
@@ -247,6 +249,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   listConversationHandoffs(turnId: string): ConversationHandoff[]
   getConversationSession(key: string): ConversationSession | undefined
   upsertConversationSession(input: UpsertConversationSessionInput): ConversationSession
+  invalidateConversationSessionsForAgent(agentId: string): string[]
   listMessagesForConversation(channelId: string, threadRootMessageId: string | null): Message[]
   listMessagesAfterThreadWatermark(channelId: string, threadRootMessageId: string, throughMessageId: string): Message[]
   listPublicMessagesForTurn(turnId: string): Message[]

@@ -3,20 +3,24 @@ import { FormEvent, useEffect, useRef, useState } from 'react'
 import type { AgentView } from '../domain/workspace-view'
 import { useModalDialog } from './useModalDialog'
 
-export function AgentConfigDialog({ agent, refreshingRuntime, onRefreshRuntime, onUpdateIdentity, onUpdateResponsibilities, onClose }: { agent: AgentView; refreshingRuntime: boolean; onRefreshRuntime(): Promise<void>; onUpdateIdentity(identity: string): Promise<void>; onUpdateResponsibilities(responsibilities: string[]): Promise<void>; onClose(): void }) {
+export function AgentConfigDialog({ agent, refreshingRuntime, onRefreshRuntime, onUpdateIdentity, onUpdateModel, onUpdateResponsibilities, onClose }: { agent: AgentView; refreshingRuntime: boolean; onRefreshRuntime(): Promise<void>; onUpdateIdentity(identity: string): Promise<void>; onUpdateModel(model: string): Promise<void>; onUpdateResponsibilities(responsibilities: string[]): Promise<void>; onClose(): void }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const [refreshError, setRefreshError] = useState<string | null>(null)
   const [identity, setIdentity] = useState(agent.identity)
   const [savingIdentity, setSavingIdentity] = useState(false)
   const [identityError, setIdentityError] = useState<string | null>(null)
+  const [model, setModel] = useState(agent.model)
+  const [savingModel, setSavingModel] = useState(false)
+  const [modelError, setModelError] = useState<string | null>(null)
   const [responsibilities, setResponsibilities] = useState((agent.responsibilities ?? []).join('\n'))
   const [savingResponsibilities, setSavingResponsibilities] = useState(false)
   const [responsibilityError, setResponsibilityError] = useState<string | null>(null)
   const dialogRef = useModalDialog(onClose, closeButtonRef)
   useEffect(() => {
     setIdentity(agent.identity)
+    setModel(agent.model)
     setResponsibilities((agent.responsibilities ?? []).join('\n'))
-  }, [agent.id, agent.identity, agent.responsibilities])
+  }, [agent.id, agent.identity, agent.model, agent.responsibilities])
   const refreshRuntime = async () => {
     setRefreshError(null)
     try {
@@ -51,12 +55,27 @@ export function AgentConfigDialog({ agent, refreshingRuntime, onRefreshRuntime, 
       setSavingIdentity(false)
     }
   }
+  const saveModel = async (event: FormEvent) => {
+    event.preventDefault()
+    const nextModel = model.trim()
+    if (nextModel === agent.model) return
+    setSavingModel(true)
+    setModelError(null)
+    try {
+      await onUpdateModel(nextModel)
+    } catch (cause) {
+      setModelError(cause instanceof Error ? cause.message : '无法保存模型名称。')
+    } finally {
+      setSavingModel(false)
+    }
+  }
   return <div className="panel-scrim" role="presentation"><section ref={dialogRef} className="agent-config-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-config-title"><header><div><p>Agent 配置</p><h2 id="agent-config-title">{agent.identity}</h2></div><div><button className="icon-button" type="button" aria-label="重新检测 Agent Runtime" data-tooltip="重新检测 Agent Runtime" onClick={() => void refreshRuntime()} disabled={refreshingRuntime}><RefreshCw size={18} /></button><button ref={closeButtonRef} className="icon-button" type="button" aria-label="关闭 Agent 配置" data-tooltip="关闭" onClick={onClose}><X size={18} /></button></div></header>
     <dl><div><dt>Runtime</dt><dd>{runtimeLabel(agent.runtime)}</dd></div><div><dt>Runtime 可用性</dt><dd>{runtimeAvailability(agent.status)}</dd></div><div><dt>预设</dt><dd>{runtimePreset(agent.runtime)}</dd></div><div><dt>Command</dt><dd><code>{agent.command}</code></dd></div><div><dt>Model</dt><dd>{modelCopy(agent.runtime, agent.model)}</dd></div><div><dt>Args</dt><dd><code>{agent.args.join(' ') || '无'}</code></dd></div><div><dt>能力标签</dt><dd>{agent.capabilityTags.join(', ') || '未设置'}</dd></div><div><dt>环境变量</dt><dd>{agent.env.length ? agent.env.map((key) => `${key}（已配置）`).join(', ') : '未设置'}</dd></div></dl>
     <form className="agent-responsibility-form" onSubmit={saveIdentity}><label htmlFor="agent-identity">名称</label><input id="agent-identity" value={identity} onChange={(event) => setIdentity(event.target.value)} autoComplete="off" /><p>名称用于频道显示和 @ 提及；原有 @{agent.mentionName} 仍然可用。</p><button type="submit" className="primary-action" disabled={savingIdentity || !identity.trim() || identity.trim() === agent.identity}>{savingIdentity ? '正在保存...' : '保存名称'}</button></form>
+    <form className="agent-responsibility-form" onSubmit={saveModel}><label htmlFor="agent-model">模型名称</label><input id="agent-model" value={model} onChange={(event) => setModel(event.target.value)} placeholder={modelPlaceholder(agent.runtime)} disabled={agent.runtime === 'opencode-acp'} /><p>{modelHelp(agent.runtime)}</p><button type="submit" className="primary-action" disabled={savingModel || agent.runtime === 'opencode-acp' || model.trim() === agent.model}>{savingModel ? '正在保存...' : '保存模型'}</button></form>
     <form className="agent-responsibility-form" onSubmit={saveResponsibilities}><label htmlFor="agent-responsibilities">职责</label><textarea id="agent-responsibilities" value={responsibilities} onChange={(event) => setResponsibilities(event.target.value)} placeholder="前端界面与交互\n每行一项，也可用逗号分隔" /><p>未 @ 时，系统只会把消息交给职责匹配的空闲 Agent。</p><button type="submit" className="primary-action" disabled={savingResponsibilities}>{savingResponsibilities ? '正在保存...' : '保存职责'}</button></form>
-    {(refreshError || identityError || responsibilityError) && <p className="form-error" role="alert">{refreshError ?? identityError ?? responsibilityError}</p>}
-    {agent.status === 'busy' && <p className="assignment-note">任务运行中，Runtime 命令不可修改。</p>}
+    {(refreshError || identityError || modelError || responsibilityError) && <p className="form-error" role="alert">{refreshError ?? identityError ?? modelError ?? responsibilityError}</p>}
+    {agent.status === 'busy' && <p className="assignment-note">当前会话继续使用启动时的模型；新模型从下一次会话生效。</p>}
   </section></div>
 }
 
@@ -89,4 +108,19 @@ function runtimeLabel(runtime: AgentView['runtime']): string {
 function modelCopy(runtime: AgentView['runtime'], model: string): string {
   if (model) return model
   return runtime === 'claude-code' ? '使用 Claude Code 默认值' : '使用 Runtime 默认值'
+}
+
+function modelPlaceholder(runtime: AgentView['runtime']): string {
+  return {
+    opencode: '例如：anthropic/claude-sonnet-4',
+    'opencode-acp': '使用 OpenCode ACP 默认模型',
+    pi: '例如：anthropic/claude-sonnet-4',
+    'claude-code': '例如：sonnet',
+  }[runtime]
+}
+
+function modelHelp(runtime: AgentView['runtime']): string {
+  if (runtime === 'opencode-acp') return 'OpenCode ACP 暂不支持按 Agent 指定模型。'
+  if (runtime === 'opencode') return 'OpenCode 使用 provider/model 格式；清空后恢复 Runtime 默认模型。'
+  return '清空后恢复 Runtime 默认模型。'
 }

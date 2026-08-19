@@ -79,11 +79,26 @@ export function parsePublicResponse(raw: string): PublicAgentResponse {
 
 export function parseDuplicateDecision(raw: string): DuplicateDecision {
   const value = parseStructuredObject(raw)
-  assertOnlyKeys(value, ['decision', 'reason', 'revisedAngle'])
+  // Some Claude models have returned the older duplicate-check shape with
+  // `duplicate`/`confidence` alongside (or instead of) the current fields.
+  // Keep the boundary strict, but normalize that known compatible shape so a
+  // harmless schema drift does not turn a valid speaker into a failed check.
+  assertNoUnknownKeys(value, ['decision', 'duplicate', 'confidence', 'reason', 'revisedAngle'])
+  const hasDecision = 'decision' in value
+  const hasDuplicate = 'duplicate' in value
+  if (!hasDecision && !hasDuplicate) throw new Error('Missing structured fields: decision')
+  if (hasDuplicate && typeof value.duplicate !== 'boolean') {
+    throw new Error('duplicate must be a boolean.')
+  }
+  if ('confidence' in value) confidenceValue(value.confidence)
   return {
-    decision: decisionValue(value.decision),
+    decision: hasDecision
+      ? decisionValue(value.decision)
+      : value.duplicate ? 'silent' : 'speak',
     reason: boundedString(value.reason, 'reason', maxDecisionTextLength),
-    revisedAngle: nullableBoundedString(value.revisedAngle, 'revisedAngle', maxDecisionTextLength),
+    revisedAngle: value.revisedAngle === undefined
+      ? null
+      : nullableBoundedString(value.revisedAngle, 'revisedAngle', maxDecisionTextLength),
   }
 }
 
@@ -92,15 +107,52 @@ function looksStructured(value: string): boolean {
 }
 
 function parseStructuredObject(raw: string): Record<string, unknown> {
-  const text = unwrapJsonFence(raw.trim())
-  let value: unknown
-  try {
-    value = JSON.parse(text)
-  } catch {
-    throw new Error('Expected valid JSON structured output.')
+  const text = raw.trim()
+  const candidates = isJsonFence(text)
+    ? [unwrapJsonFence(text)]
+    : [text, ...embeddedJsonObjects(text)]
+  for (const candidate of candidates) {
+    try {
+      const value: unknown = JSON.parse(candidate)
+      if (isRecord(value)) return value
+    } catch {
+      // A runtime may preface its final protocol JSON with ordinary text.
+      // Keep scanning until the final complete object, then validate its schema below.
+    }
   }
-  if (!isRecord(value)) throw new Error('Structured output must be a JSON object.')
-  return value
+  throw new Error('Expected valid JSON structured output.')
+}
+
+function embeddedJsonObjects(text: string): string[] {
+  const objects: string[] = []
+  let depth = 0
+  let objectStart = -1
+  let inString = false
+  let escaped = false
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!
+    if (inString) {
+      if (escaped) escaped = false
+      else if (character === '\\') escaped = true
+      else if (character === '"') inString = false
+      continue
+    }
+    if (character === '"') {
+      inString = true
+      continue
+    }
+    if (character === '{') {
+      if (depth === 0) objectStart = index
+      depth += 1
+      continue
+    }
+    if (character === '}' && depth > 0) {
+      depth -= 1
+      if (depth === 0 && objectStart >= 0) objects.push(text.slice(objectStart, index + 1))
+    }
+  }
+  return objects.reverse()
 }
 
 function unwrapJsonFence(value: string): string {
@@ -115,10 +167,14 @@ function isJsonFence(value: string): boolean {
 }
 
 function assertOnlyKeys(value: Record<string, unknown>, allowed: string[]): void {
-  const unknown = Object.keys(value).filter((key) => !allowed.includes(key))
-  if (unknown.length > 0) throw new Error(`Unknown structured fields: ${unknown.join(', ')}`)
+  assertNoUnknownKeys(value, allowed)
   const missing = allowed.filter((key) => !(key in value))
   if (missing.length > 0) throw new Error(`Missing structured fields: ${missing.join(', ')}`)
+}
+
+function assertNoUnknownKeys(value: Record<string, unknown>, allowed: string[]): void {
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key))
+  if (unknown.length > 0) throw new Error(`Unknown structured fields: ${unknown.join(', ')}`)
 }
 
 function decisionValue(value: unknown): 'speak' | 'silent' {

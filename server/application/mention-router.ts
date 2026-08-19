@@ -7,9 +7,11 @@ interface MentionMatch {
   end: number
 }
 
-const mentionLeftBoundary = '(^|[^@])'
-const mentionRightBoundary = '(?=$|[^A-Za-z0-9_/-])'
-const emailAddress = /[\p{L}\p{N}][\p{L}\p{N}._%+-]*@[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?(?:\.[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?)+/gu
+interface ParsedMention {
+  name: string
+  start: number
+  end: number
+}
 
 export class UnknownMentionError extends Error {
   constructor(readonly mentions: string[]) {
@@ -21,10 +23,14 @@ export class UnknownMentionError extends Error {
 }
 
 export function routeMentions(body: string, agents: Agent[]): MentionRoute {
-  const routableBody = maskEmailAddresses(body)
-  const matches = agentMentionMatches(routableBody, agents)
-  const allMention = exactMentionMatches(routableBody, 'all')
-  const unknownMentions = unknownMentionNames(routableBody, [...matches, ...allMention])
+  const mentions = leadingMentions(body, agents)
+  const matches = agentMentionMatches(mentions, agents)
+  const allMention = mentions.filter((mention) => mention.name.toLocaleLowerCase() === 'all')
+  const knownMentions = new Set([...matches.map((match) => match.start), ...allMention.map((match) => match.start)])
+  const unknownMentions = mentions
+    .filter((mention) => !knownMentions.has(mention.start) && !mention.name.includes('/'))
+    .map((mention) => mention.name)
+    .filter((mention, index, values) => values.indexOf(mention) === index)
 
   if (allMention.length > 0) {
     return { mode: 'all', targetAgentIds: [], unknownMentions }
@@ -38,36 +44,51 @@ export function routeMentions(body: string, agents: Agent[]): MentionRoute {
   }
 }
 
-function agentMentionMatches(body: string, agents: Agent[]): MentionMatch[] {
-  return agents.flatMap((agent) => {
-    const aliases = new Set([agent.identity, agent.mentionName].map((value) => value.trim()).filter(Boolean))
-    return [...aliases].flatMap((alias) => exactMentionMatches(body, alias).map(({ start, end }) => ({ agentId: agent.id, start, end })))
+function agentMentionMatches(mentions: ParsedMention[], agents: Agent[]): MentionMatch[] {
+  const aliases = new Map<string, string>()
+  for (const agent of agents) {
+    for (const alias of [agent.identity, agent.mentionName].map((value) => value.trim()).filter(Boolean)) {
+      aliases.set(alias.toLocaleLowerCase(), agent.id)
+    }
+  }
+  return mentions.flatMap((mention) => {
+    const agentId = aliases.get(mention.name.toLocaleLowerCase())
+    return agentId ? [{ agentId, start: mention.start, end: mention.end }] : []
   })
 }
 
-function exactMentionMatches(body: string, name: string): Array<Omit<MentionMatch, 'agentId'>> {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const expression = new RegExp(`${mentionLeftBoundary}@${escaped}${mentionRightBoundary}`, 'giu')
-  return [...body.matchAll(expression)].map((match) => ({
-    start: match.index! + match[1].length,
-    end: match.index! + match[0].length,
-  }))
-}
-
-function unknownMentionNames(body: string, knownMatches: Array<Omit<MentionMatch, 'agentId'>>): string[] {
-  const unknownMentions: string[] = []
-  const expression = new RegExp(`${mentionLeftBoundary}@([\\p{L}\\p{N}_-]+)${mentionRightBoundary}`, 'gu')
-  for (const match of body.matchAll(expression)) {
-    const start = match.index! + match[1].length
-    const end = start + match[0].length - match[1].length
-    if (knownMatches.some((known) => known.start === start || (start >= known.start && end <= known.end))) continue
-    if (!unknownMentions.includes(match[2])) unknownMentions.push(match[2])
+function leadingMentions(body: string, agents: Agent[]): ParsedMention[] {
+  const mentions: ParsedMention[] = []
+  const knownAliases = [...new Set([
+    'all',
+    ...agents.flatMap((agent) => [agent.identity, agent.mentionName].map((value) => value.trim()).filter(Boolean)),
+  ])].sort((left, right) => right.length - left.length)
+  let offset = 0
+  for (const line of body.split('\n')) {
+    const prefix = line.match(/^[\t ]*(?:(?:>|[-*+])\s+|\d+[.)]\s+)?/)![0]
+    let cursor = prefix.length
+    while (cursor < line.length) {
+      const knownAlias = knownAliases.find((alias) => matchesKnownAlias(line, cursor, alias))
+      const match = knownAlias
+        ? [`@${knownAlias}`, knownAlias]
+        : line.slice(cursor).match(/^@([\p{L}\p{N}_/-]+)(?=$|[^A-Za-z0-9_/-])/u)
+      if (!match) break
+      const start = offset + cursor
+      mentions.push({ name: match[1]!, start, end: start + match[0].length })
+      cursor += match[0].length
+      const whitespace = line.slice(cursor).match(/^[\t ]+/)?.[0] ?? ''
+      cursor += whitespace.length
+    }
+    offset += line.length + 1
   }
-  return unknownMentions
+  return mentions
 }
 
-function maskEmailAddresses(body: string): string {
-  return body.replace(emailAddress, (address) => ' '.repeat(address.length))
+function matchesKnownAlias(line: string, cursor: number, alias: string): boolean {
+  const candidate = line.slice(cursor + 1, cursor + 1 + alias.length)
+  if (candidate.toLocaleLowerCase() !== alias.toLocaleLowerCase()) return false
+  const next = line[cursor + alias.length + 1]
+  return next === undefined || !/[A-Za-z0-9_/-]/u.test(next)
 }
 
 function byFirstMention(left: MentionMatch, right: MentionMatch): number {

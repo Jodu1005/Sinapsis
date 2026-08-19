@@ -128,7 +128,7 @@ export interface CreateAppOptions {
   dreamRuntime?: RuntimeAdapter
   conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'> & Partial<Pick<
     ConversationCoordinator,
-    'getActiveStatesByChannel' | 'cancel' | 'cancelChannel' | 'cancelAgentInChannel'
+    'getActiveStatesByChannel' | 'cancel' | 'cancelChannel' | 'cancelAgentInChannel' | 'invalidateAgentSessions'
   >>
   scheduler?: TaskScheduler
   reviewService?: TaskReviewService
@@ -434,13 +434,16 @@ export function createApp(options: CreateAppOptions = {}): Express {
     if (!runtimeKinds.includes(runtime as (typeof runtimeKinds)[number])) {
       throw new ValidationError(`Runtime must be one of: ${runtimeKinds.join(', ')}.`)
     }
+    const runtimeKind = runtime as (typeof runtimeKinds)[number]
+    const overrides = runtimeOverrides(body)
+    if (overrides.model !== undefined) overrides.model = validateRuntimeModel(runtimeKind, overrides.model)
     const agent = await agentService.createAgent({
       identity: requiredString(body, 'identity'),
       mention: requiredString(body, 'mention'),
-      runtime: runtime as (typeof runtimeKinds)[number],
+      runtime: runtimeKind,
       capabilityTags: requiredStringArray(body, 'capabilityTags'),
       responsibilities: body.responsibilities === undefined ? [] : requiredStringArray(body, 'responsibilities'),
-      runtimeOverrides: runtimeOverrides(body),
+      runtimeOverrides: overrides,
     })
     response.status(201).json({
       ...agent,
@@ -462,6 +465,21 @@ export function createApp(options: CreateAppOptions = {}): Express {
       requiredParam(request.params.agentId, 'agentId'),
       requiredString(body, 'identity'),
     )
+    conversationCoordinator.invalidateAgentSessions?.(agent.id)
+    response.json(sanitizeAgent(agent))
+  }))
+
+  app.put('/api/agents/:agentId/model', asyncRoute((request, response) => {
+    const body = objectBody(request.body)
+    assertOnlyKeys(body, ['model'])
+    const agentId = requiredParam(request.params.agentId, 'agentId')
+    const current = repositories.getAgent(agentId)
+    if (!current) throw new NotFoundError(`Agent ${agentId} does not exist.`)
+    const agent = repositories.updateAgentModel(
+      agentId,
+      validateRuntimeModel(current.runtime, requiredRawString(body, 'model')),
+    )
+    conversationCoordinator.invalidateAgentSessions?.(agentId)
     response.json(sanitizeAgent(agent))
   }))
 
@@ -472,6 +490,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
       requiredParam(request.params.agentId, 'agentId'),
       requiredStringArray(body, 'responsibilities'),
     )
+    conversationCoordinator.invalidateAgentSessions?.(agent.id)
     response.json(sanitizeAgent(agent))
   }))
 
@@ -840,6 +859,17 @@ function runtimeOverrides(body: Record<string, unknown>) {
     overrides.env = env as Record<string, string>
   }
   return overrides
+}
+
+function validateRuntimeModel(runtime: (typeof runtimeKinds)[number], model: string): string {
+  const trimmed = model.trim()
+  if (!trimmed) return ''
+  if (/\s/u.test(trimmed)) throw new ValidationError('model must not contain whitespace.')
+  if (runtime === 'opencode-acp') throw new ValidationError('OpenCode ACP does not support a per-Agent model.')
+  if (runtime === 'opencode' && !/^\S+\/\S+$/u.test(trimmed)) {
+    throw new ValidationError('OpenCode model must use provider/model format.')
+  }
+  return trimmed
 }
 
 function requiredParam(value: unknown, name: string): string {

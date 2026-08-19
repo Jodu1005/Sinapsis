@@ -7,6 +7,7 @@ export interface WorkspaceApi {
   addRepository(workspaceId: string, input: { directory: string; name?: string }): Promise<RepositoryView>
   createAgent(input: CreateAgentRequest): Promise<AgentView>
   updateAgentIdentity(agentId: string, identity: string): Promise<AgentView>
+  updateAgentModel(agentId: string, model: string): Promise<AgentView>
   updateAgentResponsibilities(agentId: string, responsibilities: string[]): Promise<AgentView>
   refreshAgentRuntime(agentId: string): Promise<void>
   postMessage(channelId: string, input: { body: string; taskId?: string; threadRootMessageId?: string }): Promise<ChannelMessage>
@@ -56,6 +57,7 @@ export interface CreateAgentRequest {
   runtime: 'opencode' | 'opencode-acp' | 'pi' | 'claude-code'
   capabilityTags: string[]
   responsibilities?: string[]
+  model?: string
 }
 
 export interface AcceptMemoryCandidateRequest {
@@ -83,6 +85,9 @@ export class ApiClient implements WorkspaceApi {
   }
   async updateAgentIdentity(agentId: string, identity: string): Promise<AgentView> {
     return this.request(`/api/agents/${agentId}/identity`, { method: 'PUT', body: JSON.stringify({ identity }) })
+  }
+  async updateAgentModel(agentId: string, model: string): Promise<AgentView> {
+    return this.request(`/api/agents/${agentId}/model`, { method: 'PUT', body: JSON.stringify({ model }) })
   }
   async updateAgentResponsibilities(agentId: string, responsibilities: string[]): Promise<AgentView> {
     return this.request(`/api/agents/${agentId}/responsibilities`, { method: 'PUT', body: JSON.stringify({ responsibilities }) })

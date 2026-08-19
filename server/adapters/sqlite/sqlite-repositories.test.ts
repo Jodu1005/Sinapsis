@@ -87,6 +87,24 @@ describe('SQLite workspace repositories', () => {
     expect(publisher.events).toEqual([])
   })
 
+  it('hides soft-deleted Agents from active catalogs and channel memberships while retaining history', async () => {
+    const { repositories } = await createRepositories()
+    const channel = createChannel(repositories)
+    const agent = repositories.createAgent({
+      identity: 'Legacy Clawd', mentionName: 'build', runtime: 'claude-code', capabilityTags: [],
+      maxConcurrentTasks: 1, command: 'claude', args: [], model: '', env: {},
+    })
+    repositories.addChannelAgent(channel.id, agent.id, new Date('2026-08-09T00:00:00.000Z'))
+    database!.database.prepare('UPDATE agents SET deleted_at = ? WHERE id = ?').run('2026-08-09T00:00:01.000Z', agent.id)
+
+    expect(repositories.listAgents()).not.toContainEqual(expect.objectContaining({ id: agent.id }))
+    expect(repositories.getChannelAgentIds(channel.id)).not.toContain(agent.id)
+    expect(repositories.getChannel(channel.id)?.memberAgentIds).not.toContain(agent.id)
+    expect(repositories.getBootstrap().channels.find((item) => item.id === channel.id)?.memberAgentIds).not.toContain(agent.id)
+    expect(repositories.getAgent(agent.id)).toMatchObject({ id: agent.id, identity: 'Legacy Clawd' })
+    expect(repositories.hasAgentMention('build')).toBe(false)
+  })
+
   it('does not publish repository events when a database transaction rolls back', async () => {
     const { repositories, publisher } = await createRepositories()
     const channel = createChannel(repositories)

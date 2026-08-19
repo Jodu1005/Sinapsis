@@ -60,6 +60,7 @@ function makeApi(overrides: Partial<WorkspaceApi> = {}): WorkspaceApi {
     createAgent: vi.fn(),
     refreshAgentRuntime: vi.fn(),
     updateAgentIdentity: vi.fn().mockResolvedValue(snapshot.agents[0]!),
+    updateAgentModel: vi.fn().mockResolvedValue(snapshot.agents[0]!),
     updateAgentResponsibilities: vi.fn().mockResolvedValue(snapshot.agents[0]!),
     postMessage: vi.fn().mockResolvedValue(undefined),
     getChannelMessage: vi.fn(),
@@ -531,6 +532,51 @@ describe('WorkspaceShell', () => {
     expect(await screen.findByText('已取消')).toBeInTheDocument()
     expect(getBootstrap).toHaveBeenCalledTimes(2)
     expect(getConversationTurn).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops every distinct active channel turn once and refreshes the workspace', async () => {
+    const activeSnapshot = structuredClone(snapshot)
+    activeSnapshot.activeTurnsByChannel = {
+      'channel-general': [
+        { turnId: 'turn-1', agentId: 'agent-1', phase: 'queued', queuePosition: 1 },
+        { turnId: 'turn-1', agentId: 'agent-2', phase: 'preparing', queuePosition: null },
+        { turnId: 'turn-2', agentId: 'agent-1', phase: 'handoff', queuePosition: null },
+      ],
+      'channel-build': [],
+    }
+    const stoppedSnapshot = structuredClone(activeSnapshot)
+    stoppedSnapshot.activeTurnsByChannel = { 'channel-general': [], 'channel-build': [] }
+    const getBootstrap = vi.fn().mockResolvedValueOnce(activeSnapshot).mockResolvedValueOnce(stoppedSnapshot)
+    const cancelConversationTurn = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={makeApi({ getBootstrap, cancelConversationTurn })} />)
+
+    await user.click(await screen.findByRole('button', { name: '停止当前频道对话' }))
+
+    await waitFor(() => expect(cancelConversationTurn).toHaveBeenCalledTimes(2))
+    expect(cancelConversationTurn).toHaveBeenCalledWith('channel-general', 'turn-1')
+    expect(cancelConversationTurn).toHaveBeenCalledWith('channel-general', 'turn-2')
+    expect(getBootstrap).toHaveBeenCalledTimes(2)
+    expect(await screen.findByRole('status')).toHaveTextContent('已停止当前频道进行中的对话。')
+  })
+
+  it('shows a retryable error when stopping an active channel turn fails', async () => {
+    const activeSnapshot = structuredClone(snapshot)
+    activeSnapshot.activeTurnsByChannel = {
+      'channel-general': [{ turnId: 'turn-1', agentId: 'agent-1', phase: 'preparing', queuePosition: null }],
+      'channel-build': [],
+    }
+    const getBootstrap = vi.fn().mockResolvedValue(activeSnapshot)
+    const cancelConversationTurn = vi.fn().mockRejectedValue(new Error('取消服务暂时不可用'))
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={makeApi({ getBootstrap, cancelConversationTurn })} />)
+
+    const stop = await screen.findByRole('button', { name: '停止当前频道对话' })
+    await user.click(stop)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('取消服务暂时不可用')
+    expect(stop).toBeEnabled()
+    expect(getBootstrap).toHaveBeenCalledOnce()
   })
 
   it('keeps a confirmed cancellation locked when the detail refresh fails and allows retry', async () => {
@@ -1015,12 +1061,34 @@ describe('WorkspaceShell', () => {
 
     await user.type(within(dialog).getByLabelText('Agent 名称'), 'Claude Agent')
     await user.selectOptions(within(dialog).getByLabelText('Runtime'), 'claude-code')
+    await user.type(within(dialog).getByLabelText('模型名称（可选）'), 'sonnet')
     await user.type(within(dialog).getByLabelText('能力标签'), 'review')
     await user.click(within(dialog).getByRole('button', { name: '添加 Agent' }))
 
     expect(api.createAgent).toHaveBeenCalledWith({
-      identity: 'Claude Agent', mention: 'claude-agent', runtime: 'claude-code', capabilityTags: ['review'], responsibilities: [],
+      identity: 'Claude Agent', mention: 'claude-agent', runtime: 'claude-code', model: 'sonnet', capabilityTags: ['review'], responsibilities: [],
     })
+  })
+
+  it('updates an existing Agent model and refreshes its configuration', async () => {
+    const updatedSnapshot = structuredClone(snapshot)
+    updatedSnapshot.agents[0].model = 'anthropic/claude-sonnet-4'
+    const updateAgentModel = vi.fn().mockResolvedValue(updatedSnapshot.agents[0])
+    const api = makeApi({
+      getBootstrap: vi.fn().mockResolvedValueOnce(snapshot).mockResolvedValue(updatedSnapshot),
+      updateAgentModel,
+    })
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={api} />)
+
+    await user.click(await screen.findByRole('button', { name: '查看 实现 Agent 配置' }))
+    const dialog = screen.getByRole('dialog', { name: '实现 Agent' })
+    await user.clear(within(dialog).getByLabelText('模型名称'))
+    await user.type(within(dialog).getByLabelText('模型名称'), 'anthropic/claude-sonnet-4')
+    await user.click(within(dialog).getByRole('button', { name: '保存模型' }))
+
+    expect(updateAgentModel).toHaveBeenCalledWith('agent-1', 'anthropic/claude-sonnet-4')
+    expect(await within(dialog).findByText('anthropic/claude-sonnet-4')).toBeInTheDocument()
   })
 
   it('shows Claude Code runtime copy in the agent config dialog', async () => {
