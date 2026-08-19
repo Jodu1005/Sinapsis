@@ -59,6 +59,7 @@ interface ConversationSessions {
   cancelChannel(channelId: string): Promise<{ cancelledSessionKeys: string[] }>
   cancelAgentInChannel(channelId: string, agentId: string): Promise<{ cancelledSessionKeys: string[] }>
   cancelInvocation(invocationId: string): Promise<{ invocationId: string; cancelledSessionKeys: string[] }>
+  invalidateAgentSessions?(agentId: string): string[]
 }
 
 interface InvocationQueue {
@@ -575,6 +576,10 @@ export class ChannelTurnCoordinator {
         .some((candidate) => candidate.agentId !== agentId && !isTerminalParticipant(candidate))
       if (!hasRemainingInvocation && !hasRemainingParticipant) await this.cancel(turn.id)
     }
+  }
+
+  invalidateAgentSessions(agentId: string): void {
+    this.sessions.invalidateAgentSessions?.(agentId)
   }
 
   private async runDirectTurn(

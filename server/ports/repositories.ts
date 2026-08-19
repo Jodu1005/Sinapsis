@@ -249,6 +249,7 @@ export interface WorkspaceRepositories extends TaskSessionStore {
   listConversationHandoffs(turnId: string): ConversationHandoff[]
   getConversationSession(key: string): ConversationSession | undefined
   upsertConversationSession(input: UpsertConversationSessionInput): ConversationSession
+  invalidateConversationSessionsForAgent(agentId: string): string[]
   listMessagesForConversation(channelId: string, threadRootMessageId: string | null): Message[]
   listMessagesAfterThreadWatermark(channelId: string, threadRootMessageId: string, throughMessageId: string): Message[]
   listPublicMessagesForTurn(turnId: string): Message[]

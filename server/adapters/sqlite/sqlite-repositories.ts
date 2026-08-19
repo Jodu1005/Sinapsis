@@ -2248,6 +2248,21 @@ export class SqliteRepositories implements WorkspaceRepositories {
     })
   }
 
+  invalidateConversationSessionsForAgent(agentId: string): string[] {
+    return this.inTransaction(() => {
+      const keys = (this.sqlite.database.prepare(
+        'SELECT key FROM conversation_sessions WHERE agent_id = ? ORDER BY key',
+      ).all(agentId) as Array<{ key: string }>).map((row) => row.key)
+      if (keys.length === 0) return []
+      this.sqlite.database.prepare(`
+        UPDATE conversation_sessions
+        SET status = 'stale', runtime_session_id = NULL, runtime_session_file = NULL, updated_at = ?
+        WHERE agent_id = ?
+      `).run(now(), agentId)
+      return keys
+    })
+  }
+
   listMessagesForConversation(channelId: string, threadRootMessageId: string | null): Message[] {
     const database = this.sqlite.database
     const rows = threadRootMessageId === null

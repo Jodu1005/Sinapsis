@@ -60,6 +60,47 @@ describe('ConversationSessionService', () => {
     })
   })
 
+  it('invalidates every cached Agent session so the next invocation cold-starts with the new model', async () => {
+    const fixture = await createFixture()
+    fixture.runtime.sessionIdOnStart = 'old-model-session'
+
+    await fixture.service.invoke(fixture.invocation('first input'))
+    fixture.repositories.updateAgentModel(fixture.agent.id, 'anthropic/claude-sonnet-4')
+    const invalidated = fixture.service.invalidateAgentSessions(fixture.agent.id)
+    const nextAgent = { ...fixture.agent, model: 'anthropic/claude-sonnet-4' }
+    await fixture.service.invoke({ ...fixture.invocation('second input'), agent: nextAgent })
+
+    expect(invalidated).toEqual([`${fixture.channelId}:timeline:${fixture.agent.id}`])
+    expect(fixture.runtime.order).toEqual(['start:first input', 'start:second input'])
+    expect(fixture.runtime.starts.map((start) => start.profile.model)).toEqual([
+      '',
+      'anthropic/claude-sonnet-4',
+    ])
+    expect(fixture.runtime.cancellations).toHaveLength(1)
+  })
+
+  it('keeps an active invalidated session stale after its current invocation settles', async () => {
+    const fixture = await createFixture()
+    fixture.runtime.autoSettle = false
+    fixture.runtime.sessionIdOnStart = 'active-old-model-session'
+    const key = `${fixture.channelId}:timeline:${fixture.agent.id}`
+
+    const active = fixture.service.invoke(fixture.invocation('active input'))
+    await nextTurn()
+    fixture.service.invalidateAgentSessions(fixture.agent.id)
+    expect(fixture.repositories.getConversationSession(key)).toMatchObject({
+      status: 'stale', runtimeSessionId: null, runtimeSessionFile: null,
+    })
+
+    fixture.runtime.emitSettled('active input')
+    await active
+
+    expect(fixture.repositories.getConversationSession(key)).toMatchObject({
+      status: 'stale', runtimeSessionId: null, runtimeSessionFile: null,
+    })
+    expect(fixture.runtime.cancellations).toHaveLength(1)
+  })
+
   it('sends a persisted-resume invocation envelope verbatim without appending bounded history', async () => {
     const fixture = await createFixture()
     fixture.repositories.upsertConversationSession({
@@ -659,6 +700,11 @@ class RecordingRuntime implements RuntimeAdapter {
     if (this.cancelEvent === 'error') this.sink?.({ kind: 'error', taskId: this.taskId!, message: 'synchronous cancel error event' })
     if (this.cancelError) throw this.cancelError
     this.cancellations.push(session)
+  }
+
+  emitSettled(input: string): void {
+    if (!this.taskId || !this.sink) throw new Error('Runtime has not started.')
+    this.settle(this.taskId, input, this.sink)
   }
 
   private settle(taskId: string, input: string, sink: RuntimeEventSink): void {

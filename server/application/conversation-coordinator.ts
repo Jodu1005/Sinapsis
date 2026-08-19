@@ -64,4 +64,8 @@ export class ConversationCoordinator {
   async cancelAgentInChannel(channelId: string, agentId: string): Promise<void> {
     await this.turnCoordinator.cancelAgentInChannel(channelId, agentId)
   }
+
+  invalidateAgentSessions(agentId: string): void {
+    this.turnCoordinator.invalidateAgentSessions(agentId)
+  }
 }

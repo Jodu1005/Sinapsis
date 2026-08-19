@@ -72,16 +72,16 @@ describe('MessageComposer', () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledWith('第一行\n第二行'))
   })
 
-  it('selects an Agent with arrow keys and Enter before sending a message', async () => {
+  it('does not suggest an inline Agent mention that the backend treats as prose', async () => {
     const user = userEvent.setup()
     const onSend = vi.fn().mockResolvedValue(undefined)
     render(<MessageComposer channelName="general" agents={agents} onSend={onSend} />)
 
     const composer = screen.getByRole('textbox', { name: '发送消息' })
     await user.type(composer, '请看一下@ne')
-    await user.keyboard('{ArrowDown}{Enter}')
 
-    expect(composer).toHaveValue('请看一下@newton ')
+    expect(screen.queryByRole('listbox', { name: '可提及 Agent' })).not.toBeInTheDocument()
+    expect(composer).toHaveValue('请看一下@ne')
     expect(onSend).not.toHaveBeenCalled()
   })
 
@@ -91,13 +91,13 @@ describe('MessageComposer', () => {
     render(<MessageComposer channelName="general" agents={localizedAgents} onSend={onSend} />)
 
     const composer = screen.getByRole('textbox', { name: '发送消息' })
-    await user.type(composer, '请问 @前端 A')
+    await user.type(composer, '请问\n@前端 A')
 
     expect(screen.getAllByRole('option', { name: /@前端 Agent/ })).toHaveLength(1)
     expect(screen.queryByRole('option', { name: /@外部 Agent/ })).not.toBeInTheDocument()
     await user.keyboard('{Enter}')
 
-    expect(composer).toHaveValue('请问 @前端 Agent ')
+    expect(composer).toHaveValue('请问\n@前端 Agent ')
     expect(onSend).not.toHaveBeenCalled()
   })
 

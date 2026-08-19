@@ -534,6 +534,51 @@ describe('WorkspaceShell', () => {
     expect(getConversationTurn).toHaveBeenCalledTimes(2)
   })
 
+  it('stops every distinct active channel turn once and refreshes the workspace', async () => {
+    const activeSnapshot = structuredClone(snapshot)
+    activeSnapshot.activeTurnsByChannel = {
+      'channel-general': [
+        { turnId: 'turn-1', agentId: 'agent-1', phase: 'queued', queuePosition: 1 },
+        { turnId: 'turn-1', agentId: 'agent-2', phase: 'preparing', queuePosition: null },
+        { turnId: 'turn-2', agentId: 'agent-1', phase: 'handoff', queuePosition: null },
+      ],
+      'channel-build': [],
+    }
+    const stoppedSnapshot = structuredClone(activeSnapshot)
+    stoppedSnapshot.activeTurnsByChannel = { 'channel-general': [], 'channel-build': [] }
+    const getBootstrap = vi.fn().mockResolvedValueOnce(activeSnapshot).mockResolvedValueOnce(stoppedSnapshot)
+    const cancelConversationTurn = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={makeApi({ getBootstrap, cancelConversationTurn })} />)
+
+    await user.click(await screen.findByRole('button', { name: '停止当前频道对话' }))
+
+    await waitFor(() => expect(cancelConversationTurn).toHaveBeenCalledTimes(2))
+    expect(cancelConversationTurn).toHaveBeenCalledWith('channel-general', 'turn-1')
+    expect(cancelConversationTurn).toHaveBeenCalledWith('channel-general', 'turn-2')
+    expect(getBootstrap).toHaveBeenCalledTimes(2)
+    expect(await screen.findByRole('status')).toHaveTextContent('已停止当前频道进行中的对话。')
+  })
+
+  it('shows a retryable error when stopping an active channel turn fails', async () => {
+    const activeSnapshot = structuredClone(snapshot)
+    activeSnapshot.activeTurnsByChannel = {
+      'channel-general': [{ turnId: 'turn-1', agentId: 'agent-1', phase: 'preparing', queuePosition: null }],
+      'channel-build': [],
+    }
+    const getBootstrap = vi.fn().mockResolvedValue(activeSnapshot)
+    const cancelConversationTurn = vi.fn().mockRejectedValue(new Error('取消服务暂时不可用'))
+    const user = userEvent.setup()
+    render(<WorkspaceShell api={makeApi({ getBootstrap, cancelConversationTurn })} />)
+
+    const stop = await screen.findByRole('button', { name: '停止当前频道对话' })
+    await user.click(stop)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('取消服务暂时不可用')
+    expect(stop).toBeEnabled()
+    expect(getBootstrap).toHaveBeenCalledOnce()
+  })
+
   it('keeps a confirmed cancellation locked when the detail refresh fails and allows retry', async () => {
     const activeSnapshot = structuredClone(snapshot)
     activeSnapshot.activeTurnsByChannel = {

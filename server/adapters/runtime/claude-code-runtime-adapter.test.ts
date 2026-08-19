@@ -177,6 +177,46 @@ describe('ClaudeCodeRuntimeAdapter', () => {
     ])
   })
 
+  it('does not publish an earlier assistant message after later tool activity and a textless result', async () => {
+    const runner = new FakeProcessRunner()
+    const events: RuntimeEvent[] = []
+    const adapter = new ClaudeCodeRuntimeAdapter(runner)
+
+    await adapter.start({
+      ...task,
+      mode: 'conversation',
+      initialMessage: 'Research before answering.',
+    }, (event) => events.push(event))
+    const process = runner.spawns[0]?.process
+
+    process?.emitStdout('{"type":"assistant","message":{"content":[{"type":"text","text":"I should inspect the evidence first."}]}}\n')
+    process?.emitStdout('{"type":"assistant","message":{"content":[{"type":"text","text":"Checking now."},{"type":"tool_use","id":"toolu_1","name":"Read"}]}}\n')
+    process?.emitStdout('{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","name":"Read","content":"evidence"}]}}\n')
+    process?.emitStdout('{"type":"result","subtype":"success"}\n')
+
+    expect(events.filter((event) => event.kind === 'text')).toEqual([])
+  })
+
+  it('clears a cached conversation assistant message before a resumed launch', async () => {
+    const runner = new FakeProcessRunner()
+    const events: RuntimeEvent[] = []
+    const adapter = new ClaudeCodeRuntimeAdapter(runner)
+
+    const session = await adapter.start({
+      ...task,
+      mode: 'conversation',
+      initialMessage: 'Give a first answer.',
+    }, (event) => events.push(event))
+    runner.spawns[0]?.process.emitStdout('{"type":"assistant","message":{"content":[{"type":"text","text":"Unpublished first-turn fallback."}]}}\n')
+    adapter.sendInput(session, 'Try again.', (event) => events.push(event))
+    runner.spawns[0]?.process.exit(0)
+
+    expect(runner.spawns).toHaveLength(2)
+    runner.spawns[1]?.process.emitStdout('{"type":"result","subtype":"success"}\n')
+
+    expect(events.filter((event) => event.kind === 'text')).toEqual([])
+  })
+
   it('emits settled exactly once after a successful final run', async () => {
     const runner = new FakeProcessRunner()
     const events: RuntimeEvent[] = []

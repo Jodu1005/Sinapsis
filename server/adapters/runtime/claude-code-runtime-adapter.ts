@@ -116,13 +116,17 @@ export class ClaudeCodeRuntimeAdapter implements RuntimeAdapter {
 
     if (type === 'assistant') {
       const blocks = contentBlocks(value)
-      if (isConversation && !blocks.some((block) => stringValue(block.type) === 'tool_use')) {
-        const text = blocks
-          .filter((block) => stringValue(block.type) === 'text')
-          .map((block) => stringValue(block.text) ?? '')
-          .join('')
-          .trim()
-        if (text) this.conversationFinalTexts.set(session, text)
+      if (isConversation) {
+        if (blocks.some((block) => stringValue(block.type) === 'tool_use')) {
+          this.conversationFinalTexts.delete(session)
+        } else {
+          const text = blocks
+            .filter((block) => stringValue(block.type) === 'text')
+            .map((block) => stringValue(block.text) ?? '')
+            .join('')
+            .trim()
+          if (text) this.conversationFinalTexts.set(session, text)
+        }
       }
       for (const block of blocks) this.recordContentBlock(session, block, sink, !isConversation)
       const text = stringValue(value.text)

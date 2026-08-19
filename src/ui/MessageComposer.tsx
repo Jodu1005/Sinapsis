@@ -32,7 +32,7 @@ export function MessageComposer({
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const formRef = useRef<HTMLFormElement>(null)
-  const mention = mentionAtCaret(body, caret)
+  const mention = mentionAtCaret(body, caret, agents)
   const suggestions = useMemo(() => {
     if (!mention) return []
     if (closedMentionKey === mentionKey(mention)) return []
@@ -87,7 +87,7 @@ export function MessageComposer({
     if (event.nativeEvent.isComposing || event.shiftKey) return
     if (suggestions.length > 0 && event.key === 'Escape') {
       event.preventDefault()
-      const currentMention = mentionAtCaret(body, event.currentTarget.selectionStart)
+      const currentMention = mentionAtCaret(body, event.currentTarget.selectionStart, agents)
       setClosedMentionKey(currentMention ? mentionKey(currentMention) : null)
       return
     }
@@ -105,7 +105,7 @@ export function MessageComposer({
     event.preventDefault()
     const selected = suggestions[activeSuggestionIndex]
     if (selected) {
-      selectSuggestion(selected, mentionAtCaret(body, event.currentTarget.selectionStart))
+      selectSuggestion(selected, mentionAtCaret(body, event.currentTarget.selectionStart, agents))
       return
     }
     formRef.current?.requestSubmit()
@@ -126,13 +126,42 @@ function mentionKey(mention: MentionMatch): string {
   return `${mention.start}:${mention.end}:${mention.query}`
 }
 
-function mentionAtCaret(body: string, caret: number): MentionMatch | undefined {
+function mentionAtCaret(body: string, caret: number, agents: AgentView[]): MentionMatch | undefined {
   const beforeCaret = body.slice(0, caret)
   const start = beforeCaret.lastIndexOf('@')
   if (start < 0) return undefined
+  const lineStart = beforeCaret.lastIndexOf('\n', start - 1) + 1
+  if (!isLeadingMentionPosition(body.slice(lineStart, start), agents)) return undefined
   const query = beforeCaret.slice(start + 1)
-  if (query.includes('@')) return undefined
+  if (query.includes('@') || query.includes('\n')) return undefined
   return { query, start, end: caret }
+}
+
+function isLeadingMentionPosition(value: string, agents: AgentView[]): boolean {
+  const prefix = value.match(/^[\t ]*(?:(?:>|[-*+])\s+|\d+[.)]\s+)?/)?.[0] ?? ''
+  let remaining = value.slice(prefix.length)
+  const aliases = [...new Set(agents.flatMap((agent) => [agent.identity, agent.mentionName]))]
+    .map((alias) => alias.trim())
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)
+  while (remaining) {
+    const alias = aliases.find((candidate) => mentionStartsWith(remaining, candidate))
+    const tokenLength = alias
+      ? alias.length + 1
+      : remaining.match(/^@[\p{L}\p{N}_/-]+(?=[\t ]|$)/u)?.[0].length
+    if (!tokenLength) return false
+    remaining = remaining.slice(tokenLength)
+    const whitespace = remaining.match(/^[\t ]+/)?.[0] ?? ''
+    if (!whitespace) return false
+    remaining = remaining.slice(whitespace.length)
+  }
+  return true
+}
+
+function mentionStartsWith(value: string, alias: string): boolean {
+  if (!value.toLocaleLowerCase().startsWith(`@${alias}`.toLocaleLowerCase())) return false
+  const next = value[alias.length + 1]
+  return next === undefined || !/[A-Za-z0-9_/-]/u.test(next)
 }
 
 function normalizeMentionText(value: string): string {

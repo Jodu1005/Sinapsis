@@ -128,7 +128,7 @@ export interface CreateAppOptions {
   dreamRuntime?: RuntimeAdapter
   conversationCoordinator?: Pick<ConversationCoordinator, 'dispatch'> & Partial<Pick<
     ConversationCoordinator,
-    'getActiveStatesByChannel' | 'cancel' | 'cancelChannel' | 'cancelAgentInChannel'
+    'getActiveStatesByChannel' | 'cancel' | 'cancelChannel' | 'cancelAgentInChannel' | 'invalidateAgentSessions'
   >>
   scheduler?: TaskScheduler
   reviewService?: TaskReviewService
@@ -465,6 +465,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
       requiredParam(request.params.agentId, 'agentId'),
       requiredString(body, 'identity'),
     )
+    conversationCoordinator.invalidateAgentSessions?.(agent.id)
     response.json(sanitizeAgent(agent))
   }))
 
@@ -478,6 +479,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
       agentId,
       validateRuntimeModel(current.runtime, requiredRawString(body, 'model')),
     )
+    conversationCoordinator.invalidateAgentSessions?.(agentId)
     response.json(sanitizeAgent(agent))
   }))
 
@@ -488,6 +490,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
       requiredParam(request.params.agentId, 'agentId'),
       requiredStringArray(body, 'responsibilities'),
     )
+    conversationCoordinator.invalidateAgentSessions?.(agent.id)
     response.json(sanitizeAgent(agent))
   }))
 

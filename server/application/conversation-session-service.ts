@@ -108,6 +108,7 @@ export class ConversationSessionService {
   private readonly conversationDirectory: string
   private readonly sessions = new Map<string, SessionState>()
   private readonly retiringSessions = new Set<SessionState>()
+  private readonly invalidatedSessions = new Set<SessionState>()
 
   constructor(options: ConversationSessionServiceOptions) {
     this.repositories = options.repositories
@@ -184,6 +185,20 @@ export class ConversationSessionService {
   async cancelInvocation(invocationId: string): Promise<ConversationInvocationCancellationResult> {
     const result = this.cancelSessions((state) => state.active?.input.conversation?.invocationId === invocationId)
     return { invocationId, ...result }
+  }
+
+  invalidateAgentSessions(agentId: string): string[] {
+    const invalidatedKeys = this.repositories.invalidateConversationSessionsForAgent(agentId)
+    for (const state of this.sessions.values()) {
+      if (state.agent.id !== agentId) continue
+      if (state.active) {
+        this.invalidatedSessions.add(state)
+        continue
+      }
+      if (state.session) this.cancelUnownedSession(state.adapter, state.session)
+      this.discardState(state)
+    }
+    return invalidatedKeys
   }
 
   private redispatch(state: SessionState, input: ConversationSessionInvocation): Promise<ConversationSessionResult> {
@@ -337,10 +352,19 @@ export class ConversationSessionService {
     state.active = null
     state.phase = 'ready'
     try {
-      this.persist(state, 'ready', active.lastMessageId)
+      const invalidated = this.invalidatedSessions.has(state)
+      if (invalidated) {
+        state.runtimeSessionId = null
+        state.runtimeSessionFile = null
+      }
+      this.persist(state, invalidated ? 'stale' : 'ready', active.lastMessageId)
       const result = parseResult(rawText, active.input)
       active.input.onSettled?.(result)
       active.resolve(result)
+      if (invalidated) {
+        if (state.session) this.cancelUnownedSession(state.adapter, state.session)
+        this.discardState(state)
+      }
     } catch (error) {
       this.rejectInvocation(active, asError(error))
     }
@@ -460,6 +484,7 @@ export class ConversationSessionService {
   private discardState(state: SessionState): void {
     if (this.sessions.get(state.key) === state) this.sessions.delete(state.key)
     this.retiringSessions.delete(state)
+    this.invalidatedSessions.delete(state)
   }
 
   private isTrackedGeneration(state: SessionState): boolean {
@@ -493,15 +518,16 @@ export class ConversationSessionService {
   }
 
   private persist(state: SessionState, status: ConversationSession['status'], lastMessageId: string | null): void {
+    const invalidated = this.invalidatedSessions.has(state)
     this.repositories.upsertConversationSession({
       key: state.key,
       channelId: state.channelId,
       threadRootMessageId: state.threadRootMessageId,
       agentId: state.agent.id,
       runtime: state.agent.runtime,
-      runtimeSessionId: state.runtimeSessionId,
-      runtimeSessionFile: state.runtimeSessionFile,
-      status,
+      runtimeSessionId: invalidated ? null : state.runtimeSessionId,
+      runtimeSessionFile: invalidated ? null : state.runtimeSessionFile,
+      status: invalidated && (status === 'active' || status === 'ready') ? 'stale' : status,
       lastMessageId,
     })
   }
